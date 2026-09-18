@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-dungeon"
+dynamic = ["version"]
+description = "Terminal-first agent environments with OpenShell and optional Telltale"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+readme = "README.md"
+authors = [{name = "Dark Roast Cyber"}]
+dependencies = []
+
+[project.scripts]
+dungeon = "dungeon.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Dark-Roast-Cyber/dungeon"
+
+[tool.setuptools.dynamic]
+version = {attr = "dungeon.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

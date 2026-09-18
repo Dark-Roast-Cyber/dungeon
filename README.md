@@ -5,53 +5,56 @@ Terminal-first, policy-managed environments for coding agents. Part of the
 [Telltale](https://github.com/Dark-Roast-Cyber/telltale) integration.
 
 **0.0.1 is an engineering preview, not an audited isolation product.** Dungeon
-coordinates an installed OpenShell runtime. It does not implement a hypervisor,
-replace agent interfaces, or claim to contain an entire desktop application.
+coordinates OpenShell. It does not implement a hypervisor, replace agent
+interfaces, or contain an entire desktop application.
 
-## Scope
+## What ships
 
-- Direct terminal execution of OpenCode, Claude Code, Codex, and other commands.
-  ChatGPT subscription-backed terminal use is through Codex, not a `chatgpt` CLI.
-- Optional VS Code and SSH attachment for compatible desktop clients.
-- One explicit environment configuration and native OpenShell policy.
-- Guided initialization, reviewed launch plans, and explicit project upload.
-- No automatic host home, configuration, credential, or session-database sharing.
-- An optional Telltale diagnostic scan. Durable external telemetry collection is
-  a follow-on gate, not a capability claimed by this preview.
+- Direct terminal execution of OpenCode, Claude Code, Codex, and arbitrary
+  commands. ChatGPT-account terminal use is through Codex, not a `chatgpt` CLI.
+- Optional VS Code launch and SSH configuration for compatible desktop clients.
+- Guided setup, one explicit configuration, and editable native OpenShell policy.
+- `minimal` and `development` starter policies with mandatory Landlock.
+- Explicit project upload, separate guest state, and identity/policy-drift checks.
+- Optional in-guest Telltale diagnostics. Durable independent collection is not
+  implemented in this preview.
 
-The first backend targets **OpenShell 0.0.116**. Windows users may operate through
-WSL2 or a supported remote execution host; native Windows workload containment
-is not promised. CLI tests do not establish live platform, endpoint-protection,
-or desktop-client compatibility.
+The adapter targets **OpenShell 0.0.116**. Linux/macOS and Windows through WSL2
+or a remote Linux host are the intended deployment paths. Native Windows
+workload containment is not promised. Offline tests do not establish live
+runtime, desktop-client, or endpoint-protection compatibility.
 
 ## Install
 
-Python 3.11 or later is required. Install from this repository; no PyPI release
-is implied:
+Python 3.11 or later is required. From a checkout:
 
 ```sh
 python -m pip install .
 dungeon --help
 ```
 
-Install the OpenShell CLI and register a gateway separately using its
-[upstream instructions](https://github.com/NVIDIA/OpenShell/tree/v0.0.116).
-Dungeon never installs a host daemon or changes its privileges on your behalf.
-The OpenShell Python SDK does not install the CLI.
+The distribution is named `agent-dungeon`; no PyPI publication is implied.
+Install the [OpenShell CLI](https://github.com/NVIDIA/OpenShell/tree/v0.0.116)
+and register a gateway separately. Its Python SDK does not install the CLI.
+Dungeon never installs a privileged host service on your behalf.
 
 ## First environment
 
-Initialize a private configuration directory outside the project being opened:
+Keep configuration outside the project that will be uploaded:
 
 ```sh
 dungeon init --directory "$HOME/.config/dungeon/demo" --project "$PWD"
 ```
 
-The wizard asks for a gateway, environment name, image, default agent, and
-starter policy. Noninteractive equivalents are available in `dungeon init --help`.
-The upstream community `base` image includes the initial agent CLIs. Use a
-reviewed image digest for repeatable deployments; mutable tags are not a supply
-chain guarantee.
+The wizard asks for a gateway, name, image, default agent, and starter policy.
+For automation, add `--non-interactive --name demo --gateway YOUR_GATEWAY`.
+Use a reviewed image digest for repeatable deployments. The default upstream
+community `base:latest` image is convenient but mutable and not certified here.
+
+Review `policy.json`. Configure named providers in OpenShell, then add their
+names to `providers` in `dungeon.json` **before creating the environment**.
+Dungeon disables automatic provider creation and copies no native auth files.
+An empty provider list does not establish an authenticated model connection.
 
 ```sh
 CONFIG="$HOME/.config/dungeon/demo/dungeon.json"
@@ -65,45 +68,45 @@ dungeon --config "$CONFIG" exec -- git status
 dungeon --config "$CONFIG" shell
 ```
 
-`upload` copies the selected project to `/sandbox/project`; it does not bind
-mount the host working tree. Review project contents first. Git ignore rules
-are not a secret scanner. Upload is separate from creation and may overwrite
-files inside that guest project. No automatic synchronization back occurs.
+`upload` transfers the project to `/sandbox/project`, not a host bind mount.
+It may overwrite guest files. Review secrets first: Git ignore rules are not a
+secret scanner. No automatic download or synchronization back occurs.
+`run` and `exec` use the guest project directory; `shell` opens `/sandbox` so it
+also works before upload. Unsupported network destinations remain blocked by
+the backend rather than being approved automatically.
 
-Configure named providers in OpenShell, then list their names in Dungeon's
-configuration before creation. Dungeon disables automatic provider discovery
-and never copies native agent authentication files.
-
-## Optional attachment
+## Optional attachment and diagnostics
 
 ```sh
 dungeon --config "$CONFIG" code
 dungeon --config "$CONFIG" ssh-config
 dungeon --config "$CONFIG" status
+dungeon --config "$CONFIG" stop
+dungeon --config "$CONFIG" start
 ```
 
-`code` uses OpenShell's VS Code integration, including its managed SSH
-configuration. `ssh-config` prints an entry for deliberate installation into
-your SSH configuration. Compatible Claude Desktop and ChatGPT remote-project
-clients can use that SSH target. Desktop compatibility remains a live-validation
-gate; local UI integrations are outside the workload boundary.
+`code` delegates to OpenShell's VS Code connection, which can install its
+managed SSH configuration. `ssh-config` only prints an entry for review.
+See [integrations](docs/integrations.md) for desktop SSH and OpenCode
+`serve`/`attach`. These paths are optional; direct terminal use needs neither.
 
-OpenCode `serve`/`attach` is an optional documented workflow, not a requirement
-for terminal use. See [integrations](docs/integrations.md).
+A reviewed custom image containing `telltale` can run:
 
-## Persistence and safety
+```sh
+dungeon --config "$CONFIG" telltale
+```
 
-An environment is retained when a command exits. `stop` and `start` delegate to
-the backend. Persistence through backend stop/restart depends on its driver.
-Deleting a sandbox can destroy its project and sessions. Dungeon 0.0.1 does not
-automate deletion, export, native session imports, or recovery.
+This performs an in-guest `scan --once --dry-run --no-local-config --root
+/sandbox`. It is not an independent audit, background monitor, durable export,
+or proof of complete telemetry. The default upstream image does not include
+Telltale. See [architecture](docs/architecture.md).
 
-Policy templates request mandatory Landlock and blocking inspected rules.
-OpenShell owns their enforcement. Configuration fingerprints detect accidental
-reuse with different launch inputs; they are not policy attestations. A host or
-gateway administrator remains trusted. See [security](SECURITY.md).
+## Persistence and development
 
-## Development
+Exiting a command retains the environment. Stop/restart behavior follows the
+backend driver. Dungeon does not automate deletion, project export, native
+session imports, or recovery in 0.0.1. Before deleting a sandbox, preserve its
+project and sessions using a reviewed backend workflow.
 
 ```sh
 python -m pip install .
@@ -111,7 +114,7 @@ python -m unittest discover -s tests -v
 python -m pip wheel --no-deps . --wheel-dir dist
 ```
 
-See [architecture](docs/architecture.md), [configuration](docs/configuration.md),
+Read [configuration](docs/configuration.md), [security](SECURITY.md),
 [validation](docs/validation.md), and [roadmap](ROADMAP.md).
-Apache-2.0; upstream runtimes, images, agents, and desktop products retain their
-own licenses and service terms.
+Apache-2.0. Runtimes, images, agents, and desktop products retain their own
+licenses and service terms; no third-party binaries are bundled.
