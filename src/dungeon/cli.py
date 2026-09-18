@@ -34,6 +34,8 @@ def parser() -> argparse.ArgumentParser:
         sub.add_parser(name)
     upload = sub.add_parser("upload", help="explicitly transfer the selected project into the guest")
     upload.add_argument("--yes", action="store_true", help="confirm transfer and possible guest overwrite")
+    auth = sub.add_parser("auth", help="run a vendor-native login flow inside the environment")
+    auth.add_argument("agent", choices=("claude", "codex"))
     run = sub.add_parser("run", help="run a known agent directly, without a remote UI attachment")
     run.add_argument("agent", nargs="?", choices=AGENTS)
     run.add_argument("arguments", nargs=argparse.REMAINDER)
@@ -113,6 +115,20 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.action == "upload":
             return runtime.upload()
+        if args.action == "auth":
+            if args.agent == "codex":
+                print(
+                    "Starting Codex device authentication inside the guest. Complete the displayed "
+                    "URL/code in your browser. Dungeon never reads or stores the resulting credential.",
+                    file=sys.stderr,
+                )
+                return runtime.execute(["codex", "login", "--device-auth"], tty=True, workdir="/sandbox")
+            print(
+                "Starting Claude Code inside the guest. Use /login and complete the vendor browser "
+                "flow. Dungeon never reads or stores the resulting credential.",
+                file=sys.stderr,
+            )
+            return runtime.execute(["claude"], tty=True, workdir="/sandbox")
         if args.action in ("run", "exec"):
             command = args.arguments
             if command[:1] == ["--"]:

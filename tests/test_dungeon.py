@@ -148,6 +148,12 @@ class ConfigTests(ProjectFixture, unittest.TestCase):
         args = parser().parse_args(["exec", "--", "printf", "a; echo unsafe"])
         self.assertEqual(args.arguments, ["--", "printf", "a; echo unsafe"])
 
+    def test_auth_parser_is_vendor_scoped(self):
+        self.assertEqual(parser().parse_args(["auth", "claude"]).agent, "claude")
+        self.assertEqual(parser().parse_args(["auth", "codex"]).agent, "codex")
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parser().parse_args(["auth", "grok"])
+
     def test_host_environment_is_allowlisted(self):
         environment = {
             "PATH": str(self.project) + os.pathsep + "." + os.pathsep + str(self.root / "trusted-bin"),
@@ -279,6 +285,27 @@ class RuntimeTests(ProjectFixture, unittest.TestCase):
         self.assertEqual(runtime.return_value.execute.call_args.args[0], [
             "telltale", "scan", "--once", "--dry-run", "--no-local-config", "--root", "/sandbox",
         ])
+
+    def test_codex_auth_uses_vendor_device_flow(self):
+        output = io.StringIO()
+        with patch("dungeon.cli.Runtime") as runtime, redirect_stderr(output):
+            runtime.return_value.execute.return_value = 0
+            self.assertEqual(main(["--config", str(self.path), "auth", "codex"]), 0)
+        runtime.return_value.execute.assert_called_once_with(
+            ["codex", "login", "--device-auth"], tty=True, workdir="/sandbox"
+        )
+        self.assertIn("never reads or stores", output.getvalue())
+
+    def test_claude_auth_stays_inside_vendor_cli(self):
+        output = io.StringIO()
+        with patch("dungeon.cli.Runtime") as runtime, redirect_stderr(output):
+            runtime.return_value.execute.return_value = 0
+            self.assertEqual(main(["--config", str(self.path), "auth", "claude"]), 0)
+        runtime.return_value.execute.assert_called_once_with(
+            ["claude"], tty=True, workdir="/sandbox"
+        )
+        self.assertIn("Use /login", output.getvalue())
+        self.assertIn("never reads or stores", output.getvalue())
 
 
 if __name__ == "__main__":

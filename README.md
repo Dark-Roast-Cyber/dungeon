@@ -4,7 +4,8 @@ Terminal-first, policy-managed environments for coding agents. Part of the
 [Agent Archaeology](https://agentarchaeology.ai/) family, with optional
 [Telltale](https://github.com/Dark-Roast-Cyber/telltale) integration.
 
-**0.0.1 is an engineering preview, not an audited isolation product.** Dungeon
+**0.0.2 is the current development preview; v0.0.1 remains the latest published
+release. Neither is an audited isolation product.** Dungeon
 coordinates OpenShell. It does not implement a hypervisor, replace agent
 interfaces, or contain an entire desktop application.
 
@@ -12,6 +13,8 @@ interfaces, or contain an entire desktop application.
 
 - Direct terminal execution of OpenCode, Claude Code, Codex, and arbitrary
   commands. ChatGPT-account terminal use is through Codex, not a `chatgpt` CLI.
+- Vendor-native guest authentication for Codex device login and Claude Code
+  browser/manual login. Dungeon never handles the resulting credential bytes.
 - Optional VS Code launch and SSH configuration for compatible desktop clients.
 - Guided setup, one explicit configuration, and editable native OpenShell policy.
 - `minimal` and `development` starter policies with mandatory Landlock.
@@ -67,6 +70,29 @@ dungeon --config "$CONFIG" run codex
 dungeon --config "$CONFIG" exec -- git status
 dungeon --config "$CONFIG" shell
 ```
+
+### Vendor-native authentication
+
+For ChatGPT-backed Codex on a remote or headless environment:
+
+```sh
+dungeon --config "$CONFIG" auth codex
+```
+
+Dungeon runs `codex login --device-auth` in the guest. Complete the displayed
+URL and one-time code in your normal browser. The vendor CLI stores its
+credential in guest state; Dungeon does not receive or persist the token.
+
+For Claude Code:
+
+```sh
+dungeon --config "$CONFIG" auth claude
+```
+
+Dungeon starts Claude Code in `/sandbox`. Use `/login` and complete the
+vendor browser flow. API-key users can instead configure an explicit OpenShell
+provider when that better matches their security model. OpenCode authentication
+remains provider-specific and is not wrapped by `dungeon auth`.
 
 `upload` transfers the project to `/sandbox/project`, not a host bind mount.
 It may overwrite guest files. Review secrets first: Git ignore rules are not a

@@ -8,6 +8,8 @@ not a requirement to use a particular agent protocol.
 | OpenCode CLI | `run opencode` | Argument contract tested; live session pending. |
 | Claude Code CLI | `run claude` | Argument contract tested; live session pending. |
 | Codex CLI | `run codex` | Argument contract tested; live session pending. |
+| Codex login | `auth codex` | Dispatches vendor device-code flow; live auth pending. |
+| Claude Code login | `auth claude`, then `/login` | Dispatches vendor browser flow; live auth pending. |
 | Other compatible CLI | `exec -- COMMAND ARG...` | Generic argument transport tested. |
 | Interactive shell | `shell` | Delegates PTY to OpenShell; live terminal gate pending. |
 | VS Code | `code` | Delegates OpenShell editor connection. |
@@ -26,9 +28,28 @@ is automatic for interactive `run`, explicit with `exec --tty --`, and forced
 for `shell`. The backend owns terminal resizing and signal transport. Remote
 exit codes propagate; no retry restarts an agent session automatically.
 
-Provider authentication is configured through OpenShell before creation. The
-launcher does not reuse every account on the host. A guest login is an explicit
-choice to expose credentials inside that environment, not credential brokering.
+## Authentication
+
+Dungeon supports two explicit vendor-native guest login coordinators:
+
+```sh
+dungeon --config "$CONFIG" auth codex
+dungeon --config "$CONFIG" auth claude
+```
+
+Codex runs `codex login --device-auth` in `/sandbox`, so the user completes
+the displayed URL and one-time code in a normal browser. Claude starts its
+interactive CLI in `/sandbox`; use `/login` and complete the browser flow.
+
+These are vendor-owned flows. Dungeon does not parse terminal output, copy
+tokens, implement OAuth callbacks, mint credentials, or synchronize the guest
+credential store to the host. Credentials therefore have the same trust and
+lifetime as the retained guest environment.
+
+API-key/provider authentication is configured through OpenShell before creation.
+That path is distinct from guest OAuth and can avoid exposing the original
+provider secret to the workload when OpenShell supports credential brokering.
+OpenCode remains provider-dependent and has no `dungeon auth opencode` command.
 
 ## SSH, editors, and desktop clients
 

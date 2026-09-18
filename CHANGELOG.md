@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased (0.0.2)
+
+- Add `dungeon auth codex` for Codex device-code authentication inside the guest.
+- Add `dungeon auth claude` to enter Claude Code for its vendor-native `/login` flow.
+- Dungeon coordinates vendor authentication but never parses, copies, stores, refreshes, or escrows OAuth credentials.
+- OpenShell providers remain the separate path for brokered API credentials.
+- OpenCode authentication remains provider-specific. Grok is intentionally not added.
+
 ## 0.0.1
 
 Initial engineering preview: Python CLI around OpenShell 0.0.116; guided and

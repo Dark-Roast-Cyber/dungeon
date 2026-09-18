@@ -12,8 +12,11 @@ symlink rejection, and the Telltale dry-run command boundary.
 
 A wheel was built and installed into a separate virtual environment. The CLI
 version/help and the same test suite were checked against that installation.
-These tests fake OpenShell responses. They are not recordings of successful
-real deployments, and do not prove that backend policy is enforced.
+Current main additionally tests that Codex authentication dispatches only the
+vendor device-code command, Claude authentication stays inside the vendor CLI,
+and unsupported auth integrations are rejected at the parser boundary. The tests
+fake OpenShell responses. They are not recordings of successful real
+deployments, successful OAuth exchanges, or proof that backend policy is enforced.
 
 The GitHub workflow checks offline tests and wheel packaging on Linux, macOS,
 and Windows. One symlink test is skipped on Windows because creating symlinks

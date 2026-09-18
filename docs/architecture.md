@@ -51,11 +51,13 @@ there is deliberately no automatic adoption or destructive cleanup.
 | Guest project | Backend-owned private copy; no automatic export. |
 | Agent sessions | Guest agent-owned; persist according to driver lifecycle. |
 | Config and binding | Host-side private environment directory. |
-| Credentials | Explicit OpenShell providers or user-approved guest login. |
+| Credentials | Explicit OpenShell providers or vendor-owned guest login; Dungeon never handles token bytes. |
 | Diagnostic output | Foreground output only; not a retained audit trail. |
 
 No host dotfiles, editor caches, agent databases, skills, private SSH keys,
-engine sockets, or credential directories are copied automatically. Tool
+engine sockets, or credential directories are copied automatically. `auth`
+coordinates vendor CLI flows inside the guest only; it is not an OAuth client,
+secret vault, callback service, or host-to-guest credential copier. Tool
 composition currently uses a reviewed compatible image. Declarative features
 and selective configuration imports are future work, not hidden setup hooks.
 

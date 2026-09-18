@@ -32,7 +32,10 @@ are excluded at Dungeon's subprocess boundary.
 - Allowed endpoints can receive data. Host/port filtering is not exfiltration
   prevention or authorization for every operation at an allowed service.
 - Providers grant authority even when raw credentials remain brokered. Guest
-  logins and some desktop integrations may expose real tokens in the guest.
+  OAuth login stores vendor credentials in guest-controlled state; compromise of
+  that environment can expose or misuse them. Dungeon does not inspect, copy,
+  refresh, or escrow those credentials. Some desktop integrations may also
+  expose real tokens in the guest.
 - Project upload is explicit but is not a secret scanner or immutable snapshot.
   Preflight rejects outward symlinks and special files. Concurrent host changes,
   upstream transfer behavior, and ignored-file semantics still need validation.
