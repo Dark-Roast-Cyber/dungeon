@@ -6,7 +6,7 @@
   "type": "module",
   "bin": {"dungeon": "bin/dungeon.js"},
   "files": ["bin", "lib"],
-  "engines": {"node": ">=18"},
+  "engines": {"node": "^24.0.0 || ^26.0.0"},
   "optionalDependencies": {
     "@agent-archaeology/dungeon-linux-x64": "0.0.2",
     "@agent-archaeology/dungeon-darwin-arm64": "0.0.2",

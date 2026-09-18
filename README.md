@@ -13,11 +13,11 @@ Terminal-first, policy-managed environments for coding agents. Part of the [Agen
 - Explicit config, policy, project upload, and runtime identity checks.
 - Optional in-guest Telltale diagnostics. Durable independent collection is future work.
 
-Dungeon targets **OpenShell 0.0.116**. Windows management is intended through WSL2 or a supported remote Linux host; native Windows workload containment is not claimed.
+Dungeon targets **OpenShell 0.0.116**. The OpenShell version is intentionally pinned because Dungeon validates version-sensitive CLI and structured-output contracts; 0.0.116 is the current upstream release. Windows management is intended through WSL2 or a supported remote Linux host; native Windows workload containment is not claimed.
 
 ## Build
 
-Rust 1.82 or later:
+The repository pins **Rust 1.98.1**, the current stable toolchain, in `rust-toolchain.toml`:
 
 ```sh
 cargo build --release
@@ -73,7 +73,7 @@ npx @agent-archaeology/dungeon
 npm install -g @agent-archaeology/dungeon
 ```
 
-The npm package is only a launcher for the same Rust binary. The npm scope is provisional and is **not published yet**. See [distribution](docs/distribution.md).
+The npm package is only a launcher for the same Rust binary. Its supported Node lines are Node 24 LTS and Node 26 Current; Node is not required by the native binary. The npm scope is provisional and is **not published yet**. See [distribution](docs/distribution.md).
 
 ## Development
 
@@ -83,6 +83,8 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 node --test npm/launcher/test/platform.test.mjs
 ```
+
+CI uses explicit current GA runner images rather than mutable `*-latest` labels and pins third-party actions to immutable commits corresponding to current stable releases.
 
 Read [architecture](docs/architecture.md), [configuration](docs/configuration.md), [security](SECURITY.md), [validation](docs/validation.md), and [distribution](docs/distribution.md).
 
