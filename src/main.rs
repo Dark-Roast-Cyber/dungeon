@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use data_encoding::BASE32_NOPAD;
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{json, Map, Number, Value};
+use serde_json::{Map, Number, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -263,7 +263,9 @@ fn run(cli: Cli) -> Result<i32> {
                 Commands::Auth {
                     agent: AuthAgent::Codex,
                 } => {
-                    eprintln!("Starting Codex device authentication inside the guest. Complete the displayed URL/code in your browser. Dungeon never reads or stores the resulting credential.");
+                    eprintln!(
+                        "Starting Codex device authentication inside the guest. Complete the displayed URL/code in your browser. Dungeon never reads or stores the resulting credential."
+                    );
                     runtime.execute(
                         &["codex".into(), "login".into(), "--device-auth".into()],
                         true,
@@ -273,7 +275,9 @@ fn run(cli: Cli) -> Result<i32> {
                 Commands::Auth {
                     agent: AuthAgent::Claude,
                 } => {
-                    eprintln!("Starting Claude Code inside the guest. Use /login and complete the vendor browser flow. Dungeon never reads or stores the resulting credential.");
+                    eprintln!(
+                        "Starting Claude Code inside the guest. Use /login and complete the vendor browser flow. Dungeon never reads or stores the resulting credential."
+                    );
                     runtime.execute(&["claude".into()], true, "/sandbox")
                 }
                 Commands::Run { agent, arguments } => {
