@@ -1,30 +1,17 @@
 # Roadmap
 
-## 0.0.1: engineering preview
+## 0.0.2: native distribution convergence
 
-Terminal-first OpenShell orchestration, guided/config-file setup, two native
-policy starters, private project upload, explicit identity binding, optional
-SSH/editor attachment, and a Telltale diagnostic. Implementation history is in
-CHANGELOG; validation limits are in docs/validation.md.
+Replace the unpublished Python implementation with one Rust binary while preserving the 0.0.1 configuration/runtime contracts. Establish native release artifacts and a thin npm/npx launcher over platform binaries. Do not maintain parallel Python/Rust behavior or add a postinstall downloader.
 
 ## Next: prove the execution boundary
 
-Validate a pinned image and gateway on supported Linux/macOS configurations and
-Windows/WSL management paths. Exercise all three initial CLI agents, terminals,
-stop/resume, blocked paths/egress, credential handling, and VS Code/desktop SSH.
-Replace claims of intended support only with exact reproducible evidence.
+Validate a pinned OpenShell image/gateway, OpenCode, Claude Code, Codex, vendor login, terminals, stop/resume, policy denials, persistence, VS Code, and desktop SSH. Replace intended-support statements only with reproducible evidence.
 
-## Next: independent observation and adoption
+## Next: observation and adoption
 
-External Telltale collection with durable delivery, source health, environment
-correlation, and teardown retention. Then selective read-only configuration
-imports and declarative editor/tool features. Use existing packaging conventions
-where they fit; no arbitrary privileged host plugin hooks.
+Add independent Telltale collection with durable delivery, source health, correlation, and teardown retention. Then add selective configuration imports and declarative tool/editor features without arbitrary privileged host hooks.
 
 ## Later
 
-Managed OpenCode server/attach lifecycle, reviewed export and resumable session
-migration, organization policy integration, supported EDR deployments, and an
-additional backend only after an independently useful need is established.
-NemoClaw observations can be integrated through accepted Telltale contracts.
-AI-assisted configuration may propose changes but cannot approve its own access.
+Managed OpenCode serve/attach lifecycle, reviewed export/session migration, organization policy integration, validated EDR deployments, and another backend only after a concrete need is established.

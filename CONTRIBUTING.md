@@ -1,14 +1,15 @@
 # Contributing
 
-Python 3.11+; no runtime Python dependencies. Install from the checkout with
-`python -m pip install .`, then run `python -m unittest discover -s tests -v`.
-Build a distributable with `python -m pip wheel --no-deps . --wheel-dir dist`.
+Dungeon is a Rust binary. Validate changes with:
 
-Keep changes independently reviewable. Include a concrete failure or contract
-when proposing abstractions, backend support, or policy changes. Follow AGENTS.md
-and the architecture/security documents. Never use real credentials or personal
-session stores as committed fixtures.
+```sh
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+cargo build --release
+node --test npm/launcher/test/platform.test.mjs
+```
 
-CI tests packaging and offline contracts on Linux, macOS, and Windows. It does
-not run an OpenShell gateway or certify workload isolation. Record live evidence
-with exact versions, commands, expected/observed outcomes, and no private data.
+Keep changes independently reviewable. Include a concrete contract or failure mode when proposing abstractions, backend support, or policy changes. Never commit real credentials or personal session stores.
+
+The npm tree is a launcher plus private platform-package templates. It is not a second implementation.

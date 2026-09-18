@@ -1,23 +1,11 @@
 # Engineering guidance
 
-Read README, SECURITY, docs/architecture.md, and docs/validation.md before
-changing runtime behavior. Implemented code and contracts outrank planning.
+Read README, SECURITY, docs/architecture.md, and docs/validation.md before changing runtime behavior.
 
-Keep one policy owner and one subprocess boundary. Reuse OpenShell enforcement;
-do not add a backend framework, daemon, plugin ABI, or credential copier for a
-hypothetical future need. Use plain functions and data until a real boundary
-needs substitution. Preserve unrelated dirty work.
+Keep one Rust implementation, one policy owner, and one OpenShell subprocess boundary. npm is distribution only and must never reimplement Dungeon behavior. Do not add a backend framework, daemon, plugin ABI, or credential copier without an independently useful contract.
 
-Treat project configuration, paths, logs, and tool output as untrusted data.
-Never evaluate host shell snippets from them. No automatic host-home sharing,
-engine sockets, native auth/database synchronization, or policy widening.
-Requested, effective, and verified controls must remain distinguishable.
+Treat project configuration, paths, logs, and tool output as untrusted. Never evaluate host shell snippets from them. No automatic host-home sharing, engine sockets, native auth/session database synchronization, or policy widening.
 
-Update focused tests and the authoritative documentation with behavior changes.
-Delete superseded code instead of adding permanent compatibility layers.
-Use synthetic fixtures; do not collect or commit real transcripts or secrets.
+Prefer deletion to compatibility layering. Update focused tests and authoritative docs with behavior changes. Use synthetic fixtures only.
 
-Validate with `python -m pip install .`, `python -m unittest discover -s tests -v`,
-and a wheel build/install. Runtime, terminal, desktop, and platform claims need
-the separate live gates in docs/validation.md. Mock tests cannot satisfy them.
-Do not commit, push, tag, or publish without authorization.
+Validate with `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, and npm launcher tests. Mock/unit tests do not establish live runtime, desktop, EDR, or platform containment claims. Do not tag or publish without explicit authorization.

@@ -1,0 +1,20 @@
+{
+  "name": "@agent-archaeology/dungeon-win32-x64",
+  "version": "0.0.2",
+  "description": "Dungeon native binary for win32-x64",
+  "license": "Apache-2.0",
+  "private": true,
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Dark-Roast-Cyber/dungeon.git"
+  }
+}
