@@ -17,13 +17,11 @@ jobs:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
       - name: Verify tag version
-        shell: pwsh
+        shell: bash
         run: |
-          $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-          $version = $metadata.packages[0].version
-          if ("v$version" -ne $env:GITHUB_REF_NAME) {
-            throw "tag $env:GITHUB_REF_NAME does not match Cargo.toml version $version"
-          }
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
+          test "v${version}" = "$GITHUB_REF_NAME"
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --locked
