@@ -58,12 +58,16 @@ jobs:
         include:
           - os: ubuntu-26.04
             target: linux-x64
+            archive: tar
           - os: macos-26
             target: darwin-arm64
+            archive: tar
           - os: macos-26-intel
             target: darwin-x64
+            archive: tar
           - os: windows-2025
             target: win32-x64
+            archive: zip
     name: native-build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     steps:
@@ -76,3 +80,26 @@ jobs:
         if: runner.os != 'Windows'
       - run: target\release\dungeon.exe --version
         if: runner.os == 'Windows'
+      - name: Package Unix archive
+        if: matrix.archive == 'tar'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
+          mkdir -p dist/package
+          cp target/release/dungeon LICENSE README.md dist/package/
+          tar -C dist/package -czf "dist/dungeon-${version}-${{ matrix.target }}.tar.gz" dungeon LICENSE README.md
+      - name: Package Windows archive
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
+          New-Item -ItemType Directory -Force -Path dist/package | Out-Null
+          Copy-Item target/release/dungeon.exe,LICENSE,README.md dist/package/
+          Compress-Archive -Path dist/package/* -DestinationPath "dist/dungeon-$version-${{ matrix.target }}.zip"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-${{ matrix.target }}
+          path: dist/dungeon-*
+          if-no-files-found: error
+          retention-days: 7

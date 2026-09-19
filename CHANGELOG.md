@@ -7,6 +7,8 @@
 - Move `dungeon.json` to schema 2 and remove the redundant policy-path field; `policy.json` is always adjacent.
 - Collapse starter profiles into one starter development policy until live validation establishes meaningful scenario differences.
 - Remove the provisional in-guest `dungeon telltale` command; future Telltale integration remains independent retained collection.
+- Add native release archives for Linux x64, macOS arm64/x64, and Windows x64 with SHA-256 checksums.
+- Add a tag-gated GitHub prerelease workflow that verifies the tag against `Cargo.toml`, rebuilds from locked dependencies, and never runs on ordinary branch pushes.
 - Add a thin npm/npx launcher design with OS/CPU-specific native package templates. No postinstall downloader and no duplicate runtime logic.
 - Add `dungeon auth codex` for Codex device-code authentication.
 - Add `dungeon auth claude` for Claude Code's vendor-native `/login` flow.

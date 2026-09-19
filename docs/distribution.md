@@ -4,7 +4,20 @@ The Rust `dungeon` binary is the only implementation. Every distribution path mu
 
 ## Native releases
 
-Release builds should produce immutable archives for Linux x64, macOS arm64/x64, and Windows x64 with checksums. Direct installers/package managers can consume those artifacts later.
+CI packages the same native targets that it compiles:
+
+- Linux x64: `dungeon-VERSION-linux-x64.tar.gz`
+- macOS arm64: `dungeon-VERSION-darwin-arm64.tar.gz`
+- macOS x64: `dungeon-VERSION-darwin-x64.tar.gz`
+- Windows x64: `dungeon-VERSION-win32-x64.zip`
+
+Each archive contains only the native binary, `LICENSE`, and `README.md`.
+
+A tag matching `vMAJOR.MINOR.PATCH` triggers `.github/workflows/release.yml`. The workflow verifies the tag exactly matches the package version in `Cargo.toml`, runs locked tests, rebuilds all four native targets, creates the archives, generates `SHA256SUMS`, and publishes a GitHub prerelease.
+
+Creating a tag is therefore the release authorization boundary. Ordinary pushes and pull requests never create a GitHub release.
+
+The release workflow intentionally rebuilds rather than promoting an earlier CI binary so every published asset is tied directly to the tagged source tree and locked dependency graph.
 
 ## npm / npx
 
@@ -17,8 +30,8 @@ npm install -g @agent-archaeology/dungeon
 
 The launcher resolves an OS/CPU-specific optional dependency and executes its bundled Rust binary with `shell: false`. There is no postinstall downloader.
 
-Platform package directories are deliberately `private` source templates because the repository does not contain compiled binaries. Publication tooling must stage and verify the native binary before removing `private` and publishing platform packages, then publish the launcher.
+Platform package directories remain deliberately `private` source templates because npm publication is not yet authorized. The repository does not claim that the provisional `@agent-archaeology` scope is owned or configured.
 
-The `@agent-archaeology` npm scope is provisional until ownership, provenance, and publishing credentials are explicitly validated. Ordinary CI does not publish npm packages.
+Before npm publication, release tooling still needs a bounded staging step that inserts the already-built native binaries into the platform packages, verifies their `dungeon --version` output, removes `private` only in staging, creates package tarballs, and publishes platform packages before the launcher.
 
 Unsupported architectures fail explicitly rather than silently downloading or falling back to another runtime.

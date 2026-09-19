@@ -1,6 +1,6 @@
 # Validation and release boundary
 
-CI checks formatting, Clippy, Rust tests, release compilation, CLI version execution, npm launcher mapping/packing, and distribution version synchronization on explicit supported runners.
+CI checks formatting, Clippy, locked Rust tests, release compilation, CLI version execution, npm launcher mapping/packing, distribution version synchronization, and native archive creation on explicit supported runners.
 
 ## Version policy
 
@@ -8,10 +8,16 @@ CI checks formatting, Clippy, Rust tests, release compilation, CLI version execu
 - `Cargo.lock` is committed and is the authoritative exact dependency graph for the application.
 - GitHub Actions are pinned to immutable commit SHAs corresponding to stable action releases.
 - CI uses explicit GA runner images: Ubuntu 26.04, macOS 26 arm64, macOS 26 Intel, and Windows Server 2025.
-- npm launcher validation targets Node 24 LTS. The launcher is trivial and Node 26 compatibility is not a release gate before it becomes LTS.
+- npm launcher validation targets Node 24 LTS.
 - OpenShell 0.0.116 is an intentional compatibility pin because Dungeon consumes version-sensitive CLI and structured-output contracts.
 
-Offline tests cover strict duplicate-key JSON, safe names, schema rejection, starter-policy requirements, create arguments, auth command scope, removed provisional commands, and native launcher selection. These do not prove successful OAuth exchange, OpenShell enforcement, guest isolation, endpoint-security visibility, or desktop compatibility.
+Offline tests cover strict duplicate-key JSON, safe names, schema rejection, starter-policy requirements, create arguments, auth command scope, removed provisional commands, native launcher selection, and native archive production. These do not prove successful OAuth exchange, OpenShell enforcement, guest isolation, endpoint-security visibility, or desktop compatibility.
+
+## Native release gate
+
+A release tag must be exactly `vMAJOR.MINOR.PATCH` and match the package version in `Cargo.toml`. The release workflow rebuilds from the tagged source, runs locked tests, executes each native binary, emits four archives, generates `SHA256SUMS`, and creates a GitHub prerelease.
+
+No release is created by ordinary CI, pull requests, or branch pushes.
 
 ## Live gates
 
@@ -28,4 +34,4 @@ Offline tests cover strict duplicate-key JSON, safe names, schema rejection, sta
 
 ## Release
 
-Ordinary commits validate without publishing. A release requires explicit authorization and an exact reviewed version. npm publication has a separate gate for scope ownership, platform artifacts, provenance, and credentials.
+Creating the reviewed version tag is the explicit native-release authorization step. npm publication remains a separate future gate for scope ownership, platform package staging, provenance, and publishing credentials.
