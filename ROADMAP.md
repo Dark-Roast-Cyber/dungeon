@@ -1,8 +1,8 @@
 # Roadmap
 
-## 0.0.2: native distribution convergence
+## 0.0.2: native foundation
 
-Replace the unpublished Python implementation with one Rust binary while preserving the 0.0.1 configuration/runtime contracts. Establish native release artifacts and a thin npm/npx launcher over platform binaries. Do not maintain parallel Python/Rust behavior or add a postinstall downloader.
+Converge on one Rust binary, one config schema, one starter policy, one OpenShell subprocess boundary, native release artifacts, and a thin npm/npx launcher. Keep the implementation small enough to validate directly before adding frameworks or compatibility layers.
 
 ## Next: prove the execution boundary
 

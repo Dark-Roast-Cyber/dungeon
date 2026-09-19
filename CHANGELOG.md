@@ -3,7 +3,10 @@
 ## Unreleased (0.0.2)
 
 - Replace the unpublished Python implementation with one Rust CLI.
-- Preserve explicit configuration, OpenShell policy, runtime identity, project upload, terminal, SSH/editor, authentication, and Telltale diagnostic boundaries.
+- Split the Rust implementation into plain `cli`, `config`, `policy`, and `openshell` responsibility modules without introducing traits or sub-crates.
+- Move `dungeon.json` to schema 2 and remove the redundant policy-path field; `policy.json` is always adjacent.
+- Collapse starter profiles into one starter development policy until live validation establishes meaningful scenario differences.
+- Remove the provisional in-guest `dungeon telltale` command; future Telltale integration remains independent retained collection.
 - Add a thin npm/npx launcher design with OS/CPU-specific native package templates. No postinstall downloader and no duplicate runtime logic.
 - Add `dungeon auth codex` for Codex device-code authentication.
 - Add `dungeon auth claude` for Claude Code's vendor-native `/login` flow.

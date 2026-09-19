@@ -18,6 +18,6 @@ OpenShell providers can grant authority even when raw secrets are brokered. `dun
 - Project upload is explicit but is not a secret scanner or immutable snapshot.
 - Guest/session durability is backend-specific.
 - Mutable images/provider content can change without changing Dungeon's fingerprint.
-- In-guest Telltale is diagnostic, not independently trustworthy evidence.
 - Host EDR does not imply guest-process visibility.
+- Independent Telltale evidence collection is not implemented yet.
 - npm scope ownership, platform package provenance, and publishing credentials must be validated before npm publication.

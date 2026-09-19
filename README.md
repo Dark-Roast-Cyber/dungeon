@@ -1,6 +1,6 @@
 # Dungeon
 
-Terminal-first, policy-managed environments for coding agents. Part of the [Agent Archaeology](https://agentarchaeology.ai/) family, with optional [Telltale](https://github.com/Dark-Roast-Cyber/telltale) integration.
+Terminal-first, policy-managed environments for coding agents. Part of the [Agent Archaeology](https://agentarchaeology.ai/) family, with planned integration with [Telltale](https://github.com/Dark-Roast-Cyber/telltale).
 
 **0.0.2 is the current development preview; v0.0.1 remains the latest published release. Neither is an audited isolation product.**
 
@@ -11,13 +11,13 @@ Terminal-first, policy-managed environments for coding agents. Part of the [Agen
 - Vendor-native guest authentication for Codex device login and Claude Code browser login.
 - Optional VS Code and SSH attachment.
 - Explicit config, policy, project upload, and runtime identity checks.
-- Optional in-guest Telltale diagnostics. Durable independent collection is future work.
+- One starter OpenShell policy. Additional profiles will wait for validated scenario differences.
 
 Dungeon targets **OpenShell 0.0.116**. The OpenShell version is intentionally pinned because Dungeon validates version-sensitive CLI and structured-output contracts; 0.0.116 is the current upstream release. Windows management is intended through WSL2 or a supported remote Linux host; native Windows workload containment is not claimed.
 
 ## Build
 
-The repository pins **Rust 1.98.1**, the current stable toolchain, in `rust-toolchain.toml`:
+The repository pins **Rust 1.98.1** in `rust-toolchain.toml`:
 
 ```sh
 cargo build --release
@@ -73,7 +73,7 @@ npx @agent-archaeology/dungeon
 npm install -g @agent-archaeology/dungeon
 ```
 
-The npm package is only a launcher for the same Rust binary. Its supported Node lines are Node 24 LTS and Node 26 Current; Node is not required by the native binary. The npm scope is provisional and is **not published yet**. See [distribution](docs/distribution.md).
+The npm package is only a launcher for the same Rust binary. Node 24 LTS is the supported launcher runtime; Node is not required by the native binary. The npm scope is provisional and is **not published yet**. See [distribution](docs/distribution.md).
 
 ## Development
 
@@ -84,7 +84,7 @@ cargo test
 node --test npm/launcher/test/platform.test.mjs
 ```
 
-CI uses explicit current GA runner images rather than mutable `*-latest` labels and pins third-party actions to immutable commits corresponding to current stable releases.
+CI uses explicit GA runner images rather than mutable `*-latest` labels and pins third-party actions to immutable commits corresponding to stable releases.
 
 Read [architecture](docs/architecture.md), [configuration](docs/configuration.md), [security](SECURITY.md), [validation](docs/validation.md), and [distribution](docs/distribution.md).
 

@@ -1,19 +1,25 @@
 # Architecture
 
-Dungeon owns setup and lifecycle coordination. OpenShell owns workload isolation and policy enforcement. Agent interfaces own conversations and credential stores. Telltale owns interpretation of supported session sources.
+Dungeon owns setup and lifecycle coordination. OpenShell owns workload isolation and policy enforcement. Agent interfaces own conversations and credential stores. Telltale integration is intentionally deferred until evidence can be collected independently of the workload.
 
 ```text
-Host CLI / guided setup
+Host CLI
   -> explicit configuration + native OpenShell policy
   -> pinned OpenShell adapter
   -> managed environment: agents, tools, project, session state
        ^ terminal / optional SSH editor or desktop connection
-       -> optional Telltale diagnostic
 ```
 
 ## One implementation
 
-`dungeon` is one Rust binary. Configuration/policy validation, CLI behavior, and the OpenShell subprocess boundary live in that implementation. There is no backend hierarchy, daemon, plugin ABI, embedded JS runtime, or second policy language.
+`dungeon` is one Rust binary with four plain responsibility modules:
+
+- `cli`: command parsing and dispatch.
+- `config`: config/state parsing, validation, strict JSON, and fingerprints.
+- `policy`: the starter policy and policy safety validation.
+- `openshell`: the single OpenShell subprocess boundary and lifecycle operations.
+
+There is no backend hierarchy, daemon, plugin ABI, embedded JS runtime, second policy language, or framework layer.
 
 The npm tree is distribution only: a tiny Node launcher selects a platform package and executes its Rust binary. It must never parse Dungeon config, apply policy, coordinate auth, or contact OpenShell.
 
@@ -32,10 +38,9 @@ Reuse verifies identity and policy drift. These checks are not kernel/image atte
 | Agent sessions | Guest agent-owned |
 | Config/runtime binding | Private host directory |
 | Credentials | OpenShell providers or vendor-owned guest login |
-| Telltale diagnostic | Foreground only |
 
 No host dotfiles, editor caches, agent databases, private SSH keys, engine sockets, or credential directories are copied automatically.
 
 ## Telltale boundary
 
-The optional diagnostic uses the standalone Telltale CLI. Dungeon does not add parsers, change Telltale event contracts, or manufacture execution facts. Independent external collection remains a separate accepted integration slice.
+There is no provisional in-guest Telltale command. The accepted future integration is independent collection with retained evidence and explicit source health. Dungeon should not add a weaker compatibility path before that work is validated.

@@ -19,28 +19,17 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
-      - name: Export generated lockfile
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: generated-cargo-lock
-          path: Cargo.lock
-          retention-days: 1
-          if-no-files-found: error
+      - run: cargo test --locked
 
   npm:
     runs-on: ubuntu-26.04
-    strategy:
-      fail-fast: false
-      matrix:
-        node: [24, 26]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 24
           package-manager-cache: false
       - run: node --test npm/launcher/test/platform.test.mjs
       - run: npm pack --dry-run ./npm/launcher
@@ -62,7 +51,7 @@ jobs:
           }
           NODE
 
-  native-test:
+  native-build:
     strategy:
       fail-fast: false
       matrix:
@@ -75,15 +64,14 @@ jobs:
             target: darwin-x64
           - os: windows-2025
             target: win32-x64
-    name: native-test (${{ matrix.target }})
+    name: native-build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
-      - run: cargo test
-      - run: cargo build --release
+      - run: cargo build --release --locked
       - run: target/release/dungeon --version
         if: runner.os != 'Windows'
       - run: target\release\dungeon.exe --version

@@ -2,7 +2,7 @@
 
 Read README, SECURITY, docs/architecture.md, and docs/validation.md before changing runtime behavior.
 
-Keep one Rust implementation, one policy owner, and one OpenShell subprocess boundary. npm is distribution only and must never reimplement Dungeon behavior. Do not add a backend framework, daemon, plugin ABI, or credential copier without an independently useful contract.
+Keep one Rust implementation, one policy owner, and one OpenShell subprocess boundary. The current module split is responsibility-based, not an abstraction framework. npm is distribution only and must never reimplement Dungeon behavior. Do not add a backend trait, daemon, plugin ABI, compatibility layer, or credential copier without an independently useful contract.
 
 Treat project configuration, paths, logs, and tool output as untrusted. Never evaluate host shell snippets from them. No automatic host-home sharing, engine sockets, native auth/session database synchronization, or policy widening.
 

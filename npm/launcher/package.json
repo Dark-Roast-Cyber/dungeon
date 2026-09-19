@@ -4,14 +4,24 @@
   "description": "Native Dungeon launcher for policy-managed coding-agent environments",
   "license": "Apache-2.0",
   "type": "module",
-  "bin": {"dungeon": "bin/dungeon.js"},
-  "files": ["bin", "lib"],
-  "engines": {"node": "^24.0.0 || ^26.0.0"},
+  "bin": {
+    "dungeon": "bin/dungeon.js"
+  },
+  "files": [
+    "bin",
+    "lib"
+  ],
+  "engines": {
+    "node": "^24.0.0"
+  },
   "optionalDependencies": {
     "@agent-archaeology/dungeon-linux-x64": "0.0.2",
     "@agent-archaeology/dungeon-darwin-arm64": "0.0.2",
     "@agent-archaeology/dungeon-darwin-x64": "0.0.2",
     "@agent-archaeology/dungeon-win32-x64": "0.0.2"
   },
-  "repository": {"type": "git", "url": "https://github.com/Dark-Roast-Cyber/dungeon.git"}
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Dark-Roast-Cyber/dungeon.git"
+  }
 }
