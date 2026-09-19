@@ -1,6 +1,4 @@
-use crate::config::{
-    Agent, ConfigDoc, create_private_dir, load_config, safe_name, write_new,
-};
+use crate::config::{Agent, ConfigDoc, create_private_dir, load_config, safe_name, write_new};
 use crate::openshell::{GUEST_PROJECT, Runtime, create_arguments};
 use crate::policy::starter_policy;
 use crate::{Error, OPEN_SHELL_VERSION, Result};

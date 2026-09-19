@@ -113,7 +113,9 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn execute(&self, command: &[String], tty: bool, workdir: &str) -> Result<i32> {
-        if command.is_empty() || command[0].is_empty() || command.iter().any(|arg| arg.contains('\0'))
+        if command.is_empty()
+            || command[0].is_empty()
+            || command.iter().any(|arg| arg.contains('\0'))
         {
             return Err(Error::new("an executable and valid arguments are required"));
         }

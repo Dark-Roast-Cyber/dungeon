@@ -267,19 +267,13 @@ impl<'de> Deserialize<'de> for StrictValue {
                 Ok(StrictValue(Value::Number(Number::from(value))))
             }
 
-            fn visit_f64<E: de::Error>(
-                self,
-                value: f64,
-            ) -> std::result::Result<Self::Value, E> {
+            fn visit_f64<E: de::Error>(self, value: f64) -> std::result::Result<Self::Value, E> {
                 Number::from_f64(value)
                     .map(|number| StrictValue(Value::Number(number)))
                     .ok_or_else(|| E::custom("non-finite number"))
             }
 
-            fn visit_str<E: de::Error>(
-                self,
-                value: &str,
-            ) -> std::result::Result<Self::Value, E> {
+            fn visit_str<E: de::Error>(self, value: &str) -> std::result::Result<Self::Value, E> {
                 Ok(StrictValue(Value::String(value.to_owned())))
             }
 
