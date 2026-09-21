@@ -30,3 +30,23 @@ The starter policy requires Landlock `hard_requirement`, the non-root sandbox ac
 Dungeon does not widen policy automatically. Inspected REST/TLS endpoints must use `enforcement: enforce`.
 
 Review `plan` before `create`. `runtime.json` is Dungeon-owned identity bookkeeping and must not be edited to bypass mismatch checks.
+
+
+## Planned reviewed setup imports
+
+No setup-import field exists in schema 2. That is intentional: the current runtime should be validated before adding another execution surface.
+
+The accepted future model will extend the single authoritative Dungeon configuration rather than introduce project-local auto-discovery or a parallel plugin configuration. The model is declarative and request-only:
+
+- `imports`: explicit host paths selected by the operator and snapshotted read-only;
+- `requirements`: binaries/tool versions expected from the reviewed image;
+- `state`: guest-private writable locations;
+- `network`: destinations a setup would like to use;
+- `credentials`: named provider/credential requirements only; and
+- `environment`: bounded guest-only variable assignments required to connect config and state.
+
+Raw credentials, shell snippets, host commands, arbitrary lifecycle hooks, privileged mounts, and engine sockets are not valid setup declarations.
+
+The resolved plan must show the requested data and capability diff before anything is applied. Missing network/provider authority does not cause automatic policy widening. Project content may request setup in a future model, but project-local requests are untrusted and cannot grant themselves access.
+
+A Neovim import is a useful first case: copy only the selected Neovim config into a read-only guest snapshot, keep Neovim data/state/cache guest-private, and treat Lua/editor configuration as guest-executable content. A Rust toolchain is supplied by the reviewed OCI image rather than installed from a host script; Cargo network or registry credentials remain explicit policy/provider concerns.

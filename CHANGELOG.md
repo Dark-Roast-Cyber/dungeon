@@ -14,6 +14,8 @@
 - Add `dungeon auth claude` for Claude Code's vendor-native `/login` flow.
 - Keep OpenShell providers as the separate brokered API credential path.
 - Keep OpenCode authentication provider-specific. Grok is intentionally not added.
+- Bound the future declarative setup model: reviewed images own binaries/toolchains, imports are read-only snapshots, writable state is separate, and setup requests cannot silently widen policy or execute host hooks.
+- Pre-resolve the first Telltale integration around the existing production `opencode.sqlite` source and Event 3.0 pipeline; only the consistent external snapshot mechanism remains live-validation-dependent.
 
 ## 0.0.1
 
