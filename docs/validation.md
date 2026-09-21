@@ -25,6 +25,8 @@ Ordinary CI stages the real native binaries into temporary platform packages and
 
 This validates packaging only. npm registry publication remains blocked until the package scope, provenance, and publishing credentials are explicitly established.
 
+For the first end-to-end execution, use [live-validation.md](live-validation.md) and record the exact tested runtime combination.
+
 ## Live gates
 
 | Gate | Evidence |
