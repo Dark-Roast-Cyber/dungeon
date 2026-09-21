@@ -231,19 +231,42 @@ Do not implement collection during this run. Capture only the facts Issue #2 nee
 
 - actual OpenCode database path;
 - whether WAL/journal side files are present;
-- SQLite journal mode if safely queryable;
-- whether OpenShell can produce/download a consistent file or directory snapshot;
+- SQLite journal mode;
+- whether the installed OpenCode exposes the expected database CLI;
+- whether a completed one-file SQLite snapshot can be downloaded through OpenShell;
 - what remains available after `stop`;
 - what remains available before/after environment deletion if deletion is tested separately;
 - whether a host-side private acquisition root can receive data without becoming guest-writable.
 
-The target Telltale rooted layout for the first OpenCode slice is:
+First inspect the installed OpenCode database interface:
+
+```sh
+dungeon --config "$CONFIG" exec -- opencode db path
+dungeon --config "$CONFIG" exec -- opencode db "PRAGMA journal_mode"
+```
+
+Current upstream OpenCode v1.18.31 exposes those commands and normally uses WAL. Record the installed version and actual results rather than assuming the image matches upstream.
+
+OpenShell v0.0.116 provides `sandbox download` as tar-over-SSH file transfer, but that transfer is not itself a SQLite consistency mechanism.
+
+After the interactive OpenCode agent has exited, test the bounded snapshot candidate using a **fresh output path**:
+
+```sh
+dungeon --config "$CONFIG" exec -- opencode db "VACUUM INTO '/sandbox/opencode-telltale-snapshot.db'"
+openshell --gateway <gateway> --workspace <workspace> sandbox download <sandbox-name> /sandbox/opencode-telltale-snapshot.db <private-host-destination>
+```
+
+Use the exact gateway/workspace/name from the Dungeon configuration rather than the placeholders above. The output file must not already exist. Do not run this against real sensitive sessions until the synthetic validation succeeds.
+
+Verify the downloaded snapshot can be opened and passes an integrity/read check before treating it as acquisition input. Then remove the transient guest snapshot. Record whether this works while no agent process is active and whether any unexpected lock/policy/path behavior occurs.
+
+The target Telltale rooted layout for the first OpenCode slice remains:
 
 ```text
 <acquisition-root>/.local/share/opencode/opencode.db
 ```
 
-Do not copy only a live SQLite main database and call it consistent.
+The live test may place the verified snapshot at that path inside a fresh private acquisition root for a dry Telltale scan. Do not copy only a live SQLite main database, and do not copy a main database plus WAL/SHM files without a proven consistency contract.
 
 ## 12. Results table
 
