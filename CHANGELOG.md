@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased local setup (Issue #7)
+
+- Add `dungeon setup` for Linux/rootless Podman/OpenShell 0.0.116: bootstrap and register one local mTLS gateway, check health and driver, refuse conflicting state, and show the reviewed local-image build/next init command. No image publication, policy change, installer, or MicroVM fallback.
+
 ## Unreleased image candidate (0.0.3)
 
 - Add one local Linux agent image with a digest-pinned OpenShell base, exact official OpenCode V2/Claude Code/Codex packages, a pnpm integrity lock, and build-time CLI version checks. No image publication, default-image change, policy expansion, or host-state import.

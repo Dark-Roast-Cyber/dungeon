@@ -25,7 +25,14 @@ cargo build --release
 ./target/release/dungeon --help
 ```
 
-Install OpenShell separately and register a gateway.
+For the supported Linux path, install OpenShell **0.0.116** and rootless Podman separately. Start the user Podman API socket (`systemctl --user enable --now podman.socket`) and explicitly pull the immutable OpenShell gateway image before setup:
+
+```sh
+podman pull ghcr.io/nvidia/openshell/gateway@sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645
+dungeon setup
+```
+
+Setup provisions a local mTLS gateway named `dungeon-local` on loopback port 17670 with the Podman driver and workspace `default`. Repeat `dungeon setup` to verify it; incompatible existing registrations/containers are never overwritten. It does not create a sandbox, upload a project, install packages with privilege, download OpenShell, or fall back to MicroVM. Native Windows and macOS setup are not supported. Only the recorded Linux/Podman/OpenShell combination has live validation; setup health does not prove containment on every host.
 
 The [local reviewed agent image](images/agent/README.md) pins current OpenCode,
 Claude Code, and Codex distributions on the validated base. Build it with
@@ -36,7 +43,7 @@ and provenance remain separate work.
 ## First environment
 
 ```sh
-dungeon init --directory "$HOME/.config/dungeon/demo" --project "$PWD"
+dungeon init --directory "$HOME/.config/dungeon/demo" --project "$PWD" --gateway dungeon-local --image localhost/dungeon-agent:0.0.3-dev
 CONFIG="$HOME/.config/dungeon/demo/dungeon.json"
 
 dungeon --config "$CONFIG" plan

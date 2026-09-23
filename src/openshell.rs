@@ -9,6 +9,20 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+#[cfg(target_os = "linux")]
+#[path = "setup.rs"]
+mod local_setup;
+
+#[cfg(target_os = "linux")]
+pub(crate) use local_setup::run as setup;
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn setup() -> Result<i32> {
+    Err(Error::new(
+        "dungeon setup supports Linux only (rootless Podman); no MicroVM fallback",
+    ))
+}
+
 const LABEL: &str = "agentarchaeology.ai/dungeon-config";
 pub(crate) const GUEST_PROJECT: &str = "/sandbox/project";
 
@@ -20,7 +34,7 @@ pub(crate) struct Runtime<'a> {
 
 impl<'a> Runtime<'a> {
     pub(crate) fn new(config: &'a Config) -> Result<Self> {
-        let env = host_environment(&config.values.project)?;
+        let env = host_environment(Some(&config.values.project))?;
         let binary =
             find_executable("openshell", env.get(&OsString::from("PATH"))).ok_or_else(|| {
                 Error::new(format!(
@@ -328,7 +342,7 @@ fn upload_arguments(config: &Config) -> Vec<String> {
     ]
 }
 
-fn host_environment(project: &Path) -> Result<HashMap<OsString, OsString>> {
+pub(crate) fn host_environment(project: Option<&Path>) -> Result<HashMap<OsString, OsString>> {
     const ALLOWED: &[&str] = &[
         "HOME",
         "USER",
@@ -374,7 +388,7 @@ fn host_environment(project: &Path) -> Result<HashMap<OsString, OsString>> {
         for entry in env::split_paths(&path) {
             if entry.is_absolute() {
                 let resolved = entry.canonicalize().unwrap_or(entry);
-                if !resolved.starts_with(project) {
+                if project.is_none_or(|project| !resolved.starts_with(project)) {
                     paths.push(resolved);
                 }
             }
@@ -389,7 +403,7 @@ fn host_environment(project: &Path) -> Result<HashMap<OsString, OsString>> {
     Ok(output)
 }
 
-fn find_executable(name: &str, path: Option<&OsString>) -> Option<PathBuf> {
+pub(crate) fn find_executable(name: &str, path: Option<&OsString>) -> Option<PathBuf> {
     for directory in env::split_paths(path?) {
         let candidate = directory.join(format!("{name}{}", env::consts::EXE_SUFFIX));
         if candidate.is_file() {
