@@ -8,6 +8,7 @@ version = "0.0.2"
 dependencies = [
  "clap",
  "data-encoding",
+ "libc",
  "serde",
  "serde_json",
  "sha2",

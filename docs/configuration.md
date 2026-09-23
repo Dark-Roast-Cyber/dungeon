@@ -2,6 +2,8 @@
 
 Use one private directory per environment and pass `--config` explicitly. Dungeon never discovers config from a repository.
 
+`dungeon setup` needs no project configuration. On Linux it uses gateway `dungeon-local`, workspace `default`, port 17670, and rootless Podman. The gateway container's config, generated mTLS/JWT keys and database live in `${XDG_STATE_HOME:-$HOME/.local/state}/dungeon/local-setup` (private host state). OpenShell owns its gateway registration and mTLS client material in `${XDG_CONFIG_HOME:-$HOME/.config}/openshell/gateways/dungeon-local`; Podman owns the `dungeon-local` network and `openshell-gateway-dungeon-local` container. Neither stores Dungeon project policy. A conflicting or partial installation requires explicit operator inspection; setup does not overwrite it. The initial `dungeon init` prompt defaults to `dungeon-local`, but use `--image localhost/dungeon-agent:0.0.3-dev` only after building the reviewed local image; the community base remains the CLI image default until a separate publication decision.
+
 `dungeon.json` schema 2:
 
 ```json

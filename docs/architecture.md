@@ -18,8 +18,11 @@ Host CLI
 - `config`: config/state parsing, validation, strict JSON, and fingerprints.
 - `policy`: the starter policy and policy safety validation.
 - `openshell`: the single OpenShell subprocess boundary and lifecycle operations.
+- `openshell::local_setup`: local gateway bootstrap within the same OpenShell boundary and sanitized executable resolution; OpenShell remains the registration/health authority, Podman the container/network authority.
 
 There is no backend hierarchy, daemon, plugin ABI, embedded JS runtime, second policy language, or framework layer.
+
+Local setup keeps only private gateway TLS/configuration and persistent database files under the host XDG state directory; OpenShell registration and its mTLS client files stay under OpenShell's config directory. Dungeon does not mirror gateway metadata or select a different active gateway permanently. It does not read project config/policy or create a sandbox. The rootless Podman socket is mounted only in the trusted gateway container, not in the guest.
 
 The npm tree is distribution only: a tiny Node launcher selects a platform package and executes its Rust binary. It must never parse Dungeon config, apply policy, coordinate auth, or contact OpenShell.
 

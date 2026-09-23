@@ -39,6 +39,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    Setup,
     Init {
         #[arg(long)]
         directory: PathBuf,
@@ -96,6 +97,7 @@ pub(crate) fn run() -> Result<i32> {
 fn dispatch(cli: Cli) -> Result<i32> {
     let Cli { config, command } = cli;
     match command {
+        Commands::Setup => crate::openshell::setup(),
         Commands::Init {
             directory,
             project,
@@ -194,7 +196,10 @@ fn dispatch(cli: Cli) -> Result<i32> {
                 Commands::SshConfig => runtime.ssh_config(),
                 Commands::Start => runtime.lifecycle("start"),
                 Commands::Stop => runtime.lifecycle("stop"),
-                Commands::Init { .. } | Commands::Plan | Commands::Upload { yes: false } => {
+                Commands::Init { .. }
+                | Commands::Setup
+                | Commands::Plan
+                | Commands::Upload { yes: false } => {
                     unreachable!()
                 }
             }
@@ -244,7 +249,7 @@ fn initialize(
     if !non_interactive {
         if !io::stdin().is_terminal() {
             return Err(Error::new(
-                "use --non-interactive --name NAME --gateway NAME without a terminal",
+                "use --non-interactive --name NAME without a terminal",
             ));
         }
         name = Some(ask(
@@ -253,7 +258,7 @@ fn initialize(
         )?);
         gateway = Some(ask(
             "Registered OpenShell gateway",
-            gateway.as_deref().unwrap_or("local"),
+            gateway.as_deref().unwrap_or("dungeon-local"),
         )?);
         image = ask("Reviewed OCI image", &image)?;
         agent = Agent::from_str(
@@ -264,8 +269,7 @@ fn initialize(
     }
 
     let name = name.ok_or_else(|| Error::new("--name is required with --non-interactive"))?;
-    let gateway =
-        gateway.ok_or_else(|| Error::new("--gateway is required with --non-interactive"))?;
+    let gateway = gateway.unwrap_or_else(|| "dungeon-local".to_owned());
 
     sandbox_name(&name)?;
     for (field, value) in [
