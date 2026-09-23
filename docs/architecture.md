@@ -93,7 +93,7 @@ The intended first slice is:
 
 ```text
 guest OpenCode opencode.db
-    -> consistent snapshot outside workload write authority
+    -> completed SQLite snapshot after OpenCode exits
     -> private host acquisition root
     -> telltale scan --client opencode
     -> current Telltale privacy/detection/state/durable output
@@ -103,4 +103,4 @@ Current pushed Telltale production still uses `NormalizedRecordV1` and Rule v1, 
 
 For a rooted Linux scan, Telltale expects the staged OpenCode database at `<root>/.local/share/opencode/opencode.db`. The retained Telltale log/state/outbox belong outside the sandbox and outside agent write authority.
 
-The acquisition mechanism is intentionally unresolved until live OpenShell validation establishes the real OpenCode database location, SQLite journal behavior, and safe download/snapshot semantics. Copying a live SQLite main file without a consistency guarantee is not an acceptable implementation.
+Issue #1 established this synthetic acquisition path with OpenCode 1.2.18 and OpenShell 0.0.116 on rootless Podman: the guest database at `/sandbox/.local/share/opencode/opencode.db` used WAL; after OpenCode exited, `opencode db "VACUUM INTO ..."` completed a single-file snapshot; `openshell sandbox download` placed it in a private host acquisition root; SQLite `integrity_check` returned `ok`. The completed snapshot was staged at `<root>/.local/share/opencode/opencode.db` for Telltale's existing `opencode.sqlite` source. No new Telltale source/schema is needed, and Event 3.0 remains the current compatibility output. Guest data can be tampered with or incomplete before acquisition; the completed snapshot and retained Telltale output must be stored outside workload write authority. This is not a live-main-file copying contract, a production collection guarantee, or a validated MicroVM path.

@@ -19,13 +19,13 @@ Use one private directory per environment and pass `--config` explicitly. Dungeo
 
 Schema 2 deliberately removes the old `policy` field. `policy.json` is always the adjacent policy file, so making its path configurable created an invalid state without adding capability. This pre-1.0 preview does not carry schema-1 compatibility code.
 
-Names are lowercase DNS labels. `project` must be an absolute project directory, not root/home, and Dungeon config must be outside it. Providers are names, never secret values. Local image build paths and unqualified image names are rejected.
+Names are lowercase DNS labels; sandbox `name` is limited to 19 characters by OpenShell 0.0.116. `project` must be an absolute project directory, not root/home, and Dungeon config must be outside it. Providers are names, never secret values. Local image build paths and unqualified image names are rejected.
 
 ## Native policy
 
 `policy.json` is the single editable OpenShell policy input. `dungeon init` generates one starter development policy. Additional named profiles are deferred until live validation establishes real scenario-specific semantics.
 
-The starter policy requires Landlock `hard_requirement`, the non-root sandbox account, read-only system paths, writable guest `/sandbox` and `/tmp`, model endpoints, common development package endpoints, GitHub, and VS Code endpoints.
+The starter policy requires Landlock `hard_requirement`, the non-root sandbox account, read-only system paths, writable guest `/sandbox` and `/tmp`, model endpoints, `platform.claude.com:443` for Claude Code authentication, common development package endpoints, GitHub, and VS Code endpoints.
 
 Dungeon does not widen policy automatically. Inspected REST/TLS endpoints must use `enforcement: enforce`.
 

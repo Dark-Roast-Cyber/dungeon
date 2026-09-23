@@ -6,7 +6,7 @@ pub(crate) fn starter_policy() -> Value {
         "version": 1,
         "filesystem_policy": {
             "include_workdir": true,
-            "read_only": ["/usr", "/lib", "/proc", "/dev/urandom", "/app", "/etc", "/var/log"],
+            "read_only": ["/usr", "/lib", "/proc", "/dev/urandom", "/etc", "/var/log"],
             "read_write": ["/sandbox", "/tmp", "/dev/null"]
         },
         "landlock": {"compatibility": "hard_requirement"},
@@ -20,6 +20,7 @@ pub(crate) fn starter_policy() -> Value {
                     {"host":"auth.openai.com","port":443},
                     {"host":"chatgpt.com","port":443},
                     {"host":"claude.ai","port":443},
+                    {"host":"platform.claude.com","port":443},
                     {"host":"opencode.ai","port":443},
                     {"host":"models.dev","port":443},
                     {"host":"github.com","port":443},
@@ -123,5 +124,34 @@ mod tests {
         let network = policy["network_policies"].as_object().unwrap();
         assert_eq!(network.len(), 1);
         assert!(network.contains_key("default"));
+    }
+
+    #[test]
+    fn starter_policy_does_not_require_absent_app_directory() {
+        let policy = starter_policy();
+        let paths = policy["filesystem_policy"]["read_only"].as_array().unwrap();
+        assert!(!paths.iter().any(|path| path == "/app"));
+    }
+
+    #[test]
+    fn starter_policy_allows_claude_auth_endpoint_only_by_exact_name() {
+        let policy = starter_policy();
+        let endpoints = policy["network_policies"]["default"]["endpoints"]
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            endpoints
+                .iter()
+                .filter(
+                    |endpoint| endpoint["host"] == "platform.claude.com" && endpoint["port"] == 443
+                )
+                .count(),
+            1
+        );
+        assert!(!endpoints.iter().any(|endpoint| {
+            endpoint["host"]
+                .as_str()
+                .is_some_and(|host| host.contains('*'))
+        }));
     }
 }

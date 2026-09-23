@@ -143,13 +143,8 @@ impl<'a> Runtime<'a> {
         }
         self.checked(true, true)?;
         preflight_upload(&self.config.values.project, &self.config.values.project)?;
-        self.status(&[
-            "sandbox".into(),
-            "upload".into(),
-            self.config.values.name.clone(),
-            self.config.values.project.to_string_lossy().into_owned(),
-            GUEST_PROJECT.into(),
-        ])
+        // OpenShell nests named directories; uploading "." places their contents at the fixed guest path.
+        Ok(self.upload_command().status()?.code().unwrap_or(128))
     }
 
     pub(crate) fn connect_vscode(&self) -> Result<i32> {
@@ -205,6 +200,12 @@ impl<'a> Runtime<'a> {
             .current_dir(self.config.path.parent().expect("config parent"))
             .env_clear()
             .envs(self.env.iter());
+        command
+    }
+
+    fn upload_command(&self) -> Command {
+        let mut command = self.command(&upload_arguments(self.config), true);
+        command.current_dir(&self.config.values.project);
         command
     }
 
@@ -317,6 +318,16 @@ pub(crate) fn create_arguments(config: &Config, policy_path: &Path) -> Vec<Strin
     args
 }
 
+fn upload_arguments(config: &Config) -> Vec<String> {
+    vec![
+        "sandbox".into(),
+        "upload".into(),
+        config.values.name.clone(),
+        ".".into(),
+        GUEST_PROJECT.into(),
+    ]
+}
+
 fn host_environment(project: &Path) -> Result<HashMap<OsString, OsString>> {
     const ALLOWED: &[&str] = &[
         "HOME",
@@ -421,7 +432,7 @@ mod tests {
     use crate::policy::starter_policy;
 
     #[test]
-    fn create_arguments_do_not_upload_or_inject_env() {
+    fn create_does_not_upload_and_upload_uses_project_contents() {
         let config = Config {
             path: PathBuf::from("/tmp/dungeon.json"),
             values: ConfigDoc {
@@ -429,7 +440,7 @@ mod tests {
                 name: "demo".into(),
                 gateway: "local".into(),
                 workspace: "default".into(),
-                project: PathBuf::from("/tmp/project"),
+                project: PathBuf::from("/tmp/arbitrary-repo"),
                 image: "ghcr.io/nvidia/openshell-community/sandboxes/base:latest".into(),
                 agent: Agent::Opencode,
                 providers: vec![],
@@ -442,5 +453,42 @@ mod tests {
         assert!(args.iter().any(|arg| arg == "--no-auto-providers"));
         assert!(!args.iter().any(|arg| arg == "--upload"));
         assert!(!args.iter().any(|arg| arg == "--env"));
+        assert_eq!(
+            upload_arguments(&config),
+            ["sandbox", "upload", "demo", ".", "/sandbox/project"]
+        );
+        let runtime = Runtime {
+            config: &config,
+            env: HashMap::new(),
+            binary: PathBuf::from("/usr/bin/openshell"),
+        };
+        let upload = runtime.upload_command();
+        assert_eq!(
+            upload.get_current_dir(),
+            Some(config.values.project.as_path())
+        );
+        assert_eq!(
+            upload
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            [
+                "--gateway",
+                "local",
+                "--workspace",
+                "default",
+                "sandbox",
+                "upload",
+                "demo",
+                ".",
+                "/sandbox/project"
+            ]
+        );
+        assert_eq!(
+            runtime
+                .command(&["sandbox".into(), "get".into()], true)
+                .get_current_dir(),
+            config.path.parent()
+        );
     }
 }

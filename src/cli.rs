@@ -1,4 +1,6 @@
-use crate::config::{Agent, ConfigDoc, create_private_dir, load_config, safe_name, write_new};
+use crate::config::{
+    Agent, ConfigDoc, create_private_dir, load_config, safe_name, sandbox_name, write_new,
+};
 use crate::openshell::{GUEST_PROJECT, Runtime, create_arguments};
 use crate::policy::starter_policy;
 use crate::{Error, OPEN_SHELL_VERSION, Result};
@@ -265,8 +267,8 @@ fn initialize(
     let gateway =
         gateway.ok_or_else(|| Error::new("--gateway is required with --non-interactive"))?;
 
+    sandbox_name(&name)?;
     for (field, value) in [
-        ("name", name.as_str()),
         ("gateway", gateway.as_str()),
         ("workspace", workspace.as_str()),
     ] {
