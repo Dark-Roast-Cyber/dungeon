@@ -81,8 +81,8 @@ pub(crate) fn load_config(path: &Path) -> Result<Config> {
         return Err(Error::new("expected configuration schema 2"));
     }
 
+    sandbox_name(&values.name)?;
     for (field, value) in [
-        ("name", values.name.as_str()),
         ("gateway", values.gateway.as_str()),
         ("workspace", values.workspace.as_str()),
     ] {
@@ -175,6 +175,16 @@ pub(crate) fn safe_name(value: &str, field: &str) -> Result<()> {
         )));
     }
 
+    Ok(())
+}
+
+pub(crate) fn sandbox_name(value: &str) -> Result<()> {
+    safe_name(value, "name")?;
+    if value.len() > 19 {
+        return Err(Error::new(
+            "sandbox name must be at most 19 characters for OpenShell 0.0.116",
+        ));
+    }
     Ok(())
 }
 
@@ -350,6 +360,16 @@ mod tests {
         assert!(safe_name("demo", "name").is_ok());
         for value in ["--privileged", "../host", "UPPER", "bad_name", ""] {
             assert!(safe_name(value, "name").is_err());
+        }
+    }
+
+    #[test]
+    fn sandbox_name_matches_openshell_limit() {
+        assert!(sandbox_name("a123456789012345678").is_ok());
+        assert!(sandbox_name("a1234567890123456789").is_err());
+        for field in ["gateway", "workspace", "provider"] {
+            assert!(safe_name(&"a".repeat(63), field).is_ok());
+            assert!(safe_name(&"a".repeat(64), field).is_err());
         }
     }
 

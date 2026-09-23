@@ -19,14 +19,34 @@ Use one private directory per environment and pass `--config` explicitly. Dungeo
 
 Schema 2 deliberately removes the old `policy` field. `policy.json` is always the adjacent policy file, so making its path configurable created an invalid state without adding capability. This pre-1.0 preview does not carry schema-1 compatibility code.
 
-Names are lowercase DNS labels. `project` must be an absolute project directory, not root/home, and Dungeon config must be outside it. Providers are names, never secret values. Local image build paths and unqualified image names are rejected.
+Names are lowercase DNS labels; sandbox `name` is limited to 19 characters by OpenShell 0.0.116. `project` must be an absolute project directory, not root/home, and Dungeon config must be outside it. Providers are names, never secret values. Local image build paths and unqualified image names are rejected.
 
 ## Native policy
 
 `policy.json` is the single editable OpenShell policy input. `dungeon init` generates one starter development policy. Additional named profiles are deferred until live validation establishes real scenario-specific semantics.
 
-The starter policy requires Landlock `hard_requirement`, the non-root sandbox account, read-only system paths, writable guest `/sandbox` and `/tmp`, model endpoints, common development package endpoints, GitHub, and VS Code endpoints.
+The starter policy requires Landlock `hard_requirement`, the non-root sandbox account, read-only system paths, writable guest `/sandbox` and `/tmp`, model endpoints, `platform.claude.com:443` for Claude Code authentication, common development package endpoints, GitHub, and VS Code endpoints.
 
 Dungeon does not widen policy automatically. Inspected REST/TLS endpoints must use `enforcement: enforce`.
 
 Review `plan` before `create`. `runtime.json` is Dungeon-owned identity bookkeeping and must not be edited to bypass mismatch checks.
+
+
+## Planned reviewed setup imports
+
+No setup-import field exists in schema 2. That is intentional: the current runtime should be validated before adding another execution surface.
+
+The accepted future model will extend the single authoritative Dungeon configuration rather than introduce project-local auto-discovery or a parallel plugin configuration. The model is declarative and request-only:
+
+- `imports`: explicit host paths selected by the operator and snapshotted read-only;
+- `requirements`: binaries/tool versions expected from the reviewed image;
+- `state`: guest-private writable locations;
+- `network`: destinations a setup would like to use;
+- `credentials`: named provider/credential requirements only; and
+- `environment`: bounded guest-only variable assignments required to connect config and state.
+
+Raw credentials, shell snippets, host commands, arbitrary lifecycle hooks, privileged mounts, and engine sockets are not valid setup declarations.
+
+The resolved plan must show the requested data and capability diff before anything is applied. Missing network/provider authority does not cause automatic policy widening. Project content may request setup in a future model, but project-local requests are untrusted and cannot grant themselves access.
+
+A Neovim import is a useful first case: copy only the selected Neovim config into a read-only guest snapshot, keep Neovim data/state/cache guest-private, and treat Lua/editor configuration as guest-executable content. A Rust toolchain is supplied by the reviewed OCI image rather than installed from a host script; Cargo network or registry credentials remain explicit policy/provider concerns.

@@ -31,7 +31,7 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
-      - run: node --test npm/launcher/test/platform.test.mjs
+      - run: node --test npm/launcher/test/platform.test.mjs npm/test/stage-packages.test.mjs
       - run: npm pack --dry-run ./npm/launcher
       - name: Check package versions
         run: |
@@ -58,12 +58,16 @@ jobs:
         include:
           - os: ubuntu-26.04
             target: linux-x64
+            archive: tar
           - os: macos-26
             target: darwin-arm64
+            archive: tar
           - os: macos-26-intel
             target: darwin-x64
+            archive: tar
           - os: windows-2025
             target: win32-x64
+            archive: zip
     name: native-build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     steps:
@@ -76,3 +80,65 @@ jobs:
         if: runner.os != 'Windows'
       - run: target\release\dungeon.exe --version
         if: runner.os == 'Windows'
+      - name: Package Unix archive
+        if: matrix.archive == 'tar'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
+          mkdir -p dist/package "dist/native/${{ matrix.target }}"
+          cp target/release/dungeon LICENSE README.md dist/package/
+          cp target/release/dungeon "dist/native/${{ matrix.target }}/dungeon"
+          tar -C dist/package -czf "dist/dungeon-${version}-${{ matrix.target }}.tar.gz" dungeon LICENSE README.md
+      - name: Package Windows archive
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
+          New-Item -ItemType Directory -Force -Path dist/package | Out-Null
+          New-Item -ItemType Directory -Force -Path "dist/native/${{ matrix.target }}" | Out-Null
+          Copy-Item target/release/dungeon.exe,LICENSE,README.md dist/package/
+          Copy-Item target/release/dungeon.exe "dist/native/${{ matrix.target }}/dungeon.exe"
+          Compress-Archive -Path dist/package/* -DestinationPath "dist/dungeon-$version-${{ matrix.target }}.zip"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-${{ matrix.target }}
+          path: |
+            dist/dungeon-*
+            dist/native/**
+          if-no-files-found: error
+          retention-days: 7
+
+  npm-package:
+    needs: native-build
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: native-*
+          path: dist
+          merge-multiple: true
+      - run: node npm/stage-packages.mjs dist/native npm/staged
+      - name: Pack staged npm packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p npm/tarballs
+          for package in npm/staged/*; do
+            npm pack "$package" --pack-destination npm/tarballs
+          done
+          npm pack ./npm/launcher --pack-destination npm/tarballs
+          test "$(find npm/tarballs -maxdepth 1 -name '*.tgz' | wc -l)" -eq 5
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-package-tarballs
+          path: npm/tarballs/*.tgz
+          if-no-files-found: error
+          retention-days: 7

@@ -86,6 +86,6 @@ node --test npm/launcher/test/platform.test.mjs
 
 CI uses explicit GA runner images rather than mutable `*-latest` labels and pins third-party actions to immutable commits corresponding to stable releases.
 
-Read [architecture](docs/architecture.md), [configuration](docs/configuration.md), [security](SECURITY.md), [validation](docs/validation.md), and [distribution](docs/distribution.md).
+Read [architecture](docs/architecture.md), [configuration](docs/configuration.md), [security](SECURITY.md), [validation](docs/validation.md), [live validation runbook](docs/live-validation.md), and [distribution](docs/distribution.md).
 
 Apache-2.0. Third-party runtimes, agents, images, and desktop products retain their own licenses and service terms.

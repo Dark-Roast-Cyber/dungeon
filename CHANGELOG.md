@@ -7,11 +7,15 @@
 - Move `dungeon.json` to schema 2 and remove the redundant policy-path field; `policy.json` is always adjacent.
 - Collapse starter profiles into one starter development policy until live validation establishes meaningful scenario differences.
 - Remove the provisional in-guest `dungeon telltale` command; future Telltale integration remains independent retained collection.
-- Add a thin npm/npx launcher design with OS/CPU-specific native package templates. No postinstall downloader and no duplicate runtime logic.
+- Add native release archives for Linux x64, macOS arm64/x64, and Windows x64 with SHA-256 checksums.
+- Add a tag-gated GitHub prerelease workflow that verifies the tag against `Cargo.toml`, rebuilds from locked dependencies, and never runs on ordinary branch pushes.
+- Add a thin npm/npx launcher design with OS/CPU-specific native package templates. CI stages real native binaries into temporary packages and packs all five tarballs without publishing. No postinstall downloader and no duplicate runtime logic.
 - Add `dungeon auth codex` for Codex device-code authentication.
 - Add `dungeon auth claude` for Claude Code's vendor-native `/login` flow.
 - Keep OpenShell providers as the separate brokered API credential path.
 - Keep OpenCode authentication provider-specific. Grok is intentionally not added.
+- Bound the future declarative setup model: reviewed images own binaries/toolchains, imports are read-only snapshots, writable state is separate, and setup requests cannot silently widen policy or execute host hooks.
+- Pre-resolve the first Telltale integration around the existing production `opencode.sqlite` source and Event 3.0 pipeline; only the consistent external snapshot mechanism remains live-validation-dependent.
 
 ## 0.0.1
 
