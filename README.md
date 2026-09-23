@@ -1,6 +1,6 @@
 # Dungeon
 
-Terminal-first, policy-managed environments for coding agents. Part of the [Agent Archaeology](https://agentarchaeology.ai/) family, with planned integration with [Telltale](https://github.com/Dark-Roast-Cyber/telltale).
+Terminal-first, policy-managed environments for coding agents. Part of the [Agent Archaeology](https://agentarchaeology.ai/) family. Future [Telltale](https://github.com/Dark-Roast-Cyber/telltale) integration is deferred until Telltale 0.7.0/Event4 provides a stable downstream contract.
 
 **0.0.2 is the current development preview; v0.0.1 remains the latest published release. Neither is an audited isolation product.**
 
@@ -12,6 +12,7 @@ Terminal-first, policy-managed environments for coding agents. Part of the [Agen
 - Optional VS Code and SSH attachment.
 - Explicit config, policy, project upload, and runtime identity checks.
 - One starter OpenShell policy. Additional profiles will wait for validated scenario differences.
+- A validated rootless-Podman/OpenShell path; broader runtime/platform support remains explicit future validation.
 
 Dungeon targets **OpenShell 0.0.116**. The OpenShell version is intentionally pinned because Dungeon validates version-sensitive CLI and structured-output contracts; 0.0.116 is the current upstream release. Windows management is intended through WSL2 or a supported remote Linux host; native Windows workload containment is not claimed.
 

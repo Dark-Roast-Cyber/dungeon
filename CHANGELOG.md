@@ -6,7 +6,7 @@
 - Split the Rust implementation into plain `cli`, `config`, `policy`, and `openshell` responsibility modules without introducing traits or sub-crates.
 - Move `dungeon.json` to schema 2 and remove the redundant policy-path field; `policy.json` is always adjacent.
 - Collapse starter profiles into one starter development policy until live validation establishes meaningful scenario differences.
-- Remove the provisional in-guest `dungeon telltale` command; future Telltale integration remains independent retained collection.
+- Remove the provisional in-guest `dungeon telltale` command; Telltale integration is deferred until Telltale 0.7.0/Event4 provides a stable downstream contract.
 - Add native release archives for Linux x64, macOS arm64/x64, and Windows x64 with SHA-256 checksums.
 - Add a tag-gated GitHub prerelease workflow that verifies the tag against `Cargo.toml`, rebuilds from locked dependencies, and never runs on ordinary branch pushes.
 - Add a thin npm/npx launcher design with OS/CPU-specific native package templates. CI stages real native binaries into temporary packages and packs all five tarballs without publishing. No postinstall downloader and no duplicate runtime logic.
@@ -15,7 +15,8 @@
 - Keep OpenShell providers as the separate brokered API credential path.
 - Keep OpenCode authentication provider-specific. Grok is intentionally not added.
 - Bound the future declarative setup model: reviewed images own binaries/toolchains, imports are read-only snapshots, writable state is separate, and setup requests cannot silently widen policy or execute host hooks.
-- Pre-resolve the first Telltale integration around the existing production `opencode.sqlite` source and Event 3.0 pipeline; only the consistent external snapshot mechanism remains live-validation-dependent.
+- Preserve the successful synthetic OpenCode SQLite snapshot/download experiment as deferred research rather than binding Dungeon to Telltale's moving pre-0.7 contracts.
+- Reorient near-term work around a reviewed agent image, one-command local setup, simplified lifecycle, safe project export, and then reviewed editor/tool configuration imports.
 
 ## 0.0.1
 

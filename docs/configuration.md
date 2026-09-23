@@ -34,7 +34,7 @@ Review `plan` before `create`. `runtime.json` is Dungeon-owned identity bookkeep
 
 ## Planned reviewed setup imports
 
-No setup-import field exists in schema 2. That is intentional: the current runtime should be validated before adding another execution surface.
+No setup-import field exists in schema 2. The design is accepted, but implementation follows the reviewed image, local setup/lifecycle, and safe project-export slices so the normal contained development loop stabilizes first.
 
 The accepted future model will extend the single authoritative Dungeon configuration rather than introduce project-local auto-discovery or a parallel plugin configuration. The model is declarative and request-only:
 
