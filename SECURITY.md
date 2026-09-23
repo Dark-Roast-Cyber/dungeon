@@ -1,6 +1,6 @@
 # Security boundary
 
-Dungeon 0.0.x is an engineering preview. It has not undergone an independent audit or live containment validation.
+Dungeon 0.0.x is an engineering preview and has not undergone an independent security audit. Issue #1 performed live synthetic validation of one OpenShell 0.0.116 + rootless Podman 5.8.4 combination; that evidence does not generalize to other drivers, platforms, images, desktop clients, or EDR products.
 
 Trust the host administrator, Dungeon binary/configuration, OpenShell CLI/gateway/driver, selected image, and explicitly exposed credential/tool services. Treat the coding agent, project content, downloaded code, and agent-authored session records as untrusted.
 
@@ -19,5 +19,5 @@ OpenShell providers can grant authority even when raw secrets are brokered. `dun
 - Guest/session durability is backend-specific.
 - Mutable images/provider content can change without changing Dungeon's fingerprint.
 - Host EDR does not imply guest-process visibility.
-- Independent Telltale evidence collection is not implemented yet.
+- Telltale integration is intentionally deferred until Telltale 0.7.0/Event4 stabilizes the downstream contract.
 - npm scope ownership, platform package provenance, and publishing credentials must be validated before npm publication.

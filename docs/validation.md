@@ -11,7 +11,7 @@ CI checks formatting, Clippy, locked Rust tests, release compilation, CLI versio
 - npm launcher validation targets Node 24 LTS.
 - OpenShell 0.0.116 is an intentional compatibility pin because Dungeon consumes version-sensitive CLI and structured-output contracts.
 
-Offline tests cover strict duplicate-key JSON, safe names, schema rejection, starter-policy requirements, create arguments, auth command scope, removed provisional commands, native launcher selection, npm staging, and native archive production. These do not prove successful OAuth exchange, OpenShell enforcement, guest isolation, endpoint-security visibility, or desktop compatibility.
+Offline tests cover strict duplicate-key JSON, safe names, schema rejection, starter-policy requirements, create arguments, auth command scope, removed provisional commands, native launcher selection, npm staging, and native archive production. They do not replace live isolation, vendor-auth, image/tooling, remote-editor, endpoint-security, or platform validation.
 
 ## Native release gate
 
@@ -45,9 +45,10 @@ An OpenShell MicroVM attempt on this host remained Provisioning with a guest Lan
 | Persistence | project/session survival and deletion behavior |
 | Upload | destination, symlinks, partial failure, overwrite |
 | Remote | VS Code and each desktop path with credential boundary |
-| Telltale | independent source discovery/failure/durability when implemented |
+| Agent image | pinned versions launch/authenticate and can perform a bounded synthetic task |
+| Project return | staged export cannot silently overwrite conflicting host work |
 | EDR | supported sensor observes/controls attributed guest process |
 
 ## Release
 
-Creating the reviewed version tag is the explicit native-release authorization step. npm publication remains a separate future gate. Live OpenShell validation remains required before broadening runtime support claims.
+Creating the reviewed version tag is the explicit native-release authorization step. npm publication remains a separate future gate. Runtime support claims remain limited to the exact validated combinations. The next validation emphasis is the reviewed agent image and low-friction developer loop.

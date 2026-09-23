@@ -1,21 +1,46 @@
 # Roadmap
 
-## 0.0.2: native foundation
+## 0.0.2: validated native foundation
 
-Converge on one Rust binary, one config schema, one starter policy, one OpenShell subprocess boundary, native release artifacts, and a thin npm/npx launcher. Keep the implementation small enough to validate directly before adding frameworks or compatibility layers.
+Dungeon has converged on one Rust binary, one config schema, one starter policy, one OpenShell subprocess boundary, native release artifacts, and a thin npm/npx launcher.
 
-Code-side distribution packaging is complete when CI produces the four native archives and five staged npm tarballs without publishing. The remaining 0.0.2 product gate is live OpenShell validation and any focused defects it exposes.
+Issue #1 validated the primary Linux path with OpenShell 0.0.116 and rootless Podman 5.8.4 using an immutable community-image digest. The run exercised runtime identity, project isolation, policy denials, allowed network, PTY/exit behavior, stop/start persistence, config mismatch refusal, policy drift refusal, SSH, and vendor authentication boundaries. The resulting Dungeon defects are fixed on PR #4.
 
-## Next: prove the execution boundary
+The recorded Podman combination is validated. MicroVM, desktop-client containment, EDR visibility, and broader platform claims remain separate work.
 
-Validate a pinned OpenShell image/gateway, OpenCode, Claude Code, Codex, vendor login, terminals, stop/resume, policy denials, persistence, VS Code, and desktop SSH. Replace intended-support statements only with reproducible evidence.
+## 0.0.3: low-friction contained development
 
-## Next: observation and adoption
+The next milestone is developer usability, not telemetry integration.
 
-Add independent Telltale collection with durable delivery, source health, correlation, and teardown retention.
+The target experience is that a developer can create an isolated environment, authenticate an agent, work normally, stop/resume it, and safely get changes back without learning OpenShell internals or weakening containment.
 
-The declarative setup/import design is now bounded: reviewed OCI images remain the binary/toolchain authority; host imports are reviewed read-only snapshots; writable state is separate; requested network/credential capabilities never widen policy automatically; and no host execution hooks or plugin ABI are introduced. Implementation remains deferred until the execution boundary is live-validated so it does not expand the first validation surface.
+Work in dependency order:
+
+1. **Reviewed agent image — Issue #6.** Build one small Dungeon-owned image from a pinned OpenShell-compatible base with explicitly pinned, tested OpenCode, Claude Code, and Codex versions. Do not create an image/plugin ecosystem or dynamic agent updater.
+2. **One-command local setup — Issue #7.** Make the validated Linux/rootless-Podman path discoverable and reproducible through Dungeon without duplicating OpenShell's control plane.
+3. **Daily lifecycle — Issue #8.** Reduce create/start/upload/run/stop ceremony while keeping security transitions and overwrite risks explicit.
+4. **Safe project export — Issue #9.** Stage guest changes on the host, show the proposed change set, detect conflicts, and require approval before mutating the authoritative host project. Do not replace this with a writable bind mount.
+5. **Reviewed tool/editor imports — Issue #5.** After the core loop is comfortable, add explicit read-only configuration snapshots and separate guest-private writable state without host execution hooks.
+
+## Platform validation
+
+After the contained Linux developer loop is stable:
+
+- validate VS Code Remote workflows;
+- validate WSL2/Windows management;
+- validate macOS;
+- revisit OpenShell MicroVM when its Landlock/runtime behavior is compatible with Dungeon's hard requirement;
+- validate Claude Desktop and ChatGPT Desktop connection paths separately from generic SSH;
+- validate EDR visibility/control separately from Dungeon/OpenShell isolation.
+
+## Deferred Telltale integration
+
+Telltale integration is intentionally **not active roadmap work** while Telltale completes its 0.7 semantic/runtime convergence.
+
+Issue #2 is closed as deferred. Revisit integration only after Telltale 0.7.0 ships with Event4 as the intended external telemetry contract and the relevant privacy, durability, identity, source-health, and embedding/acquisition boundaries are stable enough for a downstream dependency.
+
+Issue #1's synthetic OpenCode SQLite snapshot result is preserved as research, not as an architecture commitment. Dungeon must not add Event 3 compatibility, transitional Telltale models, collection state, or a collector framework in the meantime.
 
 ## Later
 
-Managed OpenCode serve/attach lifecycle, reviewed export/session migration, organization policy integration, validated EDR deployments, npm registry publication after scope/provenance setup, and another backend only after a concrete need is established.
+Later work may include managed OpenCode serve/attach lifecycle, organization policy integration, mature remote/desktop workflows, npm registry publication after scope/provenance setup, and another isolation backend only after a concrete validated need exists.

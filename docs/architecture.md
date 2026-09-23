@@ -1,6 +1,6 @@
 # Architecture
 
-Dungeon owns setup and lifecycle coordination. OpenShell owns workload isolation and policy enforcement. Agent interfaces own conversations and credential stores. Telltale integration is intentionally deferred until evidence can be collected independently of the workload.
+Dungeon owns setup and lifecycle coordination. OpenShell owns workload isolation and policy enforcement. Reviewed images own the installed agent/tool versions. Agent interfaces own conversations and credential stores. Telltale is not part of the active runtime architecture.
 
 ```text
 Host CLI
@@ -41,10 +41,21 @@ Reuse verifies identity and policy drift. These checks are not kernel/image atte
 
 No host dotfiles, editor caches, agent databases, private SSH keys, engine sockets, or credential directories are copied automatically.
 
-## Telltale boundary
+## Product boundary
 
-There is no provisional in-guest Telltale command. The accepted future integration is independent collection with retained evidence and explicit source health. Dungeon should not add a weaker compatibility path before that work is validated.
+Dungeon's near-term product is a low-friction contained development environment:
 
+```text
+developer
+  -> Dungeon setup/lifecycle/project transfer
+  -> OpenShell isolation and native policy enforcement
+  -> reviewed agent image
+  -> agent + tools + isolated project copy
+```
+
+The host project remains authoritative. Dungeon does not make the sandbox a writable view of the host project. Normal development should converge on explicit upload plus safe staged export rather than weakening containment with a writable bind mount.
+
+A reviewed Dungeon image may pin compatible agent/tool versions, but it does not own vendor authentication formats, models, or session protocols.
 
 ## Declarative setup boundary
 
@@ -85,22 +96,10 @@ Development Container Features may be useful as **review input** for image const
 
 If organization policy is added later, it is a ceiling. Private host configuration, project requests, guided setup, invocation flags, or AI-proposed configuration may narrow or request within that ceiling but cannot weaken it.
 
-## Telltale collection direction
+## Deferred Telltale boundary
 
-The first independent Telltale integration should reuse Telltale's existing production OpenCode source and output contracts rather than introduce a Dungeon-specific source or event.
+There is no Telltale command, dependency, collector, event model, or persistent collection state in Dungeon.
 
-The intended first slice is:
+Telltale integration is deferred until Telltale 0.7.0 is released with Event4 as the intended external telemetry contract and the relevant downstream integration boundaries are stable. Dungeon must not bind to transitional Event 3, NormalizedRecord, Canonical Observation v2 migration details, or current collector internals.
 
-```text
-guest OpenCode opencode.db
-    -> completed SQLite snapshot after OpenCode exits
-    -> private host acquisition root
-    -> telltale scan --client opencode
-    -> current Telltale privacy/detection/state/durable output
-```
-
-Current pushed Telltale production still uses `NormalizedRecordV1` and Rule v1, with Event 3.0 as the frozen external compatibility contract. `opencode.sqlite` is the authoritative OpenCode production source identity. Dungeon must not make Event4, Canonical Observation v2, or Detection v2 activation a prerequisite for this integration.
-
-For a rooted Linux scan, Telltale expects the staged OpenCode database at `<root>/.local/share/opencode/opencode.db`. The retained Telltale log/state/outbox belong outside the sandbox and outside agent write authority.
-
-Issue #1 established this synthetic acquisition path with OpenCode 1.2.18 and OpenShell 0.0.116 on rootless Podman: the guest database at `/sandbox/.local/share/opencode/opencode.db` used WAL; after OpenCode exited, `opencode db "VACUUM INTO ..."` completed a single-file snapshot; `openshell sandbox download` placed it in a private host acquisition root; SQLite `integrity_check` returned `ok`. The completed snapshot was staged at `<root>/.local/share/opencode/opencode.db` for Telltale's existing `opencode.sqlite` source. No new Telltale source/schema is needed, and Event 3.0 remains the current compatibility output. Guest data can be tampered with or incomplete before acquisition; the completed snapshot and retained Telltale output must be stored outside workload write authority. This is not a live-main-file copying contract, a production collection guarantee, or a validated MicroVM path.
+Issue #1 proved that a post-exit OpenCode SQLite snapshot can be transferred outside workload write authority on one Podman combination. That result is preserved in deferred Issue #2 only as research. It is not an active Dungeon architecture contract.
