@@ -1,6 +1,7 @@
 /target/
 /dist/
 /node_modules/
+/images/agent/node_modules/
 *.tgz
 runtime.json
 *.log

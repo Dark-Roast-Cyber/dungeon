@@ -27,6 +27,12 @@ cargo build --release
 
 Install OpenShell separately and register a gateway.
 
+The [local reviewed agent image](images/agent/README.md) pins current OpenCode,
+Claude Code, and Codex distributions on the validated base. Build it with
+rootless Podman and explicitly select `localhost/dungeon-agent:0.0.3-dev` with
+`dungeon init --image`. It is not published or selected by default; publication
+and provenance remain separate work.
+
 ## First environment
 
 ```sh

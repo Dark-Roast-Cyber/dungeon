@@ -1,0 +1,36 @@
+FROM ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e AS base
+
+FROM base AS tools
+USER root
+WORKDIR /usr/lib/node_modules/dungeon-agent
+COPY package.json pnpm-lock.yaml verify.cjs ./
+# Bootstrap the manifest's pnpm version without running a remote installer.
+RUN set -eu; \
+    version=$(node -p 'require("./package.json").packageManager.split("@")[1]'); \
+    curl -fsSL "https://registry.npmjs.org/pnpm/-/pnpm-${version}.tgz" -o /tmp/pnpm.tgz; \
+    echo 'bfcc1bcbad279b13a516c446a75b3c58b6904b45d57a1951411015e50b751a80  /tmp/pnpm.tgz' | sha256sum -c -; \
+    mkdir /tmp/pnpm; \
+    tar -xzf /tmp/pnpm.tgz -C /tmp/pnpm --strip-components=1; \
+    node /tmp/pnpm/bin/pnpm.cjs install --frozen-lockfile --ignore-scripts --store-dir /tmp/pnpm-store
+# Fail closed if a vendor postinstall tries to fetch a missing optional binary.
+RUN --network=none node /tmp/pnpm/bin/pnpm.cjs rebuild \
+    && node verify.cjs \
+    && chmod -R go-w /usr/lib/node_modules/dungeon-agent
+
+FROM base
+USER root
+RUN rm -f /usr/bin/opencode /usr/bin/codex /usr/local/bin/claude \
+    && rm -rf /usr/lib/node_modules/opencode-ai /usr/lib/node_modules/@openai/codex
+COPY --from=tools /usr/lib/node_modules/dungeon-agent /usr/lib/node_modules/dungeon-agent
+RUN node -e 'const fs = require("node:fs"), path = require("node:path"); \
+    const root = "/usr/lib/node_modules/dungeon-agent/node_modules"; \
+    for (const name of Object.keys(require(root + "/../package.json").dependencies)) { \
+      const dir = path.join(root, name), pkg = require(dir + "/package.json"); \
+      for (const [command, binary] of Object.entries(pkg.bin)) \
+        fs.symlinkSync(path.join(dir, binary), "/usr/local/bin/" + command); \
+    }'
+ENV HOME=/sandbox
+WORKDIR /sandbox
+USER sandbox
+RUN --network=none node /usr/lib/node_modules/dungeon-agent/verify.cjs --path \
+    && rm -rf /sandbox/.codex /sandbox/.cache /sandbox/.config /sandbox/.local /tmp/opencode /tmp/.bun-*

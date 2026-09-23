@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased image candidate (0.0.3)
+
+- Add one local Linux agent image with a digest-pinned OpenShell base, exact official OpenCode V2/Claude Code/Codex packages, a pnpm integrity lock, and build-time CLI version checks. No image publication, default-image change, policy expansion, or host-state import.
+
 ## Unreleased (0.0.2)
 
 - Replace the unpublished Python implementation with one Rust CLI.

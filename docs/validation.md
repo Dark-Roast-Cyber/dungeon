@@ -37,6 +37,94 @@ An OpenShell MicroVM attempt on this host remained Provisioning with a guest Lan
 
 ## Live gates
 
+### Issue #6 local image candidate
+
+The [image build instructions and supply-chain boundary](../images/agent/README.md)
+describe a local-only candidate on Issue #1's unchanged base digest. The reviewed
+package set is OpenCode V2 2.0.14, Claude Code stable 2.1.267, and Codex 0.156.1,
+with base-provided Node 22.22.1 and build-only pnpm 10.33.0. These are observations
+for this candidate; `images/agent/package.json` and its lock are the build inputs.
+
+The frozen-lock installation and offline vendor setup scripts are followed by
+`verify.cjs`, which checks exact CLI output against the manifest. Direct container
+checks must run without authentication; vendor login and edit/test evidence must
+come from a separate OpenShell sandbox with the existing hard Landlock policy.
+Image build/version success alone does not establish contained agent usability.
+
+The corrected local amd64 candidate built on rootless Podman 5.8.4. Image ID:
+`c0d3c28cdc9da1c7bae2ca06870e73505eee3003905caa42ee2a129397e7959b`;
+local digest: `sha256:8ee097043582f4f3cd1b2f8e0981553b7f0889e496ceecc2dab13dcf153e48de`.
+Containerfile SHA-256:
+`60926d39e141b7cc498ed56bdb23660d600a6285c21e0a2885fc7b25e40fead5`.
+The image is 4,434,995,801 bytes including inherited base layers. Offline direct
+checks passed for all three version outputs, UID/GID 998, writable `/sandbox`,
+root-owned non-writable tool installation, basic bash/git/curl/Node availability,
+and absent engine sockets. Build-only pnpm caches are absent from the final
+filesystem. History inspection found no added credentials or secret inputs.
+The final-stage version check removes its transient guest state/cache, logs,
+and helper paths before the image is committed. A no-cache rebuild of the
+versioned package set produced identical vendor binary SHA-256 sums; a final
+cache-cleanup-only rebuild preserved those same sums. OCI image metadata/digest
+was not bit-for-bit identical.
+
+Repository formatting, Clippy, all 12 Rust tests, release build, and all four
+Node launcher/package tests passed. The Node tests passed under both host Node
+22.22.2 and the supported Node 24.21.0 runtime, downloaded from nodejs.org and
+verified against its published SHA-256 sums. Launcher packing with pnpm also
+succeeded (host Node 22 emitted the expected engine warning).
+
+The same package-version candidate, before the final cache/pruning-only image
+rebuild, reached Ready under OpenShell 0.0.116 with the unchanged
+hard Landlock policy. Upload landed directly at `/sandbox/project`; protected
+reads/writes and `https://example.com` were denied. Allowed OpenCode and Claude
+endpoints responded, and no engine socket was present. An initial image defect
+(broken relative paths in symlinked pnpm shims) was fixed by linking directly to
+vendor-declared binaries and adding final non-root PATH checks.
+
+OpenCode completed the synthetic read/edit/test task and exited successfully
+using its own default `mimo-v2.6-flash-free` selection. Dungeon did not select or
+override that model. The test script's hash remained unchanged. Claude reached
+interactive onboarding through `dungeon auth claude`. Claude authentication,
+edit/test, and authenticated stop/start persistence are **NOT TESTABLE** in this
+run because the operator has no Claude account. This is an account prerequisite,
+not an observed image failure. [Issue #11](https://github.com/Dark-Roast-Cyber/dungeon/issues/11)
+requests a tester with an eligible account; the user explicitly deferred these checks.
+
+No OpenCode free-tier refusal occurred in this Issue #6 run: its agent-selected
+model completed the synthetic task. That result does not generalize to every
+OpenCode provider or account.
+
+Codex `0.156.1` authenticated through official ChatGPT device login inside the
+guest. `codex login status` reported `Logged in using ChatGPT`; only directory
+ownership and modes were inspected (`/sandbox/.codex` owned by `sandbox`,
+`auth.json` mode 600), not credential contents. Its TUI launched in
+`/sandbox/project` with its own GPT-6-Astra default, without a Dungeon model
+override. Codex's built-in Linux `bwrap` sandbox could not create a user
+namespace within this OpenShell Podman guest. It offered per-command approvals
+to execute within the guest but outside the **inner Codex** sandbox. Two
+one-time approvals for the synthetic read and edit/test commands allowed the
+task to complete; `./test.sh` passed and the unchanged test-script hash was
+confirmed. Therefore task behavior is **DEGRADED** (requires approvals), not
+fully autonomous. The Issue #1 stale-CLI/model incompatibility did **not**
+recur, but inner sandbox availability is still a daily-workflow limitation.
+
+After `dungeon stop`/`start`, the same sandbox ID returned Ready, the synthetic
+project and test result survived, `codex login status` still reported logged in,
+and the guest-owned state paths retained their modes. Protected `/etc/shadow`
+reads and `/etc` writes were denied, `https://example.com` returned a denied
+CONNECT (403), and no engine socket was present. Network responses from
+`auth.openai.com` and `chatgpt.com` after login were HTTP 403; the successful
+device login and model task are stronger evidence of functional Codex access
+than these unauthenticated curl probes.
+
+The OpenShell gateway needed mTLS/JWT bootstrap and a sandbox-reachable Podman
+callback endpoint to get past provisioning. Those were dedicated gateway
+configuration steps, not changes to Dungeon policy or the agent image.
+Publication/provenance, default-image selection, and Issue #7 are not
+authorized by this candidate.
+
+### Remaining gates
+
 | Gate | Evidence |
 | --- | --- |
 | Runtime | exact CLI/gateway/driver/kernel/image and create/start/stop |
