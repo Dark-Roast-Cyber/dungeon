@@ -18,6 +18,8 @@ OpenShell providers can grant authority even when raw secrets are brokered. `dun
 - Project upload is explicit but is not a secret scanner or immutable snapshot.
 - Guest/session durability is backend-specific.
 - Mutable images/provider content can change without changing Dungeon's fingerprint.
+- The [local agent image candidate](images/agent/README.md) pins its base and agent distributions but inherits upstream base layers, including Node 22.22.1 with reported security-update debt. Local testing is not an image audit or publication approval.
+- Inside the tested OpenShell Podman guest, Codex's inner `bwrap` sandbox could not start. Explicit one-time approval ran the synthetic task outside Codex's sandbox, still within OpenShell's hard policy; do not mistake this for two working layers of containment.
 - Host EDR does not imply guest-process visibility.
 - Telltale integration is intentionally deferred until Telltale 0.7.0/Event4 stabilizes the downstream contract.
 - npm scope ownership, platform package provenance, and publishing credentials must be validated before npm publication.

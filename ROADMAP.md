@@ -16,7 +16,7 @@ The target experience is that a developer can create an isolated environment, au
 
 Work in dependency order:
 
-1. **Reviewed agent image — Issue #6.** Build one small Dungeon-owned image from a pinned OpenShell-compatible base with explicitly pinned, tested OpenCode, Claude Code, and Codex versions. Do not create an image/plugin ecosystem or dynamic agent updater.
+1. **Reviewed agent image — Issue #6.** The [local image candidate](images/agent/README.md) pins official OpenCode, Claude Code, and Codex packages on the validated immutable base. OpenCode edited/tested the synthetic fixture; Codex edited/tested with explicit approvals because its inner sandbox cannot create a user namespace under OpenShell. Claude launched to vendor login, with account-dependent checks delegated to [Issue #11](https://github.com/Dark-Roast-Cyber/dungeon/issues/11). Publication/provenance and default-image selection require separate approval. No image/plugin ecosystem or dynamic agent updater.
 2. **One-command local setup — Issue #7.** Make the validated Linux/rootless-Podman path discoverable and reproducible through Dungeon without duplicating OpenShell's control plane.
 3. **Daily lifecycle — Issue #8.** Reduce create/start/upload/run/stop ceremony while keeping security transitions and overwrite risks explicit.
 4. **Safe project export — Issue #9.** Stage guest changes on the host, show the proposed change set, detect conflicts, and require approval before mutating the authoritative host project. Do not replace this with a writable bind mount.

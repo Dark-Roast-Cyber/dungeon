@@ -57,6 +57,12 @@ The host project remains authoritative. Dungeon does not make the sandbox a writ
 
 A reviewed Dungeon image may pin compatible agent/tool versions, but it does not own vendor authentication formats, models, or session protocols.
 
+The local candidate in [`images/agent`](../images/agent/README.md) implements
+that version boundary with a digest-pinned OpenShell base and one locked package
+installation. Tools are root-owned under `/usr/lib/node_modules/dungeon-agent`,
+within the existing policy paths. Building or selecting the image does not
+change Dungeon policy or its default image, and does not import host agent state.
+
 ## Declarative setup boundary
 
 Reusable editor/tool setup must remain data, not a host plugin mechanism. The accepted first design keeps the reviewed OCI image as the authority for installed binaries and toolchains. Dungeon does not add a second package manager or execute host configuration scripts to construct an environment.
