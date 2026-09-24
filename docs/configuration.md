@@ -31,7 +31,16 @@ The starter policy requires Landlock `hard_requirement`, the non-root sandbox ac
 
 Dungeon does not widen policy automatically. Inspected REST/TLS endpoints must use `enforcement: enforce`.
 
-Review `plan` before `create`. `runtime.json` is Dungeon-owned identity bookkeeping and must not be edited to bypass mismatch checks.
+Review `plan` before `up`. `runtime.json` is Dungeon-owned identity bookkeeping and must not be edited to bypass mismatch checks.
+
+Use the same explicit config for lifecycle commands: `dungeon --config PATH up`,
+`run opencode` (or another supported command), and `down`. First `up` creates
+the sandbox and uploads the configured project once. Subsequent `up` resumes
+without uploading, and does nothing if the sandbox is already Ready. `run`
+starts a stopped sandbox already bound to this config without uploading.
+`down` stops but preserves guest state. To intentionally refresh/recover the
+guest project, use `dungeon --config PATH upload --yes`; it overwrites the guest
+copy and may discard guest-side changes. No export command exists yet.
 
 
 ## Planned reviewed setup imports

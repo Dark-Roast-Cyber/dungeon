@@ -26,6 +26,12 @@ pub(crate) fn setup() -> Result<i32> {
 const LABEL: &str = "agentarchaeology.ai/dungeon-config";
 pub(crate) const GUEST_PROJECT: &str = "/sandbox/project";
 
+#[derive(PartialEq, Eq)]
+enum Phase {
+    Ready,
+    Stopped,
+}
+
 pub(crate) struct Runtime<'a> {
     config: &'a Config,
     env: HashMap<OsString, OsString>,
@@ -33,6 +39,83 @@ pub(crate) struct Runtime<'a> {
 }
 
 impl<'a> Runtime<'a> {
+    fn phase(remote: &Value) -> Result<Phase> {
+        match Self::remote_str(remote, "phase")? {
+            "Ready" => Ok(Phase::Ready),
+            "Stopped" => Ok(Phase::Stopped),
+            phase => Err(Error::new(format!(
+                "sandbox is {phase}; inspect status before continuing"
+            ))),
+        }
+    }
+
+    pub(crate) fn up(&self) -> Result<i32> {
+        if !self.config.state_path().exists() {
+            self.create()?;
+            let code = self.upload().map_err(|error| Error::new(format!(
+                "environment created, but initial project upload failed: {error}; sandbox preserved; retry with upload --yes"
+            )))?;
+            if code != 0 {
+                return Err(Error::new(format!(
+                    "environment created, but initial project upload failed (exit {code}); sandbox preserved; retry with upload --yes"
+                )));
+            }
+            println!("Environment Ready; initial project uploaded.");
+        } else {
+            match Self::phase(&self.checked(false, true)?)? {
+                Phase::Ready => println!("Environment already up; guest project unchanged."),
+                Phase::Stopped => {
+                    self.start()?;
+                    println!("Environment Ready; existing guest work preserved (no upload).");
+                }
+            }
+        }
+        Ok(0)
+    }
+
+    pub(crate) fn run_agent(&self, command: &[String], tty: bool) -> Result<i32> {
+        if Self::phase(&self.checked(false, true)?)? == Phase::Stopped {
+            self.start()?;
+        }
+        self.execute(command, tty, GUEST_PROJECT)
+    }
+
+    pub(crate) fn start(&self) -> Result<i32> {
+        match Self::phase(&self.checked(false, true)?)? {
+            Phase::Ready => Ok(0),
+            Phase::Stopped => {
+                let code = self.lifecycle_command("start")?;
+                if code != 0 {
+                    return Err(Error::new(format!(
+                        "sandbox start failed (exit {code}); no replacement created"
+                    )));
+                }
+                self.checked(true, true).map_err(|error| Error::new(format!(
+                    "sandbox started but Ready/policy verification failed: {error}; no agent launched"
+                )))?;
+                Ok(0)
+            }
+        }
+    }
+
+    pub(crate) fn down(&self) -> Result<i32> {
+        match Self::phase(&self.checked(false, false)?)? {
+            Phase::Stopped => println!("Environment already stopped; guest state preserved."),
+            Phase::Ready => {
+                let code = self.lifecycle_command("stop")?;
+                if code != 0 {
+                    return Err(Error::new(format!("sandbox stop failed (exit {code})")));
+                }
+                if Self::phase(&self.checked(false, false)?)? != Phase::Stopped {
+                    return Err(Error::new(
+                        "sandbox stop returned success but sandbox is not Stopped",
+                    ));
+                }
+                println!("Environment stopped; guest project, sessions and auth preserved.");
+            }
+        }
+        Ok(0)
+    }
     pub(crate) fn new(config: &'a Config) -> Result<Self> {
         let env = host_environment(Some(&config.values.project))?;
         let binary =
@@ -181,17 +264,7 @@ impl<'a> Runtime<'a> {
         ])
     }
 
-    pub(crate) fn lifecycle(&self, action: &str) -> Result<i32> {
-        match action {
-            "start" => {
-                self.checked(false, true)?;
-            }
-            "stop" => {
-                self.checked(false, false)?;
-            }
-            _ => return Err(Error::new("unsupported lifecycle action")),
-        }
-
+    fn lifecycle_command(&self, action: &str) -> Result<i32> {
         self.status(&[
             "sandbox".into(),
             action.into(),
@@ -276,7 +349,11 @@ impl<'a> Runtime<'a> {
             ));
         }
 
-        let remote = self.get()?;
+        let remote = self.get().map_err(|error| {
+            Error::new(format!(
+                "bound sandbox unavailable; refusing to create or adopt a replacement: {error}"
+            ))
+        })?;
         self.check_identity(&remote)?;
 
         if Self::remote_str(&remote, "id")? != state.id {
@@ -444,6 +521,226 @@ mod tests {
     use super::*;
     use crate::config::{Agent, ConfigDoc};
     use crate::policy::starter_policy;
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    #[cfg(unix)]
+    struct Fixture {
+        root: tempfile::TempDir,
+        config: Config,
+        binary: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl Fixture {
+        fn new() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            let project = root.path().join("project");
+            fs::create_dir(&project).unwrap();
+            fs::write(project.join("file"), "host").unwrap();
+            let config = Config {
+                path: root.path().join("dungeon.json"),
+                policy_path: root.path().join("policy.json"),
+                values: ConfigDoc {
+                    schema: 2,
+                    name: "demo".into(),
+                    gateway: "local".into(),
+                    workspace: "default".into(),
+                    project,
+                    image: "localhost/test:1".into(),
+                    agent: Agent::Opencode,
+                    providers: vec![],
+                },
+                policy: starter_policy(),
+                fingerprint: "fingerprint".into(),
+            };
+            let binary = root.path().join("openshell");
+            let policy = serde_json::to_string(&config.policy).unwrap();
+            fs::write(&binary, format!(r#"#!/bin/sh
+root='{}'
+printf '%s\n' "$*" >> "$root/calls"
+case " $* " in
+  *' sandbox create '*) echo Ready > "$root/phase" ;;
+  *' sandbox start '*) test ! -e "$root/fail-start" || exit 9; echo Ready > "$root/phase" ;;
+  *' sandbox stop '*) echo Stopped > "$root/phase" ;;
+  *' sandbox upload '*) test ! -e "$root/fail-upload" || exit 8 ;;
+  *' sandbox get '*)
+    test -e "$root/phase" || exit 7
+    phase=$(cat "$root/phase")
+    id=original
+    test ! -e "$root/replaced" || id=replacement
+    label=fingerprint
+    test ! -e "$root/mismatch" || label=other
+    policy='{policy}'
+    test ! -e "$root/drift" || policy='{{"changed":true}}'
+    printf '{{"id":"%s","name":"demo","workspace":"default","labels":{{"{LABEL}":"%s"}},"phase":"%s","policy_source":"sandbox","policy":%s}}\n' "$id" "$label" "$phase" "$policy"
+    ;;
+esac
+"#, root.path().display())).unwrap();
+            fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
+            Self {
+                root,
+                config,
+                binary,
+            }
+        }
+
+        fn runtime(&self) -> Runtime<'_> {
+            Runtime {
+                config: &self.config,
+                env: HashMap::new(),
+                binary: self.binary.clone(),
+            }
+        }
+
+        fn flag(&self, name: &str) {
+            fs::write(self.root.path().join(name), "").unwrap();
+        }
+        fn calls(&self, action: &str) -> usize {
+            fs::read_to_string(self.root.path().join("calls"))
+                .unwrap_or_default()
+                .lines()
+                .filter(|line| line.contains(&format!("sandbox {action} ")))
+                .count()
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fresh_up_uploads_once_and_resume_preserves_guest() {
+        let fixture = Fixture::new();
+        let runtime = fixture.runtime();
+        runtime.up().unwrap();
+        assert_eq!(fixture.calls("create"), 1);
+        assert_eq!(fixture.calls("upload"), 1);
+        runtime.up().unwrap();
+        assert_eq!(fixture.calls("create"), 1);
+        assert_eq!(fixture.calls("upload"), 1);
+        runtime.down().unwrap();
+        runtime.down().unwrap();
+        assert_eq!(fixture.calls("stop"), 1);
+        runtime.up().unwrap();
+        assert_eq!(fixture.calls("start"), 1);
+        assert_eq!(fixture.calls("upload"), 1);
+        assert_eq!(fixture.calls("create"), 1);
+        assert_eq!(fixture.calls("delete"), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn upload_failure_preserves_binding_and_allows_explicit_recovery() {
+        let fixture = Fixture::new();
+        fixture.flag("fail-upload");
+        let runtime = fixture.runtime();
+        let error = runtime.up().unwrap_err().to_string();
+        assert!(error.contains("environment created, but initial project upload failed"));
+        assert!(fixture.config.state_path().exists());
+        assert_eq!(fixture.calls("create"), 1);
+        assert_eq!(fixture.calls("upload"), 1);
+        fs::remove_file(fixture.root.path().join("fail-upload")).unwrap();
+        runtime.upload().unwrap();
+        assert_eq!(fixture.calls("upload"), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn binding_mismatch_drift_and_absence_refuse_all_transitions() {
+        for flag in ["mismatch", "replaced", "drift", "missing", "fingerprint"] {
+            let fixture = Fixture::new();
+            let runtime = fixture.runtime();
+            runtime.create().unwrap();
+            runtime.down().unwrap();
+            if flag == "missing" {
+                fs::remove_file(fixture.root.path().join("phase")).unwrap();
+            } else if flag == "fingerprint" {
+                let mut state = read_json(&fixture.config.state_path()).unwrap();
+                state["config"] = Value::String("other".into());
+                fs::write(
+                    fixture.config.state_path(),
+                    serde_json::to_vec(&state).unwrap(),
+                )
+                .unwrap();
+            } else {
+                fixture.flag(flag);
+            }
+            assert!(runtime.up().is_err(), "{flag}");
+            assert!(
+                runtime.run_agent(&["opencode".into()], false).is_err(),
+                "{flag}"
+            );
+            if flag != "drift" {
+                assert!(runtime.down().is_err(), "{flag}");
+            }
+            assert_eq!(fixture.calls("create"), 1);
+            assert_eq!(fixture.calls("start"), 0);
+            assert_eq!(fixture.calls("upload"), 0);
+            assert_eq!(fixture.calls("exec"), 0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_starts_only_when_stopped_and_start_failure_prevents_launch() {
+        let fixture = Fixture::new();
+        let runtime = fixture.runtime();
+        runtime.create().unwrap();
+        runtime.run_agent(&["opencode".into()], false).unwrap();
+        assert_eq!(fixture.calls("exec"), 1);
+        runtime.down().unwrap();
+        fixture.flag("fail-start");
+        assert!(
+            runtime
+                .run_agent(&["opencode".into()], false)
+                .unwrap_err()
+                .to_string()
+                .contains("start failed")
+        );
+        assert_eq!(fixture.calls("exec"), 1);
+        assert_eq!(fixture.calls("upload"), 0);
+        fs::remove_file(fixture.root.path().join("fail-start")).unwrap();
+        runtime.run_agent(&["opencode".into()], false).unwrap();
+        assert_eq!(fixture.calls("exec"), 2);
+        assert_eq!(fixture.calls("upload"), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_resume_does_not_replace_or_upload() {
+        let fixture = Fixture::new();
+        let runtime = fixture.runtime();
+        runtime.create().unwrap();
+        runtime.down().unwrap();
+        fixture.flag("fail-start");
+        assert!(
+            runtime
+                .up()
+                .unwrap_err()
+                .to_string()
+                .contains("start failed")
+        );
+        assert_eq!(fixture.calls("create"), 1);
+        assert_eq!(fixture.calls("upload"), 0);
+        assert_eq!(fixture.calls("exec"), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fresh_up_uses_upload_preflight() {
+        let fixture = Fixture::new();
+        std::os::unix::fs::symlink("/etc/passwd", fixture.config.values.project.join("unsafe"))
+            .unwrap();
+        assert!(
+            fixture
+                .runtime()
+                .up()
+                .unwrap_err()
+                .to_string()
+                .contains("initial project upload failed")
+        );
+        assert_eq!(fixture.calls("upload"), 0);
+        assert_eq!(fixture.calls("create"), 1);
+    }
 
     #[test]
     fn create_does_not_upload_and_upload_uses_project_contents() {

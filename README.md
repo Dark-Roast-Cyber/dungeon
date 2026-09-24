@@ -47,17 +47,20 @@ dungeon init --directory "$HOME/.config/dungeon/demo" --project "$PWD" --gateway
 CONFIG="$HOME/.config/dungeon/demo/dungeon.json"
 
 dungeon --config "$CONFIG" plan
-dungeon --config "$CONFIG" create
-dungeon --config "$CONFIG" upload --yes
-
+dungeon --config "$CONFIG" up
 dungeon --config "$CONFIG" run opencode
-dungeon --config "$CONFIG" run claude
-dungeon --config "$CONFIG" run codex
 dungeon --config "$CONFIG" exec -- git status
-dungeon --config "$CONFIG" shell
+dungeon --config "$CONFIG" down
 ```
 
-The project is copied to `/sandbox/project`; it is not bind-mounted and is not automatically synchronized back.
+On first `up`, Dungeon creates the sandbox and uploads the configured project to
+`/sandbox/project`. A later `up` resumes the bound sandbox without uploading;
+if it is already Ready, `up` does nothing. `run` starts a stopped bound sandbox
+when needed, also without uploading. `down` stops the sandbox and preserves its
+guest state. Upload is a deliberate refresh/recovery action, not part of resume:
+`dungeon --config "$CONFIG" upload --yes` overwrites guest project contents and
+can discard guest-side edits. The project is copied, not bind-mounted, and is not
+automatically synchronized back; export is not available yet.
 
 ## Authentication
 
@@ -74,8 +77,6 @@ Codex uses `codex login --device-auth`. Claude starts inside the guest so the us
 dungeon --config "$CONFIG" code
 dungeon --config "$CONFIG" ssh-config
 dungeon --config "$CONFIG" status
-dungeon --config "$CONFIG" stop
-dungeon --config "$CONFIG" start
 ```
 
 ## Distribution

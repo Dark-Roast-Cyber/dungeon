@@ -62,6 +62,8 @@ enum Commands {
     },
     Plan,
     Create,
+    Up,
+    Down,
     Status,
     Start,
     Stop,
@@ -151,6 +153,8 @@ fn dispatch(cli: Cli) -> Result<i32> {
             let runtime = Runtime::new(&config)?;
             match command {
                 Commands::Create => runtime.create(),
+                Commands::Up => runtime.up(),
+                Commands::Down | Commands::Stop => runtime.down(),
                 Commands::Status => {
                     println!("{}", serde_json::to_string_pretty(&runtime.get()?)?);
                     Ok(0)
@@ -180,10 +184,9 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     let selected = agent.unwrap_or(config.values.agent);
                     let mut command = vec![selected.as_str().to_owned()];
                     command.extend(arguments);
-                    runtime.execute(
+                    runtime.run_agent(
                         &command,
                         io::stdin().is_terminal() && io::stdout().is_terminal(),
-                        GUEST_PROJECT,
                     )
                 }
                 Commands::Exec { tty, arguments } => {
@@ -194,8 +197,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
                 }
                 Commands::Code => runtime.connect_vscode(),
                 Commands::SshConfig => runtime.ssh_config(),
-                Commands::Start => runtime.lifecycle("start"),
-                Commands::Stop => runtime.lifecycle("stop"),
+                Commands::Start => runtime.start(),
                 Commands::Init { .. }
                 | Commands::Setup
                 | Commands::Plan
@@ -362,5 +364,23 @@ mod tests {
     #[test]
     fn telltale_command_is_not_exposed() {
         assert!(Cli::try_parse_from(["dungeon", "telltale"]).is_err());
+    }
+
+    #[test]
+    fn lifecycle_and_recovery_commands_remain_available() {
+        for command in ["up", "down", "start", "stop", "create", "upload"] {
+            let args = if command == "upload" {
+                vec![
+                    "dungeon",
+                    "--config",
+                    "/private/dungeon.json",
+                    command,
+                    "--yes",
+                ]
+            } else {
+                vec!["dungeon", "--config", "/private/dungeon.json", command]
+            };
+            assert!(Cli::try_parse_from(args).is_ok(), "{command}");
+        }
     }
 }

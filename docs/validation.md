@@ -13,6 +13,24 @@ CI checks formatting, Clippy, locked Rust tests, release compilation, CLI versio
 
 Offline tests cover strict duplicate-key JSON, safe names, schema rejection, starter-policy requirements, create arguments, auth command scope, removed provisional commands, native launcher selection, npm staging, and native archive production. They do not replace live isolation, vendor-auth, image/tooling, remote-editor, endpoint-security, or platform validation.
 
+Issue #8 lifecycle contract: verify first `up` creates and uploads once; resumed
+`up` starts the same bound sandbox without another upload and is a no-op when
+Ready; `run` starts a stopped bound sandbox without upload; and `down` stops it
+without deleting guest state. Verify the separate `upload --yes` path is explicit
+and overwrites the guest project. These lifecycle checks do not establish safe
+project export, which is not implemented.
+
+On the local OpenShell 0.0.116/rootless Podman 5.8.4 setup, a new synthetic
+sandbox (`d8-live-926`, ID `a6a2f0e9-a672-4738-9642-83fc9dbba37d`) received
+one initial upload. A guest-only `guest-edit.txt` survived `down`/`up` under
+the same ID, and the original host fixture remained unchanged. A second `up`
+reported already Ready. After another stop, `run opencode run` auto-started
+that same sandbox and OpenCode read the guest-only edit from `/sandbox/project`
+without an upload. The final stop was slow: after a 30-second client timeout
+the backend reported `Stopping`, then transitioned to `Stopped`; a repeated
+`down` was idempotent. This test did not check Claude login, Codex approvals,
+export, or containment on other runtime combinations.
+
 Issue #7 local setup uses Linux + rootless Podman + OpenShell 0.0.116 only. Gateway bootstrap uses a pre-pulled immutable OpenShell gateway image, user Podman API socket, generated mTLS/JWT material, the explicit Podman driver, and `default` workspace. `dungeon setup` checks a registered gateway and its live driver/version/health on repeats, without creating sandboxes or uploading projects. MicroVM is not a fallback (hard Landlock failed on the tested host). A healthy gateway is not an enforcement test or validation of every Podman/OpenShell combination. Setup does not install privileged prerequisites or publish the reviewed agent image. Issue #11's Claude-account check remains open.
 
 ## Native release gate
