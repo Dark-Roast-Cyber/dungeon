@@ -20,8 +20,8 @@ without deleting guest state. Verify the separate `upload --yes` path is explici
 and overwrites the guest project.
 
 Issue #9 export contract: on OpenShell 0.0.116, verify
-export is restricted to the bound Ready sandbox; upload records a baseline from
-the actual downloaded guest tree bound to config fingerprint and sandbox ID;
+export is restricted to the bound Ready sandbox; upload records pre-upload host
+values for the paths found in the downloaded guest tree, bound to config fingerprint and sandbox ID;
 upload gitignore filtering is reflected in the baseline without filtering the export download; and export presents a deterministic summary and
 requires typed `yes` or explicit `--yes`. Exercise host-only preservation,
 non-conflicting guest additions/edits/deletions, three-way conflict refusal,

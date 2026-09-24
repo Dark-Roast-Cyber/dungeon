@@ -17,6 +17,16 @@ pub(crate) enum Entry {
 
 pub(crate) type Tree = BTreeMap<String, Entry>;
 
+// Upload may omit gitignored paths. Retain the pre-upload host values only for
+// paths present in the downloaded guest tree; never baseline guest-authored
+// content that appeared during or after the upload.
+pub(crate) fn upload_baseline(host: &Tree, guest: &Tree) -> Tree {
+    host.iter()
+        .filter(|(name, _)| guest.contains_key(*name))
+        .map(|(name, entry)| (name.clone(), entry.clone()))
+        .collect()
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Baseline {
@@ -589,6 +599,29 @@ mod tests {
             changes(&base, &host, &guest).get("dir"),
             Some(&Change::Conflict)
         );
+    }
+
+    #[test]
+    fn upload_baseline_does_not_trust_concurrent_guest_edits_or_ignored_host_paths() {
+        let mut host = Tree::new();
+        host.insert("uploaded".into(), file("original"));
+        host.insert("ignored".into(), file("secret"));
+        let mut guest = Tree::new();
+        guest.insert("uploaded".into(), file("guest edit"));
+        guest.insert("guest-add".into(), file("new"));
+        let base = upload_baseline(&host, &guest);
+        assert_eq!(base.get("uploaded"), host.get("uploaded"));
+        assert!(!base.contains_key("ignored"));
+        assert!(!base.contains_key("guest-add"));
+        assert_eq!(
+            changes(&base, &host, &guest).get("uploaded"),
+            Some(&Change::Modify)
+        );
+        assert_eq!(
+            changes(&base, &host, &guest).get("guest-add"),
+            Some(&Change::Add)
+        );
+        assert!(!changes(&base, &host, &guest).contains_key("ignored"));
     }
 
     #[test]
