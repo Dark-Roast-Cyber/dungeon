@@ -37,7 +37,11 @@ The normal lifecycle is `up`, `run`, and `down` with an explicit config. First
 without upload, and is a no-op when it is already Ready. `run` starts a stopped
 bound sandbox when needed, without upload. `down` stops it and retains guest
 state. A separate explicit `upload --yes` is the operator's overwrite-capable
-refresh/recovery action. There is no export path yet.
+refresh/recovery action. `export` is a separate Ready-only operation for the
+bound sandbox on OpenShell 0.0.116. It downloads and stages the guest project,
+then presents a deterministic three-way diff against the last successful upload
+baseline and current host project. It applies only after interactive typed
+`yes` or explicit `--yes`; it is never part of `up`, `run`, or `down`.
 
 ## Storage ownership
 
@@ -47,6 +51,7 @@ refresh/recovery action. There is no export path yet.
 | Guest project | Backend-owned explicit copy |
 | Agent sessions | Guest agent-owned |
 | Config/runtime binding | Private host directory |
+| Export baseline | Private config directory (`baseline.json`) |
 | Credentials | OpenShell providers or vendor-owned guest login |
 
 No host dotfiles, editor caches, agent databases, private SSH keys, engine sockets, or credential directories are copied automatically.
@@ -63,7 +68,9 @@ developer
   -> agent + tools + isolated project copy
 ```
 
-The host project remains authoritative. Dungeon does not make the sandbox a writable view of the host project. The initial copy is uploaded on first `up`; subsequent starts do not silently refresh it. Safe staged export remains future work rather than weakening containment with a writable bind mount.
+The host project remains authoritative. Dungeon does not make the sandbox a writable view of the host project. The initial copy is uploaded on first `up`; subsequent starts do not silently refresh it. OpenShell uploads may filter ignored files; export downloads the complete guest tree. After a successful upload, Dungeon obtains the actual guest tree through OpenShell and records its three-way comparison baseline bound to the config fingerprint and sandbox ID in the private config directory. Export refuses to proceed if this binding is absent or mismatched; it does not infer a baseline.
+
+Export compares baseline, current host, and downloaded guest paths. Host-only files remain untouched; changes on both sides are conflicts and are refused. The deterministic summary must be approved with typed `yes` or `--yes`. Special entries are rejected. Applied state is limited to regular file contents, directories, and the Unix executable bit; no other metadata is carried. If apply fails, affected original files are backed up privately adjacent to the project for manual recovery. This is not an atomic transaction or live synchronization path. No host mount is introduced.
 
 A reviewed Dungeon image may pin compatible agent/tool versions, but it does not own vendor authentication formats, models, or session protocols.
 

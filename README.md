@@ -43,6 +43,7 @@ and provenance remain separate work.
 ## First environment
 
 ```sh
+dungeon setup
 dungeon init --directory "$HOME/.config/dungeon/demo" --project "$PWD" --gateway dungeon-local --image localhost/dungeon-agent:0.0.3-dev
 CONFIG="$HOME/.config/dungeon/demo/dungeon.json"
 
@@ -50,6 +51,7 @@ dungeon --config "$CONFIG" plan
 dungeon --config "$CONFIG" up
 dungeon --config "$CONFIG" run opencode
 dungeon --config "$CONFIG" exec -- git status
+dungeon --config "$CONFIG" export
 dungeon --config "$CONFIG" down
 ```
 
@@ -57,10 +59,14 @@ On first `up`, Dungeon creates the sandbox and uploads the configured project to
 `/sandbox/project`. A later `up` resumes the bound sandbox without uploading;
 if it is already Ready, `up` does nothing. `run` starts a stopped bound sandbox
 when needed, also without uploading. `down` stops the sandbox and preserves its
-guest state. Upload is a deliberate refresh/recovery action, not part of resume:
-`dungeon --config "$CONFIG" upload --yes` overwrites guest project contents and
-can discard guest-side edits. The project is copied, not bind-mounted, and is not
-automatically synchronized back; export is not available yet.
+guest state. Export is a separate reviewed operation, allowed only while the
+bound sandbox is Ready on OpenShell 0.0.116. `dungeon --config "$CONFIG" export`
+downloads and stages guest changes, prints a deterministic summary, then
+requires interactive typed `yes` or explicit `--yes` before applying. Conflicts
+and special entries are refused. Upload remains a deliberate refresh/recovery
+action: `dungeon --config "$CONFIG" upload --yes` overwrites guest project
+contents and can discard guest-side edits. The project is copied, not
+bind-mounted or live-synchronized.
 
 ## Authentication
 

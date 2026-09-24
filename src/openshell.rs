@@ -1,4 +1,5 @@
 use crate::config::{Config, RuntimeState, digest, read_json, write_new};
+use crate::export;
 use crate::policy::validate_policy;
 use crate::{Error, OPEN_SHELL_VERSION, Result};
 use serde_json::Value;
@@ -240,8 +241,61 @@ impl<'a> Runtime<'a> {
         }
         self.checked(true, true)?;
         preflight_upload(&self.config.values.project, &self.config.values.project)?;
+        let before = export::snapshot(&self.config.values.project)?;
+        // Even a failed transfer may have overwritten part of the guest. The old baseline
+        // can no longer justify an export once upload starts.
+        let baseline_path = self.config.baseline_path();
+        if baseline_path.exists() {
+            if !fs::symlink_metadata(&baseline_path)?.file_type().is_file() {
+                return Err(Error::new("invalid baseline destination"));
+            }
+            fs::remove_file(baseline_path)?;
+        }
         // OpenShell nests named directories; uploading "." places their contents at the fixed guest path.
-        Ok(self.upload_command().status()?.code().unwrap_or(128))
+        let code = self.upload_command().status()?.code().unwrap_or(128);
+        if code == 0 {
+            if before != export::snapshot(&self.config.values.project)? {
+                return Err(Error::new(
+                    "host project changed during upload; baseline not advanced; preserve guest work before retrying upload",
+                ));
+            }
+            // Upload may filter ignored files; record the actual guest tree, not a guessed host copy.
+            let stage = self.download_project()?;
+            export::save_baseline(self.config, &export::snapshot(stage.path())?)?;
+        }
+        Ok(code)
+    }
+
+    pub(crate) fn export(&self, yes: bool) -> Result<i32> {
+        self.checked(true, true)?;
+        let baseline = export::load_baseline(self.config)?;
+        let stage = self.download_project()?;
+        export::review_and_apply_checked(self.config, &baseline, stage.path(), yes, || {
+            self.checked(true, true).map(|_| ())
+        })?;
+        Ok(0)
+    }
+
+    fn download_project(&self) -> Result<tempfile::TempDir> {
+        let stage = tempfile::Builder::new()
+            .prefix("dungeon-export-")
+            .tempdir_in(self.config.path.parent().expect("config parent"))?;
+        let args = vec![
+            "sandbox".into(),
+            "download".into(),
+            self.config.values.name.clone(),
+            GUEST_PROJECT.into(),
+            stage.path().to_string_lossy().into_owned(),
+        ];
+        let code = self.status(&args)?;
+        if code != 0 {
+            return Err(Error::new(format!(
+                "OpenShell download failed (exit {code}); host unchanged"
+            )));
+        }
+        self.checked(true, true)?;
+        // OpenShell 0.0.116 extracts directory contents directly into DEST.
+        Ok(stage)
     }
 
     pub(crate) fn connect_vscode(&self) -> Result<i32> {
@@ -565,6 +619,7 @@ case " $* " in
   *' sandbox start '*) test ! -e "$root/fail-start" || exit 9; echo Ready > "$root/phase" ;;
   *' sandbox stop '*) echo Stopped > "$root/phase" ;;
   *' sandbox upload '*) test ! -e "$root/fail-upload" || exit 8 ;;
+  *' sandbox download '*) for dest do :; done; cp "$root/project/file" "$dest/file" ;;
   *' sandbox get '*)
     test -e "$root/phase" || exit 7
     phase=$(cat "$root/phase")
@@ -614,15 +669,26 @@ esac
         runtime.up().unwrap();
         assert_eq!(fixture.calls("create"), 1);
         assert_eq!(fixture.calls("upload"), 1);
+        assert_eq!(fixture.calls("download"), 1);
+        assert!(fixture.config.baseline_path().exists());
+        let download_call = fs::read_to_string(fixture.root.path().join("calls")).unwrap();
+        let download_call = download_call
+            .lines()
+            .find(|line| line.contains("sandbox download "))
+            .unwrap();
+        assert!(download_call.contains(fixture.config.path.parent().unwrap().to_str().unwrap()));
+        assert!(!download_call.contains(fixture.config.values.project.to_str().unwrap()));
         runtime.up().unwrap();
         assert_eq!(fixture.calls("create"), 1);
         assert_eq!(fixture.calls("upload"), 1);
+        assert_eq!(fixture.calls("download"), 1);
         runtime.down().unwrap();
         runtime.down().unwrap();
         assert_eq!(fixture.calls("stop"), 1);
         runtime.up().unwrap();
         assert_eq!(fixture.calls("start"), 1);
         assert_eq!(fixture.calls("upload"), 1);
+        assert_eq!(fixture.calls("download"), 1);
         assert_eq!(fixture.calls("create"), 1);
         assert_eq!(fixture.calls("delete"), 0);
     }
@@ -638,9 +704,21 @@ esac
         assert!(fixture.config.state_path().exists());
         assert_eq!(fixture.calls("create"), 1);
         assert_eq!(fixture.calls("upload"), 1);
+        assert!(!fixture.config.baseline_path().exists());
         fs::remove_file(fixture.root.path().join("fail-upload")).unwrap();
         runtime.upload().unwrap();
         assert_eq!(fixture.calls("upload"), 2);
+        assert!(fixture.config.baseline_path().exists());
+        fs::write(fixture.config.values.project.join("file"), "refreshed").unwrap();
+        runtime.upload().unwrap();
+        assert_eq!(fixture.calls("upload"), 3);
+        assert_eq!(
+            crate::export::load_baseline(&fixture.config).unwrap(),
+            crate::export::snapshot(&fixture.config.values.project).unwrap()
+        );
+        fixture.flag("fail-upload");
+        assert_eq!(runtime.upload().unwrap(), 8);
+        assert!(!fixture.config.baseline_path().exists());
     }
 
     #[cfg(unix)]
@@ -740,6 +818,43 @@ esac
         );
         assert_eq!(fixture.calls("upload"), 0);
         assert_eq!(fixture.calls("create"), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn export_requires_binding_baseline_and_approval() {
+        let fixture = Fixture::new();
+        let runtime = fixture.runtime();
+        runtime.create().unwrap();
+        assert!(
+            runtime
+                .export(true)
+                .unwrap_err()
+                .to_string()
+                .contains("no trustworthy upload baseline")
+        );
+        assert_eq!(fixture.calls("download"), 0);
+        runtime.upload().unwrap();
+        fs::write(fixture.config.values.project.join("file"), "host change").unwrap();
+        assert!(runtime.export(false).is_ok()); // host-only work stays untouched
+        assert_eq!(
+            fs::read_to_string(fixture.config.values.project.join("file")).unwrap(),
+            "host change"
+        );
+        for flag in ["mismatch", "replaced", "drift"] {
+            fixture.flag(flag);
+            assert!(runtime.export(true).is_err(), "{flag}");
+            assert_eq!(fixture.calls("download"), 2);
+            fs::remove_file(fixture.root.path().join(flag)).unwrap();
+        }
+        runtime.down().unwrap();
+        assert!(
+            runtime
+                .export(true)
+                .unwrap_err()
+                .to_string()
+                .contains("not Ready")
+        );
     }
 
     #[test]

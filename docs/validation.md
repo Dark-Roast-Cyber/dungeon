@@ -17,8 +17,34 @@ Issue #8 lifecycle contract: verify first `up` creates and uploads once; resumed
 `up` starts the same bound sandbox without another upload and is a no-op when
 Ready; `run` starts a stopped bound sandbox without upload; and `down` stops it
 without deleting guest state. Verify the separate `upload --yes` path is explicit
-and overwrites the guest project. These lifecycle checks do not establish safe
-project export, which is not implemented.
+and overwrites the guest project.
+
+Issue #9 export contract: on OpenShell 0.0.116, verify
+export is restricted to the bound Ready sandbox; upload records a baseline from
+the actual downloaded guest tree bound to config fingerprint and sandbox ID;
+upload gitignore filtering is reflected in the baseline without filtering the export download; and export presents a deterministic summary and
+requires typed `yes` or explicit `--yes`. Exercise host-only preservation,
+non-conflicting guest additions/edits/deletions, three-way conflict refusal,
+special-entry refusal, metadata limits, and failed-apply private adjacent
+backups/manual recovery. Verify baseline-less legacy configurations are refused
+and can recover only by manual OpenShell download/inspection followed by explicit
+`upload --yes`. These checks must not be reported as passed until run; unit/mock
+coverage does not establish live OpenShell transfer or filesystem apply behavior.
+
+Issue #9 disposable live run used sandbox `issue9-live-0912` on the local
+OpenShell 0.0.116 gateway with the `localhost/dungeon-agent:0.0.3-dev` image.
+After first `up`, a noninteractive export listed `DELETE app.js`,
+`MODIFY app.py`, `ADD guest-add.txt`, `ADD guestdir`, `ADD guestdir/inner.txt` and
+refused apply without `--yes`. Approved export installed exactly those edits;
+three subsequent exports reported no changes. Differing host/guest edits
+produced `CONFLICT app.py` with no host mutation or baseline advance. A
+host-only file remained untouched; guest deletions applied; a guest symlink
+to `/etc/passwd` was rejected before mutation. In a controlled failure, a
+guest-deleted directory containing a host-only file could not be removed;
+original-file backups and a recovery marker were retained, baseline did not
+advance, and retry refused until recovery inspection. That shape now reports
+a conflict before mutation in focused tests. This is not a crash/power-loss
+durability claim, nor cross-platform validation.
 
 On the local OpenShell 0.0.116/rootless Podman 5.8.4 setup, a new synthetic
 sandbox (`d8-live-926`, ID `a6a2f0e9-a672-4738-9642-83fc9dbba37d`) received
@@ -154,7 +180,7 @@ authorized by this candidate.
 | Upload | destination, symlinks, partial failure, overwrite |
 | Remote | VS Code and each desktop path with credential boundary |
 | Agent image | pinned versions launch/authenticate and can perform a bounded synthetic task |
-| Project return | staged export cannot silently overwrite conflicting host work |
+| Project return (Issue #9) | Local OpenShell 0.0.116/rootless Podman: staged edit/add/nested add/delete, approval refusal, conflict, host-only preservation, symlink refusal, idempotence and recovery refusal exercised; broader platforms and interruption durability remain unvalidated |
 | EDR | supported sensor observes/controls attributed guest process |
 
 ## Release
