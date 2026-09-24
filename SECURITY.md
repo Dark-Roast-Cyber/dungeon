@@ -15,7 +15,8 @@ OpenShell providers can grant authority even when raw secrets are brokered. `dun
 ## Remaining risks
 
 - Allowed endpoints can receive data.
-- Project upload is explicit but is not a secret scanner or immutable snapshot.
+- First `up` uploads the configured project once. Resume and automatic `run` startup do not upload. Explicit `upload --yes` is a deliberate refresh/recovery operation that overwrites guest project contents and may destroy guest-side edits; upload is not a secret scanner or immutable snapshot.
+- `down` stops the sandbox without deleting its guest state. There is no project export yet, so guest changes are not automatically returned to the authoritative host project.
 - Guest/session durability is backend-specific.
 - Mutable images/provider content can change without changing Dungeon's fingerprint.
 - The [local agent image candidate](images/agent/README.md) pins its base and agent distributions but inherits upstream base layers, including Node 22.22.1 with reported security-update debt. Local testing is not an image audit or publication approval.

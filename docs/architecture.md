@@ -32,6 +32,13 @@ Initialization does not execute project code or contact a runtime. Creation snap
 
 Reuse verifies identity and policy drift. These checks are not kernel/image attestation and do not prove provider content stayed unchanged.
 
+The normal lifecycle is `up`, `run`, and `down` with an explicit config. First
+`up` creates the bound sandbox and uploads the project; resumed `up` starts it
+without upload, and is a no-op when it is already Ready. `run` starts a stopped
+bound sandbox when needed, without upload. `down` stops it and retains guest
+state. A separate explicit `upload --yes` is the operator's overwrite-capable
+refresh/recovery action. There is no export path yet.
+
 ## Storage ownership
 
 | Data | Owner |
@@ -56,7 +63,7 @@ developer
   -> agent + tools + isolated project copy
 ```
 
-The host project remains authoritative. Dungeon does not make the sandbox a writable view of the host project. Normal development should converge on explicit upload plus safe staged export rather than weakening containment with a writable bind mount.
+The host project remains authoritative. Dungeon does not make the sandbox a writable view of the host project. The initial copy is uploaded on first `up`; subsequent starts do not silently refresh it. Safe staged export remains future work rather than weakening containment with a writable bind mount.
 
 A reviewed Dungeon image may pin compatible agent/tool versions, but it does not own vendor authentication formats, models, or session protocols.
 

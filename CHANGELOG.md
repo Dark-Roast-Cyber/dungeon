@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased lifecycle (Issue #8)
+
+- Add `up`, `run`, and `down` lifecycle flow: first `up` creates and uploads once, resume avoids upload, `run` starts a stopped bound sandbox without upload, and `down` stops while preserving guest state. Keep overwriting upload as explicit `upload --yes`; project export is not included.
+
 ## Unreleased local setup (Issue #7)
 
 - Add `dungeon setup` for Linux/rootless Podman/OpenShell 0.0.116: bootstrap and register one local mTLS gateway, check health and driver, refuse conflicting state, and show the reviewed local-image build/next init command. No image publication, policy change, installer, or MicroVM fallback.
