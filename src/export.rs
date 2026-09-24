@@ -29,7 +29,10 @@ struct Baseline {
 fn relative(name: &str) -> Result<PathBuf> {
     let path = Path::new(name);
     if name.is_empty()
-        || name.contains('\\')
+        || name.contains(['\\', '\0'])
+        || name
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
         || path
             .components()
             .any(|part| !matches!(part, Component::Normal(_)))
@@ -333,7 +336,7 @@ fn review_and_apply_with_hooks(
             Change::Delete => "DELETE",
             Change::Conflict => "CONFLICT",
         };
-        println!("{label:<9}{path}");
+        println!("{label:<9}{}", path.escape_debug());
     }
     if changes.values().any(|change| *change == Change::Conflict) {
         return Err(Error::new(
@@ -469,7 +472,7 @@ fn review_and_apply_with_hooks(
         "If export was interrupted, compare the host against old/ (original changed files) and new/ (not-yet-installed guest files). Restore deliberately before retrying; the upload baseline has not advanced until export reports success."
     )?;
     for (name, change) in &changes {
-        writeln!(instructions, "{change:?} {name}")?;
+        writeln!(instructions, "{change:?} {}", name.escape_debug())?;
     }
     instructions.sync_all()?;
     for dir in [&old, &new] {
@@ -590,7 +593,20 @@ mod tests {
 
     #[test]
     fn unsafe_paths_and_files_refused() {
-        for path in ["../escape", "/absolute", "a/../b", "a\\b", "./a", ""] {
+        assert_eq!(
+            format!("{}", "a\n\u{1b}[31m".escape_debug()),
+            "a\\n\\u{1b}[31m"
+        );
+        for path in [
+            "../escape",
+            "/absolute",
+            "a/../b",
+            "a/./b",
+            "a//b",
+            "a\\b",
+            "./a",
+            "",
+        ] {
             assert!(relative(path).is_err(), "{path}");
         }
         let tmp = tempfile::tempdir().unwrap();
