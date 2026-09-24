@@ -74,6 +74,10 @@ enum Commands {
         #[arg(long)]
         yes: bool,
     },
+    Export {
+        #[arg(long)]
+        yes: bool,
+    },
     Auth {
         #[arg(value_enum)]
         agent: AuthAgent,
@@ -160,6 +164,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     Ok(0)
                 }
                 Commands::Upload { yes: true } => runtime.upload(),
+                Commands::Export { yes } => runtime.export(yes),
                 Commands::Auth {
                     agent: AuthAgent::Codex,
                 } => {

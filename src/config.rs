@@ -55,6 +55,12 @@ pub(crate) struct Config {
 }
 
 impl Config {
+    pub(crate) fn baseline_path(&self) -> PathBuf {
+        self.path
+            .parent()
+            .expect("config parent")
+            .join("baseline.json")
+    }
     pub(crate) fn state_path(&self) -> PathBuf {
         self.path
             .parent()

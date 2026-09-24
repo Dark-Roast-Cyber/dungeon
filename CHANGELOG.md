@@ -1,8 +1,12 @@
 # Changelog
 
+## Unreleased safe export (Issue #9)
+
+- Add Ready-only reviewed export for OpenShell 0.0.116: stage the guest tree, summarize changes deterministically, detect three-way conflicts, and require typed `yes` or `--yes` before applying. Preserve host-only files; reject special entries and unsupported metadata. Track the uploaded baseline in private config state, and retain private adjacent backups if apply fails. No live sync or host mount.
+
 ## Unreleased lifecycle (Issue #8)
 
-- Add `up`, `run`, and `down` lifecycle flow: first `up` creates and uploads once, resume avoids upload, `run` starts a stopped bound sandbox without upload, and `down` stops while preserving guest state. Keep overwriting upload as explicit `upload --yes`; project export is not included.
+- Add `up`, `run`, and `down` lifecycle flow: first `up` creates and uploads once, resume avoids upload, `run` starts a stopped bound sandbox without upload, and `down` stops while preserving guest state. Keep overwriting upload as explicit `upload --yes`; reviewed project export is a separate Issue #9 operation.
 
 ## Unreleased local setup (Issue #7)
 

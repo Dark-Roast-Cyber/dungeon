@@ -40,7 +40,24 @@ without uploading, and does nothing if the sandbox is already Ready. `run`
 starts a stopped sandbox already bound to this config without uploading.
 `down` stops but preserves guest state. To intentionally refresh/recover the
 guest project, use `dungeon --config PATH upload --yes`; it overwrites the guest
-copy and may discard guest-side changes. No export command exists yet.
+copy and may discard guest-side changes. To return changes, use
+`dungeon --config PATH export` only while the bound OpenShell 0.0.116 sandbox is
+Ready. Dungeon downloads/stages the complete guest tree, prints a
+deterministic summary, and waits for typed `yes`; `--yes` explicitly approves
+without the prompt. Host-only files are preserved and three-way conflicts or
+special entries are refused. It applies regular contents, directories, and the
+Unix executable bit only. On failed apply, affected host files have private
+adjacent backups for manual recovery. Export is not live sync and uses no host
+mount.
+
+The three-way baseline is `baseline.json` in the private config directory,
+bound to the config fingerprint and sandbox ID. It stores only pre-upload host
+entries that exactly match post-upload guest entries (type, file hash, and Unix
+executable bit). Filtered paths left stale in the guest and guest edits during
+upload are not claimed as common state. An older config without a
+baseline is refused: manually download and recover the guest project with
+OpenShell, inspect it, then run `upload --yes` explicitly to create a new
+baseline. Dungeon does not guess or synthesize the missing baseline.
 
 
 ## Planned reviewed setup imports
