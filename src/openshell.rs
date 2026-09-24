@@ -259,8 +259,7 @@ impl<'a> Runtime<'a> {
                     "host project changed during upload; baseline not advanced; preserve guest work before retrying upload",
                 ));
             }
-            // Guest writes between upload and download are not part of the host baseline.
-            // The downloaded tree identifies paths that survived OpenShell's upload filter.
+            // Only exact pre-upload host/post-upload guest matches are proven common state.
             let stage = self.download_project()?;
             let guest = export::snapshot(stage.path())?;
             export::save_baseline(self.config, &export::upload_baseline(&before, &guest))?;

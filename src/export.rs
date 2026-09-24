@@ -17,12 +17,11 @@ pub(crate) enum Entry {
 
 pub(crate) type Tree = BTreeMap<String, Entry>;
 
-// Upload may omit gitignored paths. Retain the pre-upload host values only for
-// paths present in the downloaded guest tree; never baseline guest-authored
-// content that appeared during or after the upload.
+// Upload can omit ignored paths or leave existing guest entries untouched.
+// Record only pre-upload host entries exactly observed in the post-upload guest.
 pub(crate) fn upload_baseline(host: &Tree, guest: &Tree) -> Tree {
     host.iter()
-        .filter(|(name, _)| guest.contains_key(*name))
+        .filter(|(name, entry)| guest.get(*name) == Some(*entry))
         .map(|(name, entry)| (name.clone(), entry.clone()))
         .collect()
 }
@@ -602,26 +601,49 @@ mod tests {
     }
 
     #[test]
-    fn upload_baseline_does_not_trust_concurrent_guest_edits_or_ignored_host_paths() {
+    fn upload_baseline_requires_exact_common_entries() {
+        let hash = HEXLOWER.encode(&Sha256::digest(b"same"));
         let mut host = Tree::new();
-        host.insert("uploaded".into(), file("original"));
-        host.insert("ignored".into(), file("secret"));
+        host.insert("uploaded".into(), file(&hash));
+        host.insert("absent".into(), file("host-only"));
+        host.insert("ignored.env".into(), file("new-host"));
+        host.insert("script".into(), file("same-hash"));
+        host.insert("type".into(), file("content"));
+        host.insert("dir".into(), Entry::Dir);
+        host.insert("dir/file".into(), file(&hash));
         let mut guest = Tree::new();
-        guest.insert("uploaded".into(), file("guest edit"));
+        guest.insert("uploaded".into(), file(&hash));
+        guest.insert("ignored.env".into(), file("stale-guest"));
+        guest.insert(
+            "script".into(),
+            Entry::File {
+                sha256: "same-hash".into(),
+                executable: true,
+            },
+        );
+        guest.insert("type".into(), Entry::Dir);
+        guest.insert("dir".into(), Entry::Dir);
+        guest.insert("dir/file".into(), file(&hash));
         guest.insert("guest-add".into(), file("new"));
         let base = upload_baseline(&host, &guest);
         assert_eq!(base.get("uploaded"), host.get("uploaded"));
-        assert!(!base.contains_key("ignored"));
+        assert!(!base.contains_key("absent"));
         assert!(!base.contains_key("guest-add"));
+        assert!(!base.contains_key("ignored.env"));
+        assert!(!base.contains_key("script"));
+        assert!(!base.contains_key("type"));
+        assert_eq!(base.get("dir"), Some(&Entry::Dir));
+        assert_eq!(base.get("dir/file"), host.get("dir/file"));
+        verify_tree(&base).unwrap();
         assert_eq!(
-            changes(&base, &host, &guest).get("uploaded"),
-            Some(&Change::Modify)
+            changes(&base, &host, &guest).get("ignored.env"),
+            Some(&Change::Conflict)
         );
         assert_eq!(
             changes(&base, &host, &guest).get("guest-add"),
             Some(&Change::Add)
         );
-        assert!(!changes(&base, &host, &guest).contains_key("ignored"));
+        assert!(!changes(&base, &host, &guest).contains_key("absent"));
     }
 
     #[test]

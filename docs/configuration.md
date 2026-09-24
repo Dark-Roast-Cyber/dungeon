@@ -51,10 +51,10 @@ adjacent backups for manual recovery. Export is not live sync and uses no host
 mount.
 
 The three-way baseline is `baseline.json` in the private config directory,
-bound to the config fingerprint and sandbox ID. It stores pre-upload host
-hashes/types/executable bits for paths found in the guest download after a
-successful upload; host-only ignored files and guest edits during upload are
-not mistaken for uploaded host state. An older config without a
+bound to the config fingerprint and sandbox ID. It stores only pre-upload host
+entries that exactly match post-upload guest entries (type, file hash, and Unix
+executable bit). Filtered paths left stale in the guest and guest edits during
+upload are not claimed as common state. An older config without a
 baseline is refused: manually download and recover the guest project with
 OpenShell, inspect it, then run `upload --yes` explicitly to create a new
 baseline. Dungeon does not guess or synthesize the missing baseline.

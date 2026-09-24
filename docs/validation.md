@@ -19,11 +19,13 @@ Ready; `run` starts a stopped bound sandbox without upload; and `down` stops it
 without deleting guest state. Verify the separate `upload --yes` path is explicit
 and overwrites the guest project.
 
-Issue #9 export contract: on OpenShell 0.0.116, verify
-export is restricted to the bound Ready sandbox; upload records pre-upload host
-values for the paths found in the downloaded guest tree, bound to config fingerprint and sandbox ID;
-upload gitignore filtering is reflected in the baseline without filtering the export download; and export presents a deterministic summary and
-requires typed `yes` or explicit `--yes`. Exercise host-only preservation,
+Issue #9 export contract: on OpenShell 0.0.116, verify export is restricted to
+the bound Ready sandbox; upload records pre-upload host values only when they
+exactly match post-upload guest entries (type, hash, Unix executable bit), bound
+to the config fingerprint and sandbox ID. Gitignore filtering must not create
+a false baseline for a stale guest path. Export downloads the complete guest
+tree, presents a deterministic summary, and requires typed `yes` or explicit
+`--yes`. Exercise host-only preservation,
 non-conflicting guest additions/edits/deletions, three-way conflict refusal,
 special-entry refusal, metadata limits, and failed-apply private adjacent
 backups/manual recovery. Verify baseline-less legacy configurations are refused
