@@ -17,11 +17,52 @@ RUN --network=none node /tmp/pnpm/bin/pnpm.cjs rebuild \
     && node verify.cjs \
     && chmod -R go-w /usr/lib/node_modules/dungeon-agent
 
+# Download and hash-check immutable reviewed editor/toolchain artifacts.
+RUN set -eu; \
+    test "$(uname -m)" = x86_64; \
+    manifest=/usr/lib/node_modules/dungeon-agent/package.json; \
+    install_root=/opt/dungeon-image-tools; \
+    mkdir -p "${install_root}/usr/local"; \
+    nvim_version=$(node -p "require('$manifest').imageTools.neovim.version"); \
+    nvim_sha256=$(node -p "require('$manifest').imageTools.neovim.sha256"); \
+    nvim_archive=nvim-linux-x86_64.tar.gz; \
+    curl -fsSL "https://github.com/neovim/neovim/releases/download/v${nvim_version}/${nvim_archive}" -o "/tmp/${nvim_archive}"; \
+    echo "${nvim_sha256}  /tmp/${nvim_archive}" | sha256sum -c -; \
+    tar -xzf "/tmp/${nvim_archive}" -C "${install_root}/usr/local" --strip-components=1; \
+    rust_version=$(node -p "require('$manifest').imageTools.rust.version"); \
+    rust_date=$(node -p "require('$manifest').imageTools.rust.distDate"); \
+    rust_target=$(node -p "require('$manifest').imageTools.rust.target"); \
+    for component in rustc cargo rust-std; do \
+      archive="${component}-${rust_version}-${rust_target}.tar.xz"; \
+      sha256=$(node -p "require('$manifest').imageTools.rust.components['${component}']"); \
+      curl -fsSL "https://static.rust-lang.org/dist/${rust_date}/${archive}" -o "/tmp/${archive}"; \
+      echo "${sha256}  /tmp/${archive}" | sha256sum -c -; \
+      mkdir "/tmp/${component}"; \
+      tar -xJf "/tmp/${archive}" -C "/tmp/${component}" --strip-components=1; \
+    done
+# Execute only the already verified Rust component installers, with no network.
+RUN --network=none set -eu; \
+    install_root=/opt/dungeon-image-tools; \
+    for component in rustc cargo rust-std; do \
+      "/tmp/${component}/install.sh" \
+        --destdir="${install_root}" \
+        --prefix=/usr/local \
+        --disable-ldconfig; \
+    done; \
+    chown -R root:root "${install_root}/usr/local"; \
+    chmod -R go-w "${install_root}/usr/local"; \
+    rm -rf /tmp/nvim-linux-x86_64.tar.gz /tmp/rustc /tmp/cargo /tmp/rust-std \
+      /tmp/rustc-*.tar.xz /tmp/cargo-*.tar.xz /tmp/rust-std-*.tar.xz
+
 FROM base
 USER root
 RUN rm -f /usr/bin/opencode /usr/bin/codex /usr/local/bin/claude \
-    && rm -rf /usr/lib/node_modules/opencode-ai /usr/lib/node_modules/@openai/codex
+      /usr/bin/nvim /usr/bin/rustc /usr/bin/cargo \
+      /usr/local/bin/nvim /usr/local/bin/rustc /usr/local/bin/cargo \
+    && rm -rf /usr/lib/node_modules/opencode-ai /usr/lib/node_modules/@openai/codex \
+      /usr/local/lib/nvim /usr/local/lib/rustlib /usr/local/share/nvim
 COPY --from=tools /usr/lib/node_modules/dungeon-agent /usr/lib/node_modules/dungeon-agent
+COPY --from=tools /opt/dungeon-image-tools/usr/local/ /usr/local/
 RUN node -e 'const fs = require("node:fs"), path = require("node:path"); \
     const root = "/usr/lib/node_modules/dungeon-agent/node_modules"; \
     for (const name of Object.keys(require(root + "/../package.json").dependencies)) { \
@@ -29,8 +70,13 @@ RUN node -e 'const fs = require("node:fs"), path = require("node:path"); \
       for (const [command, binary] of Object.entries(pkg.bin)) \
         fs.symlinkSync(path.join(dir, binary), "/usr/local/bin/" + command); \
     }'
-ENV HOME=/sandbox
+ENV HOME=/sandbox \
+    XDG_CONFIG_HOME=/sandbox/.config \
+    XDG_DATA_HOME=/sandbox/.local/share \
+    XDG_STATE_HOME=/sandbox/.local/state \
+    XDG_CACHE_HOME=/sandbox/.cache \
+    CARGO_HOME=/sandbox/.cargo
 WORKDIR /sandbox
 USER sandbox
 RUN --network=none node /usr/lib/node_modules/dungeon-agent/verify.cjs --path \
-    && rm -rf /sandbox/.codex /sandbox/.cache /sandbox/.config /sandbox/.local /tmp/opencode /tmp/.bun-*
+    && rm -rf /sandbox/.cargo /sandbox/.codex /sandbox/.cache /sandbox/.config /sandbox/.local /tmp/opencode /tmp/.bun-*

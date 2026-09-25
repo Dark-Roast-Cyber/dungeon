@@ -1,22 +1,28 @@
 # Local reviewed agent image
 
-Issue #6's Linux image candidate. This is **not published and not Dungeon's default**. Live validation and publication readiness are separate gates.
+Issue #6's Linux image candidate, extended by Issue #17 with reviewed image-owned Neovim and Rust capabilities. This is **not published and not Dungeon's default**. Live validation and publication readiness are separate gates.
 
 ## Inputs and ownership
 
 - Base: `ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e`, unchanged from Issue #1. The amd64 member is `sha256:c2a43bb0d765774e2790b3babfb20997bb2eac7b4bf4c6d7d8661e99817bf904`.
-- `package.json` owns the exact agent versions and build-only pnpm version. `pnpm-lock.yaml` locks official npm registry packages, including platform binaries, with SHA-512 integrity metadata. Read the manifest for the selected versions rather than maintaining a second version list.
+- `package.json` owns the exact agent versions, build-only pnpm version, Neovim/Rust versions, Rust distribution coordinates, and reviewed SHA-256 artifact hashes. `pnpm-lock.yaml` locks official npm registry packages, including platform binaries, with SHA-512 integrity metadata. Read the manifest for selected versions and hashes rather than maintaining a second version list.
+- Neovim comes from the official Linux x86_64 release archive. Rust uses the official `rustc`, `cargo`, and `rust-std` standalone component archives for the bounded x86_64 GNU/Linux toolchain, without rustup or runtime toolchain resolution.
 - This glibc Linux image excludes OpenCode's two redundant x64 musl optional binary packages through pnpm's lock-aware `ignoredOptionalDependencies`. The glibc x64 baseline fallback stays installed for CPUs without AVX2.
 - OpenCode uses the current V2 `@opencode/cli` distribution, not the legacy `opencode-ai` package. Claude uses Anthropic's explicit **stable** channel (not its faster `latest` channel). Codex uses the current non-prerelease `latest` distribution. Channel names are consulted during review only; builds never resolve a channel.
 - Node 22.22.1 comes from the digest-pinned base and satisfies the installers' Node requirements (Claude requires Node >=22; Codex >=16). No extra Node distribution or distro upgrade is installed.
 
-Official sources reviewed on 2026-09-23 UTC:
+Agent/base sources reviewed on 2026-09-23 UTC:
 
 - [OpenShell base source](https://github.com/NVIDIA/OpenShell-Community/blob/main/sandboxes/base/Dockerfile)
 - [OpenCode V2 installation](https://opencode.ai/v2/docs/) and [registry metadata](https://registry.npmjs.org/@opencode/cli)
 - [Claude installation and integrity](https://code.claude.com/docs/en/setup#install-with-npm) and [registry metadata](https://registry.npmjs.org/@anthropic-ai/claude-code)
 - [Codex installation](https://github.com/openai/codex#installing-and-running-codex) and [registry metadata](https://registry.npmjs.org/@openai/codex)
 - [pnpm registry metadata](https://registry.npmjs.org/pnpm)
+
+Issue #17 sources reviewed on 2026-09-25 UTC:
+
+- [Neovim v0.12.5 release](https://github.com/neovim/neovim/releases/tag/v0.12.5)
+- [Rust 1.98.1 release](https://blog.rust-lang.org/2026/09/03/Rust-1.98.1/) and official distribution host at `https://static.rust-lang.org/dist/2026-09-03/`
 
 ## Build and check
 
@@ -30,15 +36,17 @@ podman run --rm --network none --entrypoint node \
 podman history --no-trunc localhost/dungeon-agent:0.0.3-dev
 ```
 
-Pull the exact `FROM` digest first if it is not cached. No registry publication is needed. `verify.cjs` compares all three CLI version outputs against the manifest, both in the package installation and through the final non-root runtime PATH during the build. The final check removes its transient guest cache, log, and helper paths (absent in the pinned base); it does not leave a Codex session or auth state in the image. Runtime links target vendor-declared binaries directly, not pnpm's location-dependent shell shims.
+Pull the exact `FROM` digest first if it is not cached. No registry publication is needed. `verify.cjs` compares all three agent CLI outputs against the manifest, then, from the final non-root runtime PATH, checks Neovim, rustc, and Cargo versions, exact image-owned paths, root ownership, non-writability, and guest-private state environment. The final check removes its transient guest cache, Cargo state, logs, and helper paths; it does not leave a Codex session or auth state in the image. Runtime agent links target vendor-declared binaries directly, not pnpm's location-dependent shell shims.
 
-The pnpm bootstrap archive is SHA-256 checked. Package installation uses the frozen lock with scripts disabled; only the two reviewed native-binary setup scripts run afterward, with network disabled. A missing binary cannot trigger an unlocked fallback download. The final stage copies only the installed tooling, not pnpm's bootstrap or package store. The build context allowlist excludes all other files.
+The pnpm bootstrap archive and all Neovim/Rust archives are SHA-256 checked before extraction or local installer execution. Package installation uses the frozen lock with scripts disabled; only the two reviewed npm vendor native-binary setup scripts run afterward, with network disabled. Rust component `install.sh` files are executed only after their containing official archives pass the reviewed hash check. No remote installer is piped to a shell, no rustup toolchain manager is added, and no mutable Rust or Neovim release channel is resolved. A missing binary cannot trigger an unlocked fallback download. The final stage copies only the installed agent packages and reviewed image-tool filesystem, not pnpm's bootstrap, package store, or downloaded archives. The build context allowlist excludes all other files.
 
-For a version update, edit the manifest, regenerate the lock with its pinned pnpm (`pnpm install --lockfile-only --ignore-scripts` in this directory), review upstream install scripts and integrity metadata, then rebuild and repeat live validation. A pnpm version update also requires reviewing and replacing its bootstrap checksum in the Containerfile.
+For an agent version update, edit the manifest, regenerate the lock with its pinned pnpm (`pnpm install --lockfile-only --ignore-scripts` in this directory), review upstream install scripts and integrity metadata, then rebuild and repeat live validation. For a Neovim or Rust update, replace only the manifest version/distribution coordinates and reviewed artifact hashes, then repeat the same image and containment validation. A pnpm version update also requires reviewing and replacing its bootstrap checksum in the Containerfile.
 
 ## Containment contract
 
-The runtime remains `sandbox:sandbox` (UID/GID 998), with `HOME=/sandbox`. Installed tools are root-owned under `/usr/lib/node_modules/dungeon-agent`; `/usr/local/bin` exposes them. This location uses existing Dungeon read-only and executable-network policy paths. Old base OpenCode/Codex/Claude entrypoints are removed, not left as alternate launch paths. Guest state stays in guest-owned paths; the image does not contain host configuration, credentials, browser state, sessions, private keys, or engine sockets.
+The runtime remains `sandbox:sandbox` (UID/GID 998), with `HOME=/sandbox`. Agent packages are root-owned under `/usr/lib/node_modules/dungeon-agent`, with `/usr/local/bin` exposing their reviewed entrypoints. Neovim installs under `/usr/local/bin/nvim`, `/usr/local/lib/nvim`, and `/usr/local/share/nvim`; Rust installs `/usr/local/bin/rustc`, `/usr/local/bin/cargo`, and `/usr/local/lib/rustlib`. These locations are root-owned and non-writable to `sandbox`, and already fall under Dungeon's existing read-only `/usr` policy and executable-network paths. No policy expansion is required. Old base OpenCode/Codex/Claude entrypoints are removed, not left as alternate launch paths.
+
+Neovim and Cargo writable state remains guest-private: `XDG_CONFIG_HOME=/sandbox/.config`, `XDG_DATA_HOME=/sandbox/.local/share`, `XDG_STATE_HOME=/sandbox/.local/state`, `XDG_CACHE_HOME=/sandbox/.cache`, and `CARGO_HOME=/sandbox/.cargo`. Issue #17 does not import a real Neovim config or Cargo credentials. The image does not contain host configuration, credentials, browser state, sessions, private keys, registry auth, project files, or engine sockets.
 
 No model, provider, telemetry override, authentication bypass, or privileged runtime requirement is added. Vendor authentication happens only inside OpenShell. Dungeon still owns coordination, OpenShell enforcement, the image installed versions, and vendors auth/model/session formats.
 

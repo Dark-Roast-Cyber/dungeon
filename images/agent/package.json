@@ -7,6 +7,22 @@
     "@opencode/cli": "2.0.14",
     "@openai/codex": "0.156.1"
   },
+  "imageTools": {
+    "neovim": {
+      "version": "0.12.5",
+      "sha256": "bce0f56eda1f1b1db6eee8f4133d7a38813ea07933837dd1777411ca384c6875"
+    },
+    "rust": {
+      "version": "1.98.1",
+      "distDate": "2026-09-03",
+      "target": "x86_64-unknown-linux-gnu",
+      "components": {
+        "rustc": "e974f036b28565f37c0f3bd92ddefa809bee16c04f9dcf07b9ed96e05aaaf7c4",
+        "cargo": "ea1de9f9e23107d97ee2b41a72c552f34064a593da503789218387aee59f3ba4",
+        "rust-std": "fa3ff450172a16c026944030230c5069947af93c728d9179971d44e5e0cfb561"
+      }
+    }
+  },
   "pnpm": {
     "ignoredOptionalDependencies": [
       "@opencode/cli-linux-x64-musl",
