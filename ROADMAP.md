@@ -28,7 +28,8 @@ Completed or substantially implemented:
 2. **One-command local setup, Issue #7.** `dungeon setup` provisions and verifies the local Linux/rootless-Podman gateway after explicit prerequisite installation and immutable gateway-image pull.
 3. **Daily lifecycle, Issue #8.** `up`, `run`, and `down` preserve guest state and do not silently re-upload on resume.
 4. **Safe project export, Issue #9.** Reviewed staged export is implemented on the validated OpenShell 0.0.116/rootless-Podman path.
-5. **Reviewed tool/editor imports, Issue #5.** Continue with explicit read-only snapshots and guest-private writable state. Issue #17 supplies the first image-owned Neovim/Rust prerequisites.
+
+**Next in the 0.0.3 loop: reviewed tool/editor imports, Issue #5.** Continue with explicit read-only snapshots and guest-private writable state. Issue #17's local Linux amd64 image tooling passed synthetic Neovim, rustc, and offline Cargo workloads under the unchanged OpenShell hard policy. Issue #5 can use these image-owned tools, but importing operator-selected configuration is still separate work. The image is neither published nor Dungeon's default.
 
 Keep Issue #16 as bounded follow-up hardening for export durability, concurrency, and broader-platform semantics.
 
@@ -52,7 +53,7 @@ Guided CLI commands and declarative configuration must converge on one authorita
 
 Do not add arbitrary host hooks, runtime install scripts, raw secrets, automatic policy widening, or a second policy language.
 
-Issues #5 and #17 are the first concrete implementation path and should be extended rather than duplicated.
+Issue #5 is the first configuration-import slice; Issue #17 supplies its reviewed image-owned tool prerequisites and should not be reimplemented as a runtime installer.
 
 ### 3. Better OpenShell adoption and diagnostics, Issue #22
 

@@ -51,7 +51,7 @@ dungeon setup
 
 Setup provisions a local mTLS gateway named `dungeon-local` on loopback port 17670 with the Podman driver and workspace `default`. Repeat `dungeon setup` to verify it; incompatible existing registrations/containers are never overwritten. It does not create a sandbox, upload a project, install packages with privilege, download OpenShell, or fall back to MicroVM. Native Windows and macOS setup are not supported. Only the recorded Linux/Podman/OpenShell combination has live validation; setup health does not prove containment on every host.
 
-The [local reviewed agent image](images/agent/README.md) pins current OpenCode, Claude Code, and Codex distributions on the validated base. Build it with rootless Podman and explicitly select `localhost/dungeon-agent:0.0.3-dev` with `dungeon init --image`. It is not published or selected by default; publication and provenance remain separate work.
+The [local reviewed agent image](images/agent/README.md) pins reviewed OpenCode, Claude Code, Codex, Neovim, and Rust versions on the validated base. Build it with rootless Podman and explicitly select `localhost/dungeon-agent:0.0.3-dev` with `dungeon init --image`. It is not published or selected by default; publication and provenance remain separate work.
 
 ## First environment
 

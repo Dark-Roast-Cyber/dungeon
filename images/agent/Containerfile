@@ -70,12 +70,7 @@ RUN node -e 'const fs = require("node:fs"), path = require("node:path"); \
       for (const [command, binary] of Object.entries(pkg.bin)) \
         fs.symlinkSync(path.join(dir, binary), "/usr/local/bin/" + command); \
     }'
-ENV HOME=/sandbox \
-    XDG_CONFIG_HOME=/sandbox/.config \
-    XDG_DATA_HOME=/sandbox/.local/share \
-    XDG_STATE_HOME=/sandbox/.local/state \
-    XDG_CACHE_HOME=/sandbox/.cache \
-    CARGO_HOME=/sandbox/.cargo
+ENV HOME=/sandbox
 WORKDIR /sandbox
 USER sandbox
 RUN --network=none node /usr/lib/node_modules/dungeon-agent/verify.cjs --path \

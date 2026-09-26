@@ -240,7 +240,7 @@ This is not an atomic transaction or live synchronization path. No writable host
 
 A reviewed Dungeon image may pin compatible agent/tool versions, but it does not own vendor authentication formats, models, prompts, or session protocols.
 
-The local candidate in [`images/agent`](../images/agent/README.md) implements that version boundary with a digest-pinned OpenShell base and locked package installation. Tools are root-owned under `/usr/lib/node_modules/dungeon-agent`, within existing policy paths. Building or selecting the image does not change Dungeon policy or import host agent state.
+The local candidate in [`images/agent`](../images/agent/README.md) implements that version boundary with a digest-pinned OpenShell base, locked agent packages, and hash-verified Neovim/Rust artifacts. Agents are root-owned under `/usr/lib/node_modules/dungeon-agent`; Neovim and Rust are root-owned under `/usr/local`. Their entrypoints resolve under `/usr/local/bin`, within existing policy paths. Building or selecting the image does not change Dungeon policy or import host agent state. Neovim and Cargo use guest-private HOME-derived state under `/sandbox`; OpenShell does not propagate OCI image environment variables to executed commands by default.
 
 ## Optional Telltale boundary
 

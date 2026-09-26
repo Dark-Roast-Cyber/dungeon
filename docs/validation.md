@@ -85,7 +85,7 @@ An OpenShell MicroVM attempt on this host remained Provisioning with a guest Lan
 
 ## Live gates
 
-### Issue #6 local image candidate
+### Issue #6 local image candidate (historical)
 
 The [image build instructions and supply-chain boundary](../images/agent/README.md)
 describe a local-only candidate on Issue #1's unchanged base digest. The reviewed
@@ -99,7 +99,7 @@ checks must run without authentication; vendor login and edit/test evidence must
 come from a separate OpenShell sandbox with the existing hard Landlock policy.
 Image build/version success alone does not establish contained agent usability.
 
-The corrected local amd64 candidate built on rootless Podman 5.8.4. Image ID:
+The Issue #6 corrected local amd64 candidate built on rootless Podman 5.8.4. Its historical image ID:
 `c0d3c28cdc9da1c7bae2ca06870e73505eee3003905caa42ee2a129397e7959b`;
 local digest: `sha256:8ee097043582f4f3cd1b2f8e0981553b7f0889e496ceecc2dab13dcf153e48de`.
 Containerfile SHA-256:
@@ -168,8 +168,54 @@ than these unauthenticated curl probes.
 The OpenShell gateway needed mTLS/JWT bootstrap and a sandbox-reachable Podman
 callback endpoint to get past provisioning. Those were dedicated gateway
 configuration steps, not changes to Dungeon policy or the agent image.
-Publication/provenance, default-image selection, and Issue #7 are not
-authorized by this candidate.
+Publication/provenance and default-image selection were not authorized by
+this candidate. Issue #7 local setup was validated separately above.
+
+### Issue #17 local image tooling (2026-09-26)
+
+At Dungeon source HEAD `615e2f50bd8bb4f611ac331f4f369418b0dabaf3`
+plus the uncommitted image/docs convergence that removes redundant XDG and
+Cargo image environment variables, a local Linux amd64 candidate built with
+rootless Podman 5.8.4 and `--pull=never` from the same exact base digest.
+The final image ID is
+`f41665067d11e4f2738a3134c93ea69ea47b8cf61a301f91a3a10e466398cdde`,
+local digest `sha256:5a5353c130370361934d4826ee792e2f8038de40763f2713025dbb4ba83e0ce5`,
+and Containerfile SHA-256
+`73da7df24610e4e485ffb948a8dc83d55d85a4e49d0b0706926e62fe96863518`.
+The pnpm, Neovim, `rustc`, `cargo`, and `rust-std` archives passed their
+reviewed SHA-256 checks. The build's final network-disabled non-root
+`verify.cjs --path` passed, as did a separate network-disabled final-image
+run: Neovim 0.12.5, rustc 1.98.1, and cargo 1.98.1 resolved exactly under
+`/usr/local/bin`; their immutable tool/support paths were root-owned and
+non-writable to UID/GID 998 (`sandbox:sandbox`). Image history showed no
+added build secrets or credentials.
+
+With only `HOME=/sandbox` and no XDG or `CARGO_HOME` overrides, a synthetic
+read-only Neovim config executed headlessly, rustc compiled and ran a trivial
+binary, and a dependency-free Cargo project built offline and ran. Neovim
+reported data, state, and cache under `/sandbox/.local/share/nvim`,
+`/sandbox/.local/state/nvim`, and `/sandbox/.cache/nvim`; Cargo wrote under
+`/sandbox/.cargo` and the build target under `/sandbox`. Direct Podman checks
+also refused `/usr` and `/etc` writes and `/etc/shadow` reads; checked engine
+sockets and credential paths were absent.
+
+The same candidate reached Ready in a disposable Dungeon sandbox on the
+healthy local OpenShell CLI/gateway/Podman driver 0.0.116 combination, using
+the unchanged starter policy with Landlock `hard_requirement`. Without
+per-command environment overrides, the same Neovim, rustc, and offline Cargo
+tasks passed and wrote to those guest-private paths. A synthetic root-owned
+read-only config staged solely for this test was readable and executable by
+the guest but could not be written or chmodded by it. Protected writes and
+`/etc/shadow` reads failed, common engine sockets and checked credentials
+were absent, and unapproved `https://example.com` received CONNECT 403.
+OpenShell exec exposed `HOME=/sandbox` but not the removed OCI XDG/Cargo
+variables; it sanitizes the child environment. These tasks do not require
+Dungeon-managed `--env` propagation. The disposable sandbox was deleted;
+neither image publication nor a default-image/policy change was performed.
+Issue #17's local image/tooling acceptance is PASS on this tested Linux
+amd64/Podman combination, unblocking Issue #5's first image-owned prerequisites.
+It does not validate Issue #5 imports, other platforms, desktop clients, or
+EDR containment.
 
 ### Remaining gates
 
@@ -187,4 +233,4 @@ authorized by this candidate.
 
 ## Release
 
-Creating the reviewed version tag is the explicit native-release authorization step. npm publication remains a separate future gate. Runtime support claims remain limited to the exact validated combinations. The next validation emphasis is the reviewed agent image and low-friction developer loop.
+Creating the reviewed version tag is the explicit native-release authorization step. npm publication remains a separate future gate. Runtime support claims remain limited to the exact validated combinations. Issue #5's read-only configuration imports remain a separate implementation and validation gate after the Issue #17 image-owned tool prerequisites.

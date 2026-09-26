@@ -87,16 +87,7 @@ for (const pathname of [
   verifyImmutable(pathname);
 }
 
-for (const [name, expected] of Object.entries({
-  HOME: '/sandbox',
-  XDG_CONFIG_HOME: '/sandbox/.config',
-  XDG_DATA_HOME: '/sandbox/.local/share',
-  XDG_STATE_HOME: '/sandbox/.local/state',
-  XDG_CACHE_HOME: '/sandbox/.cache',
-  CARGO_HOME: '/sandbox/.cargo',
-})) {
-  assert.equal(process.env[name], expected, `${name} must remain guest-private`);
-}
+assert.equal(process.env.HOME, '/sandbox', 'HOME must remain guest-private');
 
 assert.notEqual(process.getuid(), 0, 'runtime user must be non-root');
 

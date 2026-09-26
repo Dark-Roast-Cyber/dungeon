@@ -15,6 +15,7 @@
 ## Unreleased image candidate (0.0.3)
 
 - Add one local Linux agent image with a digest-pinned OpenShell base, exact official OpenCode V2/Claude Code/Codex packages, a pnpm integrity lock, and build-time CLI version checks. No image publication, default-image change, policy expansion, or host-state import.
+- Add pinned, hash-verified Neovim 0.12.5 and Rust 1.98.1 (`rustc`, `cargo`, `rust-std`) to the image. Synthetic editor, compiler, and offline Cargo workloads passed under the unchanged OpenShell hard policy on the tested rootless-Podman gateway. Writable state uses HOME-derived `/sandbox` locations; no runtime installers or explicit guest environment propagation were added. Issue #5 configuration snapshots remain unimplemented.
 
 ## Unreleased (0.0.2)
 

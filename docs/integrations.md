@@ -3,15 +3,15 @@
 The execution environment is the common boundary. Interfaces are alternatives,
 not a requirement to use a particular agent protocol.
 
-| Workflow | Dungeon 0.0.1 path | Validation status |
+| Workflow | Dungeon path | Validation status |
 | --- | --- | --- |
-| OpenCode CLI | `run opencode` | Argument contract tested; live session pending. |
-| Claude Code CLI | `run claude` | Argument contract tested; live session pending. |
-| Codex CLI | `run codex` | Argument contract tested; live session pending. |
-| Codex login | `auth codex` | Dispatches vendor device-code flow; live auth pending. |
-| Claude Code login | `auth claude`, then `/login` | Dispatches vendor browser flow; live auth pending. |
+| OpenCode CLI | `run opencode` | Synthetic edit/test passed in one OpenShell Podman guest; other providers/accounts untested. |
+| Claude Code CLI | `run claude` | Reached onboarding/login-method screen; authenticated task not tested (Issue #11). |
+| Codex CLI | `run codex` | Synthetic task passed after two one-time approvals outside Codex's inner `bwrap` sandbox, within OpenShell. |
+| Codex login | `auth codex` | ChatGPT device login succeeded in guest; retained guest login checked after restart. |
+| Claude Code login | `auth claude`, then `/login` | Reached login-method screen; account-dependent completion not tested (Issue #11). |
 | Other compatible CLI | `exec -- COMMAND ARG...` | Generic argument transport tested. |
-| Interactive shell | `shell` | Delegates PTY to OpenShell; live terminal gate pending. |
+| Interactive shell | `shell` | PTY/Ctrl-C tested on the Issue #1 OpenShell Podman combination. |
 | VS Code | `code` | Delegates OpenShell editor connection. |
 | Claude Desktop / ChatGPT remote projects | `ssh-config`, then client setup | Documented integration target, not live-certified. |
 | OpenCode remote TUI | Guest server plus protected tunnel | Manual alternative, not managed server lifecycle. |
