@@ -29,7 +29,9 @@ Completed or substantially implemented:
 3. **Daily lifecycle, Issue #8.** `up`, `run`, and `down` preserve guest state and do not silently re-upload on resume.
 4. **Safe project export, Issue #9.** Reviewed staged export is implemented on the validated OpenShell 0.0.116/rootless-Podman path.
 
-**Next in the 0.0.3 loop: reviewed tool/editor imports, Issue #5.** Continue with explicit read-only snapshots and guest-private writable state. Issue #17's local Linux amd64 image tooling passed synthetic Neovim, rustc, and offline Cargo workloads under the unchanged OpenShell hard policy. Issue #5 can use these image-owned tools, but importing operator-selected configuration is still separate work. The image is neither published nor Dungeon's default.
+**Reviewed tool/editor imports, Issue #5 (plan-only slice landed).** The authoritative private config now accepts an explicit Neovim directory declaration; `plan` inventories it with file hashes plus the derived image-owned `nvim` requirement and guest-private state paths. Runtime application stays blocked: OpenShell 0.0.116 uploads as the sandbox user into writable `/sandbox`, which cannot enforce a read-only imported subtree, and Dungeon will not ship a weaker copy labeled as read-only.
+
+**Live workspace mount is the accepted direction for the default contained-development loop.** The product goal is that an agent environment mounts the current project workspace live read-write as its only default writable host path, while selected host configuration imports remain read-only snapshots and credentials, SSH keys, and engine sockets are never mounted. This changes Dungeon's current "copy project, reviewed export" default and must be built as a narrowly guarded transfer mode (reject root/home/parent-escape and credential paths), not a general host-mount feature. The reviewed upload/export copy path remains the explicit automation and recovery surface.
 
 Keep Issue #16 as bounded follow-up hardening for export durability, concurrency, and broader-platform semantics.
 

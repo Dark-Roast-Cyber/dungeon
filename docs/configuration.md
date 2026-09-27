@@ -74,6 +74,8 @@ Add the `imports` member to the existing config; the example omits its other req
 
 **Application is not implemented:** `create`, `up`, `run`, and other runtime operations refuse configurations declaring imports. OpenShell 0.0.116 uploads as the sandbox user into writable guest scope; merely changing the uploaded file modes would not make them read-only to that user. Do not treat the plan as an applied snapshot or an isolation test. Remove the declaration to use existing runtime operations; a safe, tested guest read-only mechanism is required before enabling import application. This does not change `policy.json`, the reviewed image, or environment propagation.
 
+A live read-write workspace mount of the configured project is the accepted default direction for the contained-development loop (see architecture and ROADMAP). It is a separate, future, narrowly guarded transfer mode; it does not change this import model or remove the copied upload/export automation path.
+
 The accepted capability model continues to extend this single authoritative configuration, not a parallel plugin configuration. General declarative fields for the remaining request categories are not added in this first slice (the Neovim requirement/state paths shown in plan are derived, and existing `providers` remains the named provider binding):
 
 - `requirements`: binaries/tool versions expected from the reviewed image;

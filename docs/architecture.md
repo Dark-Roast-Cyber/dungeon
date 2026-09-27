@@ -100,8 +100,8 @@ Low-friction project binding may remove repeated `--config` ceremony, but it mus
 
 | Data | Owner |
 | --- | --- |
-| Host project | User-owned; never mounted by Dungeon |
-| Guest project | Backend-owned explicit copy |
+| Host project | User-owned; live read-write workspace mount is the accepted default direction, narrowly guarded; copied upload/export remains the explicit automation/recovery surface |
+| Guest project | Backend-owned explicit copy in the copy mode; the live workspace mount replaces it in the live mode |
 | Agent sessions | Guest agent-owned |
 | Config/runtime binding | Private host directory |
 | Export baseline | Private config directory (`baseline.json`) |
@@ -183,7 +183,9 @@ Unsupported or unsatisfied requests remain explicit. Missing authority never cau
 
 ### Snapshot imports
 
-The first plan-only slice accepts a reviewed Neovim directory declaration in the authoritative private config. Runtime commands refuse it: OpenShell 0.0.116 uploads as the sandbox user, so guest-writable `/sandbox` cannot enforce a read-only imported subtree using uploaded file modes. Enforceable guest read-only snapshots are still an implementation gate; there are no live host mounts.
+The plan-only slice accepts a reviewed Neovim directory declaration in the authoritative private config and inventories it in `plan`. Runtime commands refuse it: OpenShell 0.0.116 uploads as the sandbox user, so guest-writable `/sandbox` cannot enforce a read-only imported subtree using uploaded file modes. Enforceable guest read-only snapshots remain an implementation gate.
+
+Separately, a live read-write workspace mount of the configured project has been accepted as the default contained-development direction. It is a narrowly guarded transfer mode: the workspace is the only default writable host path, imports and other selected host paths stay read-only, and credentials, SSH keys, and engine sockets are never mounted. The copied upload/export path remains the explicit automation/recovery surface. Neither mode introduces a general host-mount feature.
 
 - The host source path is selected explicitly from private Dungeon configuration.
 - Snapshot preflight rejects special files and symlinks for the initial implementation.
