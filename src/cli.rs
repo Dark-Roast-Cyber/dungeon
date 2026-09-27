@@ -127,6 +127,19 @@ fn dispatch(cli: Cli) -> Result<i32> {
         ),
         Commands::Plan => {
             let config = load_config(&required_config(config)?)?;
+            let imports = config
+                .values
+                .imports
+                .iter()
+                .map(|import| {
+                    Ok(json!({
+                        "source": import.source,
+                        "destination": import.destination,
+                        "mode": "requested read-only snapshot; not applied",
+                        "contents": crate::export::snapshot(&import.source)?,
+                    }))
+                })
+                .collect::<Result<Vec<_>>>()?;
             let mut command = vec![
                 "openshell".into(),
                 "--gateway".into(),
@@ -143,6 +156,11 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     "fingerprint": config.fingerprint,
                     "command": command,
                     "policy": config.policy,
+                    "imports": imports,
+                    "tool_requirements": if config.values.imports.is_empty() { vec![] } else { vec!["nvim (reviewed image; not verified by plan)"] },
+                    "guest_private_state": if config.values.imports.is_empty() { vec![] } else { vec!["/sandbox/.local/share/nvim", "/sandbox/.local/state/nvim", "/sandbox/.cache/nvim"] },
+                    "provider_requests": config.values.providers,
+                    "unsatisfied": if config.values.imports.is_empty() { vec![] } else { vec!["read-only guest import application is not yet supported; create/up refused"] },
                     "project_transfer": "separate explicit upload; no host bind mount",
                     "verification": "plan only; no backend contacted or enforcement verified"
                 }))?
@@ -154,6 +172,11 @@ fn dispatch(cli: Cli) -> Result<i32> {
         )),
         command => {
             let config = load_config(&required_config(config)?)?;
+            if !config.values.imports.is_empty() {
+                return Err(Error::new(
+                    "read-only guest imports are not yet enforceable by the OpenShell upload path; plan is review-only; remove imports to operate this environment",
+                ));
+            }
             let runtime = Runtime::new(&config)?;
             match command {
                 Commands::Create => runtime.create(),
@@ -307,6 +330,7 @@ fn initialize(
             image,
             agent,
             providers,
+            imports: vec![],
         },
     )?;
 
@@ -386,6 +410,47 @@ mod tests {
                 vec!["dungeon", "--config", "/private/dungeon.json", command]
             };
             assert!(Cli::try_parse_from(args).is_ok(), "{command}");
+        }
+    }
+
+    #[test]
+    fn declared_import_refuses_runtime_before_openshell_is_contacted() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let source = root.path().join("nvim");
+        let private = root.path().join("private");
+        for dir in [&project, &source, &private] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        std::fs::write(source.join("init.lua"), "vim.opt.number = true").unwrap();
+        write_new(&private.join("policy.json"), &starter_policy()).unwrap();
+        let mut doc = serde_json::to_value(ConfigDoc {
+            schema: 2,
+            name: "demo".into(),
+            gateway: "local".into(),
+            workspace: "default".into(),
+            project,
+            image: "localhost/test:1".into(),
+            agent: Agent::Opencode,
+            providers: vec![],
+            imports: vec![],
+        })
+        .unwrap();
+        doc["imports"] = json!([{"source": source, "destination": "/sandbox/.config/nvim"}]);
+        let path = private.join("dungeon.json");
+        write_new(&path, &doc).unwrap();
+        for action in ["create", "up", "run", "upload", "down"] {
+            let mut args = vec!["dungeon", "--config", path.to_str().unwrap(), action];
+            if action == "upload" {
+                args.push("--yes");
+            }
+            assert!(
+                dispatch(Cli::try_parse_from(args).unwrap())
+                    .unwrap_err()
+                    .to_string()
+                    .contains("not yet enforceable"),
+                "{action}"
+            );
         }
     }
 }

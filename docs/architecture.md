@@ -183,7 +183,7 @@ Unsupported or unsatisfied requests remain explicit. Missing authority never cau
 
 ### Snapshot imports
 
-The first implementation supports reviewed read-only snapshots only, not live host mounts.
+The first plan-only slice accepts a reviewed Neovim directory declaration in the authoritative private config. Runtime commands refuse it: OpenShell 0.0.116 uploads as the sandbox user, so guest-writable `/sandbox` cannot enforce a read-only imported subtree using uploaded file modes. Enforceable guest read-only snapshots are still an implementation gate; there are no live host mounts.
 
 - The host source path is selected explicitly from private Dungeon configuration.
 - Snapshot preflight rejects special files and symlinks for the initial implementation.

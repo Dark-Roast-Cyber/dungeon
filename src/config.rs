@@ -43,6 +43,15 @@ pub(crate) struct ConfigDoc {
     pub(crate) image: String,
     pub(crate) agent: Agent,
     pub(crate) providers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) imports: Vec<Import>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Import {
+    pub(crate) source: PathBuf,
+    pub(crate) destination: String,
 }
 
 #[derive(Clone, Debug)]
@@ -103,6 +112,19 @@ pub(crate) fn load_config(path: &Path) -> Result<Config> {
         }
     }
 
+    let mut destinations = HashSet::new();
+    for import in &values.imports {
+        if import.destination != "/sandbox/.config/nvim" {
+            return Err(Error::new(
+                "the first import destination must be /sandbox/.config/nvim",
+            ));
+        }
+        if !destinations.insert(&import.destination) {
+            return Err(Error::new("duplicate import destination"));
+        }
+        validate_import(&import.source)?;
+    }
+
     if !values.project.is_absolute() {
         return Err(Error::new("project must be an absolute path"));
     }
@@ -121,6 +143,19 @@ pub(crate) fn load_config(path: &Path) -> Result<Config> {
         return Err(Error::new(
             "keep Dungeon configuration outside the uploaded project",
         ));
+    }
+    for import in &values.imports {
+        if import.source.starts_with(&values.project)
+            || import
+                .source
+                .starts_with(path.parent().expect("config parent"))
+            || values.project.starts_with(&import.source)
+            || path.starts_with(&import.source)
+        {
+            return Err(Error::new(
+                "imports must be outside the project and private configuration directory",
+            ));
+        }
     }
     if !valid_image(&values.image) {
         return Err(Error::new(
@@ -151,6 +186,88 @@ pub(crate) fn load_config(path: &Path) -> Result<Config> {
         policy_path,
         fingerprint,
     })
+}
+
+fn validate_import(source: &Path) -> Result<()> {
+    use std::path::Component;
+    if !source.is_absolute()
+        || source
+            .to_string_lossy()
+            .split('/')
+            .any(|part| part == "." || part == "..")
+        || source
+            .components()
+            .any(|component| !matches!(component, Component::RootDir | Component::Normal(_)))
+        || source == Path::new("/")
+        || is_home(source)
+    {
+        return Err(Error::new(
+            "import source must be a specific absolute path without traversal",
+        ));
+    }
+    let mut path = PathBuf::new();
+    for component in source.components() {
+        path.push(component);
+        if reserved_import_name(component.as_os_str()) {
+            return Err(Error::new(
+                "import includes a credential or native state path",
+            ));
+        }
+        let kind = fs::symlink_metadata(&path)?.file_type();
+        if kind.is_symlink() || !kind.is_dir() && path != source {
+            return Err(Error::new(
+                "import path contains a symlink or non-directory ancestor",
+            ));
+        }
+    }
+    let kind = fs::symlink_metadata(source)?.file_type();
+    if !kind.is_dir() {
+        return Err(Error::new(
+            "Neovim import source must be an ordinary directory",
+        ));
+    }
+    validate_import_tree(source)
+}
+
+fn validate_import_tree(directory: &Path) -> Result<()> {
+    for item in fs::read_dir(directory)? {
+        let item = item?;
+        if reserved_import_name(&item.file_name()) {
+            return Err(Error::new(
+                "import includes a credential or native state path",
+            ));
+        }
+        let kind = item.file_type()?;
+        if kind.is_dir() {
+            validate_import_tree(&item.path())?;
+        } else if !kind.is_file() {
+            return Err(Error::new("import contains a symlink or special file"));
+        }
+    }
+    Ok(())
+}
+
+fn reserved_import_name(name: &std::ffi::OsStr) -> bool {
+    let name = name.to_string_lossy().to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        ".ssh"
+            | ".gnupg"
+            | ".aws"
+            | ".codex"
+            | ".claude"
+            | ".local"
+            | ".cache"
+            | ".npmrc"
+            | ".netrc"
+            | "auth.json"
+            | "credentials"
+            | "id_rsa"
+            | "id_ed25519"
+    ) || name == ".env"
+        || name.starts_with(".env.")
+        || name.ends_with(".pem")
+        || name.ends_with(".key")
 }
 
 pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
@@ -355,6 +472,7 @@ fn decode_json(text: &str) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::policy::starter_policy;
 
     #[test]
     fn duplicate_json_keys_are_rejected() {
@@ -393,5 +511,70 @@ mod tests {
             "policy": "policy.json"
         });
         assert!(serde_json::from_value::<ConfigDoc>(value).is_err());
+    }
+
+    #[test]
+    fn import_preflight_and_fingerprint_are_bound_to_the_single_config() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let private = root.path().join("private");
+        let source = root.path().join("nvim");
+        for dir in [&project, &private, &source] {
+            fs::create_dir(dir).unwrap();
+        }
+        fs::write(source.join("init.lua"), "vim.opt.number = true").unwrap();
+        write_new(&private.join("policy.json"), &starter_policy()).unwrap();
+        let config_path = private.join("dungeon.json");
+        let mut doc = json!({
+            "schema": 2, "name": "demo", "gateway": "local", "workspace": "default",
+            "project": project, "image": "localhost/test:1", "agent": "opencode",
+            "providers": [], "imports": []
+        });
+        let save =
+            |value: &Value| fs::write(&config_path, serde_json::to_vec(value).unwrap()).unwrap();
+        save(&doc);
+        let original = load_config(&config_path).unwrap().fingerprint;
+        let declaration = json!({"source": source, "destination": "/sandbox/.config/nvim"});
+        doc["imports"] = json!([declaration]);
+        save(&doc);
+        assert_ne!(original, load_config(&config_path).unwrap().fingerprint);
+
+        doc["imports"] = json!([declaration, declaration]);
+        save(&doc);
+        assert!(
+            load_config(&config_path)
+                .unwrap_err()
+                .to_string()
+                .contains("duplicate")
+        );
+
+        for bad in [
+            source.join("../nvim"),
+            project.clone(),
+            root.path().to_path_buf(),
+            private.clone(),
+        ] {
+            doc["imports"] = json!([{"source": bad, "destination": "/sandbox/.config/nvim"}]);
+            save(&doc);
+            assert!(load_config(&config_path).is_err(), "{bad:?}");
+        }
+        doc["imports"] = json!([declaration]);
+        fs::create_dir(source.join(".ssh")).unwrap();
+        save(&doc);
+        assert!(load_config(&config_path).is_err());
+        fs::remove_dir(source.join(".ssh")).unwrap();
+        fs::write(source.join(".env"), "FAKE_TOKEN=synthetic").unwrap();
+        assert!(load_config(&config_path).is_err());
+        fs::remove_file(source.join(".env")).unwrap();
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("init.lua", source.join("alias")).unwrap();
+            assert!(load_config(&config_path).is_err());
+            fs::remove_file(source.join("alias")).unwrap();
+            use std::os::unix::net::UnixListener;
+            let _socket = UnixListener::bind(source.join("socket")).unwrap();
+            assert!(load_config(&config_path).is_err());
+        }
     }
 }

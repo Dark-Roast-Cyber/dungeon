@@ -85,6 +85,16 @@ An OpenShell MicroVM attempt on this host remained Provisioning with a guest Lan
 
 ## Live gates
 
+Issue #5 plan-only first slice: synthetic tests exercise a Neovim directory
+declaration in the existing private schema-2 config, config fingerprint change,
+duplicate destination, traversal, project/config-tree import, credential-state
+entry, symlink, and socket refusal. `plan` inventories selected files but does
+not apply a guest import. All runtime commands fail closed for a declared import;
+the OpenShell 0.0.116 upload path runs as the guest sandbox user and cannot by
+itself enforce a read-only destination under writable `/sandbox`. No live import
+or guest read-only claim has been established. A tested enforcement mechanism
+and synthetic live import validation remain open before Issue #5 completion.
+
 ### Issue #6 local image candidate (historical)
 
 The [image build instructions and supply-chain boundary](../images/agent/README.md)
