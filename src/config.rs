@@ -32,9 +32,7 @@ impl Agent {
     }
 }
 
-#[derive(
-    Clone, Copy, Debug, Default, Deserialize, Serialize, clap::ValueEnum, PartialEq, Eq,
-)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, clap::ValueEnum, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 #[value(rename_all = "lower")]
 pub(crate) enum ProjectTransfer {
@@ -593,7 +591,10 @@ mod tests {
 
         doc["project_transfer"] = json!("copy");
         save(&doc);
-        assert_eq!(copy_fingerprint, load_config(&config_path).unwrap().fingerprint);
+        assert_eq!(
+            copy_fingerprint,
+            load_config(&config_path).unwrap().fingerprint
+        );
 
         doc["project_transfer"] = json!("live");
         save(&doc);

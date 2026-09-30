@@ -49,8 +49,7 @@ fn live_project_mount(config: &Config) -> Option<LiveProjectMount> {
 }
 
 fn live_driver_config(config: &Config) -> Option<String> {
-    live_project_mount(config)
-        .map(|mount| json!({"podman": {"mounts": [mount]}}).to_string())
+    live_project_mount(config).map(|mount| json!({"podman": {"mounts": [mount]}}).to_string())
 }
 
 pub(crate) fn project_transfer_plan(config: &Config) -> Value {
@@ -826,7 +825,13 @@ esac
         let runtime = fixture.runtime();
 
         assert!(runtime.upload().unwrap_err().to_string().contains("live"));
-        assert!(runtime.export(true).unwrap_err().to_string().contains("live"));
+        assert!(
+            runtime
+                .export(true)
+                .unwrap_err()
+                .to_string()
+                .contains("live")
+        );
         assert_eq!(fixture.calls("get"), 0);
         assert_eq!(fixture.calls("upload"), 0);
         assert_eq!(fixture.calls("download"), 0);
@@ -1081,7 +1086,10 @@ esac
                 }
             })
         );
-        assert_eq!(driver_config["podman"]["mounts"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            driver_config["podman"]["mounts"].as_array().unwrap().len(),
+            1
+        );
 
         let plan_args = plan_create_arguments(&live, &live.policy_path);
         let index = plan_args

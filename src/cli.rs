@@ -2,9 +2,7 @@ use crate::config::{
     Agent, ConfigDoc, ProjectTransfer, create_private_dir, load_config, safe_name, sandbox_name,
     write_new,
 };
-use crate::openshell::{
-    GUEST_PROJECT, Runtime, plan_create_arguments, project_transfer_plan,
-};
+use crate::openshell::{GUEST_PROJECT, Runtime, plan_create_arguments, project_transfer_plan};
 use crate::policy::starter_policy;
 use crate::{Error, OPEN_SHELL_VERSION, Result};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -477,8 +475,20 @@ mod tests {
         .unwrap();
 
         for args in [
-            vec!["dungeon", "--config", path.to_str().unwrap(), "upload", "--yes"],
-            vec!["dungeon", "--config", path.to_str().unwrap(), "export", "--yes"],
+            vec![
+                "dungeon",
+                "--config",
+                path.to_str().unwrap(),
+                "upload",
+                "--yes",
+            ],
+            vec![
+                "dungeon",
+                "--config",
+                path.to_str().unwrap(),
+                "export",
+                "--yes",
+            ],
         ] {
             let error = dispatch(Cli::try_parse_from(args).unwrap())
                 .unwrap_err()
