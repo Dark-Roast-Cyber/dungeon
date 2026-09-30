@@ -8,6 +8,12 @@ OpenShell owns filesystem/process/network enforcement. Dungeon requires Landlock
 
 Dungeon clears the inherited environment before invoking OpenShell and restores only an explicit allowlist. It does not automatically mount/copy host homes, engine sockets, native agent databases, private keys, or provider secrets.
 
+Project selection is launch context, not security authority. The low-friction
+launcher canonicalizes the selected/current directory and derives a private
+Dungeon-owned config location from that path. It never loads policy, transfer
+mode, raw mount data, or credentials from repository files. Renamed/moved
+projects are not silently rebound.
+
 ## Credentials
 
 OpenShell providers can grant authority even when raw secrets are brokered. `dungeon auth` starts vendor-owned login inside the guest. Resulting OAuth credentials live in guest-controlled state. Dungeon does not inspect, copy, refresh, escrow, or synchronize them.

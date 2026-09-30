@@ -55,33 +55,53 @@ The [local reviewed agent image](images/agent/README.md) pins reviewed OpenCode,
 
 ## First environment
 
-The current explicit flow is:
-
-```sh
-dungeon setup
-dungeon init --directory "$HOME/.config/dungeon/demo" --project "$PWD" --gateway dungeon-local --image localhost/dungeon-agent:0.0.3-dev
-CONFIG="$HOME/.config/dungeon/demo/dungeon.json"
-
-dungeon --config "$CONFIG" plan
-dungeon --config "$CONFIG" up
-dungeon --config "$CONFIG" run opencode
-dungeon --config "$CONFIG" exec -- git status
-dungeon --config "$CONFIG" export
-dungeon --config "$CONFIG" down
-```
-
-The planned low-friction path keeps the same security and lifecycle semantics while removing repeated configuration ceremony for normal interactive use. The target experience is approximately:
+After machine-level setup, the normal interactive launcher is project-oriented:
 
 ```sh
 dungeon setup
 cd my-project
+dungeon
+```
+
+With no positional path, `dungeon` uses the current directory. Pass a directory
+to launch another project directly:
+
+```sh
+dungeon ../other-project
+dungeon /home/user/projects/demo
+```
+
+Dungeon canonicalizes the selected project and resolves one deterministic
+private environment under
+`${XDG_CONFIG_HOME:-$HOME/.config}/dungeon/projects/<project-key>`. It never
+loads policy or security authority from the repository. On first use, an
+interactive terminal is required: Dungeon shows the project, private config
+path, copy transfer mode, gateway, image, and default agent, asks for
+confirmation, writes the private configuration, then brings the environment up
+and launches the configured agent.
+
+After that, lifecycle commands resolve the same private environment from the
+current directory without repeated config-path ceremony:
+
+```sh
 dungeon up
 dungeon run opencode
 dungeon code
 dungeon down
 ```
 
-The exact syntax may evolve. Explicit `--config PATH` remains the deterministic automation and recovery surface.
+The explicit configuration flow remains supported for deterministic automation,
+recovery, and hand-authored environments:
+
+```sh
+dungeon init --directory "$HOME/.config/dungeon/demo" --project "$PWD" --gateway dungeon-local --image localhost/dungeon-agent:0.0.3-dev
+CONFIG="$HOME/.config/dungeon/demo/dungeon.json"
+dungeon --config "$CONFIG" plan
+dungeon --config "$CONFIG" up
+```
+
+Explicit configs are not scanned or silently adopted as project bindings.
+`--config PATH` remains authoritative when supplied.
 
 The generated/default transfer mode is `copy`. On first `up`, copy mode creates the sandbox and uploads the configured project to `/sandbox/project`. A later `up` resumes the bound sandbox without uploading; if it is already Ready, `up` does nothing. `run` starts a stopped bound sandbox when needed, also without uploading. `down` stops the sandbox and preserves guest state.
 

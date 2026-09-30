@@ -1,6 +1,7 @@
+use crate::binding;
 use crate::config::{
-    Agent, ConfigDoc, ProjectTransfer, create_private_dir, load_config, safe_name, sandbox_name,
-    write_new,
+    Agent, Config, ConfigDoc, ProjectTransfer, canonical_project, create_private_dir, load_config,
+    safe_name, sandbox_name, write_new,
 };
 use crate::openshell::{GUEST_PROJECT, Runtime, plan_create_arguments, project_transfer_plan};
 use crate::policy::starter_policy;
@@ -10,7 +11,7 @@ use serde_json::json;
 use std::collections::HashSet;
 use std::env;
 use std::io::{self, IsTerminal, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const DEFAULT_IMAGE: &str = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest";
 
@@ -25,7 +26,8 @@ enum AuthAgent {
 #[command(
     name = "dungeon",
     version,
-    about = "Manage agent environments with OpenShell"
+    about = "Manage agent environments with OpenShell",
+    subcommand_precedence_over_arg = true
 )]
 struct Cli {
     #[arg(
@@ -34,8 +36,13 @@ struct Cli {
         help = "explicit private dungeon.json; no project discovery"
     )]
     config: Option<PathBuf>,
+    #[arg(
+        value_name = "PROJECT",
+        help = "project directory for direct launch; defaults to the current directory"
+    )]
+    project: Option<PathBuf>,
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -104,176 +111,306 @@ pub(crate) fn run() -> Result<i32> {
 }
 
 fn dispatch(cli: Cli) -> Result<i32> {
-    let Cli { config, command } = cli;
+    let Cli {
+        config,
+        project,
+        command,
+    } = cli;
+
     match command {
-        Commands::Setup => crate::openshell::setup(),
-        Commands::Init {
-            directory,
-            project,
-            project_transfer,
-            name,
-            gateway,
-            workspace,
-            image,
-            agent,
-            providers,
-            non_interactive,
-        } => initialize(
-            directory,
-            project,
-            project_transfer,
-            name,
-            gateway,
-            workspace,
-            image,
-            agent,
-            providers,
-            non_interactive,
-        ),
-        Commands::Plan => {
-            let config = load_config(&required_config(config)?)?;
-            let imports = config
-                .values
-                .imports
-                .iter()
-                .map(|import| {
-                    Ok(json!({
-                        "source": import.source,
-                        "destination": import.destination,
-                        "mode": "requested read-only snapshot; not applied",
-                        "contents": crate::export::snapshot(&import.source)?,
-                    }))
-                })
-                .collect::<Result<Vec<_>>>()?;
-            let mut unsatisfied = Vec::new();
-            if !config.values.imports.is_empty() {
-                unsatisfied.push(
-                    "read-only guest import application is not yet supported; create/up refused",
-                );
+        Some(Commands::Setup) => {
+            if project.is_some() {
+                return Err(Error::new(
+                    "PROJECT is only accepted for direct launch; setup has no project binding",
+                ));
             }
-            if config.values.project_transfer == ProjectTransfer::Live {
-                unsatisfied.push(
-                    "live project transfer requires trusted Podman bind-mount and keep-id gateway configuration; plan does not verify it",
-                );
-            }
-            let mut command = vec![
-                "openshell".into(),
-                "--gateway".into(),
-                config.values.gateway.clone(),
-                "--workspace".into(),
-                config.values.workspace.clone(),
-            ];
-            command.extend(plan_create_arguments(&config, &config.policy_path));
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&json!({
-                    "adapter": "openshell",
-                    "version": OPEN_SHELL_VERSION,
-                    "fingerprint": config.fingerprint,
-                    "command": command,
-                    "policy": config.policy,
-                    "imports": imports,
-                    "tool_requirements": if config.values.imports.is_empty() { vec![] } else { vec!["nvim (reviewed image; not verified by plan)"] },
-                    "guest_private_state": if config.values.imports.is_empty() { vec![] } else { vec!["/sandbox/.local/share/nvim", "/sandbox/.local/state/nvim", "/sandbox/.cache/nvim"] },
-                    "provider_requests": config.values.providers,
-                    "unsatisfied": unsatisfied,
-                    "project_transfer": project_transfer_plan(&config),
-                    "verification": "plan only; no backend contacted or enforcement verified"
-                }))?
-            );
-            Ok(0)
+            crate::openshell::setup()
         }
-        command => {
-            let config = load_config(&required_config(config)?)?;
-            if !config.values.imports.is_empty() {
+        Some(Commands::Init {
+            directory,
+            project: init_project,
+            project_transfer,
+            name,
+            gateway,
+            workspace,
+            image,
+            agent,
+            providers,
+            non_interactive,
+        }) => {
+            if project.is_some() {
                 return Err(Error::new(
-                    "read-only guest imports are not yet enforceable by the OpenShell upload path; plan is review-only; remove imports to operate this environment",
+                    "PROJECT is only accepted for direct launch; use init --project PATH",
                 ));
             }
-            if config.values.project_transfer == ProjectTransfer::Live {
-                match &command {
-                    Commands::Upload { .. } => {
-                        return Err(Error::new(
-                            "upload is unavailable in live project-transfer mode; the host project is requested directly at /sandbox/project",
-                        ));
-                    }
-                    Commands::Export { .. } => {
-                        return Err(Error::new(
-                            "export is unavailable in live project-transfer mode; live project changes are written directly to the host project",
-                        ));
-                    }
-                    _ => {}
-                }
-            }
-            if matches!(&command, Commands::Upload { yes: false }) {
+            initialize(
+                directory,
+                init_project,
+                project_transfer,
+                name,
+                gateway,
+                workspace,
+                image,
+                agent,
+                providers,
+                non_interactive,
+            )
+        }
+        Some(Commands::Plan) => {
+            if project.is_some() {
                 return Err(Error::new(
-                    "review project contents, including secrets and symlinks, then repeat upload --yes",
+                    "PROJECT is only accepted for direct launch; run plan from that directory or use --config",
                 ));
             }
-            let runtime = Runtime::new(&config)?;
-            match command {
-                Commands::Create => runtime.create(),
-                Commands::Up => runtime.up(),
-                Commands::Down | Commands::Stop => runtime.down(),
-                Commands::Status => {
-                    println!("{}", serde_json::to_string_pretty(&runtime.get()?)?);
-                    Ok(0)
-                }
-                Commands::Upload { yes: true } => runtime.upload(),
-                Commands::Export { yes } => runtime.export(yes),
-                Commands::Auth {
-                    agent: AuthAgent::Codex,
-                } => {
-                    eprintln!(
-                        "Starting Codex device authentication inside the guest. Complete the displayed URL/code in your browser. Dungeon never reads or stores the resulting credential."
-                    );
-                    runtime.execute(
-                        &["codex".into(), "login".into(), "--device-auth".into()],
-                        true,
-                        "/sandbox",
-                    )
-                }
-                Commands::Auth {
-                    agent: AuthAgent::Claude,
-                } => {
-                    eprintln!(
-                        "Starting Claude Code inside the guest. Use /login and complete the vendor browser flow. Dungeon never reads or stores the resulting credential."
-                    );
-                    runtime.execute(&["claude".into()], true, "/sandbox")
-                }
-                Commands::Run { agent, arguments } => {
-                    let selected = agent.unwrap_or(config.values.agent);
-                    let mut command = vec![selected.as_str().to_owned()];
-                    command.extend(arguments);
-                    runtime.run_agent(
-                        &command,
-                        io::stdin().is_terminal() && io::stdout().is_terminal(),
-                    )
-                }
-                Commands::Exec { tty, arguments } => {
-                    runtime.execute(&arguments, tty, GUEST_PROJECT)
-                }
-                Commands::Shell => {
-                    runtime.execute(&["/bin/bash".into(), "-l".into()], true, "/sandbox")
-                }
-                Commands::Code => runtime.connect_vscode(),
-                Commands::SshConfig => runtime.ssh_config(),
-                Commands::Start => runtime.start(),
-                Commands::Init { .. }
-                | Commands::Setup
-                | Commands::Plan
-                | Commands::Upload { yes: false } => {
-                    unreachable!()
-                }
+            let config = resolve_environment(config, None, true)?;
+            print_plan(&config)
+        }
+        None => {
+            let config = resolve_environment(config, project.as_deref(), true)?;
+            launch_default(&config)
+        }
+        Some(command) => {
+            if project.is_some() {
+                return Err(Error::new(
+                    "PROJECT is only accepted for direct launch; run the subcommand from that directory or use --config",
+                ));
             }
+            let create_binding = matches!(&command, Commands::Create | Commands::Up);
+            let config = resolve_environment(config, None, create_binding)?;
+            run_command(&config, command)
         }
     }
 }
 
-fn required_config(path: Option<PathBuf>) -> Result<PathBuf> {
-    path.ok_or_else(|| {
-        Error::new("--config is required; project-local configuration is never auto-loaded")
-    })
+fn resolve_environment(
+    explicit: Option<PathBuf>,
+    project: Option<&Path>,
+    create_if_missing: bool,
+) -> Result<Config> {
+    if let Some(path) = explicit {
+        if project.is_some() {
+            return Err(Error::new(
+                "do not combine positional PROJECT with --config; the explicit config is authoritative",
+            ));
+        }
+        return load_config(&path);
+    }
+
+    let project = canonical_project(project.unwrap_or_else(|| Path::new(".")))?;
+    if let Some(config) = binding::load(&project)? {
+        return Ok(config);
+    }
+    if !create_if_missing {
+        return Err(Error::new(format!(
+            "no private Dungeon environment is bound to {}; run `dungeon` or `dungeon up` from that project to initialize one",
+            project.display()
+        )));
+    }
+    create_project_binding(&project)
+}
+
+fn create_project_binding(project: &Path) -> Result<Config> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Err(Error::new(format!(
+            "no private Dungeon environment is bound to {}; initialize interactively from that project or use --config",
+            project.display()
+        )));
+    }
+
+    let path = binding::config_path(project)?;
+    let directory = path.parent().expect("binding config parent").to_path_buf();
+    let name = ask("Environment name", &binding::generated_name(project)?)?;
+    let gateway = ask("Registered OpenShell gateway", "dungeon-local")?;
+    let image = ask("Reviewed OCI image", DEFAULT_IMAGE)?;
+    let agent = Agent::from_str(
+        &ask("Default agent (opencode/claude/codex)", "opencode")?,
+        true,
+    )
+    .map_err(|_| Error::new("unknown default agent"))?;
+
+    println!("Project: {}", project.display());
+    println!("Private configuration: {}", path.display());
+    println!("Project transfer: copy");
+    println!("Writable host mounts: none in copy mode");
+    println!("Gateway: {gateway}");
+    println!("Image: {image}");
+    println!("Default agent: {}", agent.as_str());
+    if !confirm("Create this private project environment and continue?")? {
+        return Err(Error::new(
+            "project environment initialization cancelled; no files were created",
+        ));
+    }
+
+    write_environment(
+        directory,
+        ConfigDoc {
+            schema: 2,
+            name,
+            gateway,
+            workspace: "default".into(),
+            project: project.to_path_buf(),
+            project_transfer: ProjectTransfer::Copy,
+            image,
+            agent,
+            providers: vec![],
+            imports: vec![],
+        },
+    )
+}
+
+fn print_plan(config: &Config) -> Result<i32> {
+    let imports = config
+        .values
+        .imports
+        .iter()
+        .map(|import| {
+            Ok(json!({
+                "source": import.source,
+                "destination": import.destination,
+                "mode": "requested read-only snapshot; not applied",
+                "contents": crate::export::snapshot(&import.source)?,
+            }))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut unsatisfied = Vec::new();
+    if !config.values.imports.is_empty() {
+        unsatisfied.push(
+            "read-only guest import application is not yet supported; create/up refused",
+        );
+    }
+    if config.values.project_transfer == ProjectTransfer::Live {
+        unsatisfied.push(
+            "live project transfer requires trusted Podman bind-mount and keep-id gateway configuration; plan does not verify it",
+        );
+    }
+    let mut command = vec![
+        "openshell".into(),
+        "--gateway".into(),
+        config.values.gateway.clone(),
+        "--workspace".into(),
+        config.values.workspace.clone(),
+    ];
+    command.extend(plan_create_arguments(config, &config.policy_path));
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "adapter": "openshell",
+            "version": OPEN_SHELL_VERSION,
+            "environment": {
+                "name": config.values.name,
+                "config": config.path,
+                "project": config.values.project,
+            },
+            "fingerprint": config.fingerprint,
+            "command": command,
+            "policy": config.policy,
+            "imports": imports,
+            "tool_requirements": if config.values.imports.is_empty() { vec![] } else { vec!["nvim (reviewed image; not verified by plan)"] },
+            "guest_private_state": if config.values.imports.is_empty() { vec![] } else { vec!["/sandbox/.local/share/nvim", "/sandbox/.local/state/nvim", "/sandbox/.cache/nvim"] },
+            "provider_requests": config.values.providers,
+            "unsatisfied": unsatisfied,
+            "project_transfer": project_transfer_plan(config),
+            "verification": "plan only; no backend contacted or enforcement verified"
+        }))?
+    );
+    Ok(0)
+}
+
+fn runtime_allowed(config: &Config) -> Result<()> {
+    if !config.values.imports.is_empty() {
+        return Err(Error::new(
+            "read-only guest imports are not yet enforceable by the OpenShell upload path; plan is review-only; remove imports to operate this environment",
+        ));
+    }
+    Ok(())
+}
+
+fn launch_default(config: &Config) -> Result<i32> {
+    runtime_allowed(config)?;
+    let runtime = Runtime::new(config)?;
+    let code = runtime.up()?;
+    if code != 0 {
+        return Ok(code);
+    }
+    runtime.run_agent(
+        &[config.values.agent.as_str().to_owned()],
+        io::stdin().is_terminal() && io::stdout().is_terminal(),
+    )
+}
+
+fn run_command(config: &Config, command: Commands) -> Result<i32> {
+    runtime_allowed(config)?;
+    if config.values.project_transfer == ProjectTransfer::Live {
+        match &command {
+            Commands::Upload { .. } => {
+                return Err(Error::new(
+                    "upload is unavailable in live project-transfer mode; the host project is requested directly at /sandbox/project",
+                ));
+            }
+            Commands::Export { .. } => {
+                return Err(Error::new(
+                    "export is unavailable in live project-transfer mode; live project changes are written directly to the host project",
+                ));
+            }
+            _ => {}
+        }
+    }
+    if matches!(&command, Commands::Upload { yes: false }) {
+        return Err(Error::new(
+            "review project contents, including secrets and symlinks, then repeat upload --yes",
+        ));
+    }
+
+    let runtime = Runtime::new(config)?;
+    match command {
+        Commands::Create => runtime.create(),
+        Commands::Up => runtime.up(),
+        Commands::Down | Commands::Stop => runtime.down(),
+        Commands::Status => {
+            println!("{}", serde_json::to_string_pretty(&runtime.get()?)?);
+            Ok(0)
+        }
+        Commands::Upload { yes: true } => runtime.upload(),
+        Commands::Export { yes } => runtime.export(yes),
+        Commands::Auth {
+            agent: AuthAgent::Codex,
+        } => {
+            eprintln!(
+                "Starting Codex device authentication inside the guest. Complete the displayed URL/code in your browser. Dungeon never reads or stores the resulting credential."
+            );
+            runtime.execute(
+                &["codex".into(), "login".into(), "--device-auth".into()],
+                true,
+                "/sandbox",
+            )
+        }
+        Commands::Auth {
+            agent: AuthAgent::Claude,
+        } => {
+            eprintln!(
+                "Starting Claude Code inside the guest. Use /login and complete the vendor browser flow. Dungeon never reads or stores the resulting credential."
+            );
+            runtime.execute(&["claude".into()], true, "/sandbox")
+        }
+        Commands::Run { agent, arguments } => {
+            let selected = agent.unwrap_or(config.values.agent);
+            let mut command = vec![selected.as_str().to_owned()];
+            command.extend(arguments);
+            runtime.run_agent(
+                &command,
+                io::stdin().is_terminal() && io::stdout().is_terminal(),
+            )
+        }
+        Commands::Exec { tty, arguments } => runtime.execute(&arguments, tty, GUEST_PROJECT),
+        Commands::Shell => runtime.execute(&["/bin/bash".into(), "-l".into()], true, "/sandbox"),
+        Commands::Code => runtime.connect_vscode(),
+        Commands::SshConfig => runtime.ssh_config(),
+        Commands::Start => runtime.start(),
+        Commands::Init { .. }
+        | Commands::Setup
+        | Commands::Plan
+        | Commands::Upload { yes: false } => unreachable!(),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -289,26 +426,7 @@ fn initialize(
     providers: Vec<String>,
     non_interactive: bool,
 ) -> Result<i32> {
-    let project = project.canonicalize()?;
-    if !project.is_dir() || project.parent().is_none() || is_home(&project) {
-        return Err(Error::new(
-            "select a project directory, not a filesystem root or your home",
-        ));
-    }
-
-    let directory = if directory.is_absolute() {
-        directory
-    } else {
-        env::current_dir()?.join(directory)
-    };
-    if directory.starts_with(&project) {
-        return Err(Error::new("configuration must be outside the project"));
-    }
-    if directory.exists() {
-        return Err(Error::new(
-            "use a new configuration directory; existing directories are never overwritten",
-        ));
-    }
+    let project = canonical_project(&project)?;
 
     if !non_interactive {
         if !io::stdin().is_terminal() {
@@ -334,28 +452,9 @@ fn initialize(
 
     let name = name.ok_or_else(|| Error::new("--name is required with --non-interactive"))?;
     let gateway = gateway.unwrap_or_else(|| "dungeon-local".to_owned());
-
-    sandbox_name(&name)?;
-    for (field, value) in [
-        ("gateway", gateway.as_str()),
-        ("workspace", workspace.as_str()),
-    ] {
-        safe_name(value, field)?;
-    }
-
-    let mut seen = HashSet::new();
-    for provider in &providers {
-        safe_name(provider, "provider")?;
-        if !seen.insert(provider) {
-            return Err(Error::new("provider names must not repeat"));
-        }
-    }
-
-    create_private_dir(&directory)?;
-    write_new(&directory.join("policy.json"), &starter_policy())?;
-    write_new(
-        &directory.join("dungeon.json"),
-        &ConfigDoc {
+    let config = write_environment(
+        directory,
+        ConfigDoc {
             schema: 2,
             name,
             gateway,
@@ -369,10 +468,46 @@ fn initialize(
         },
     )?;
 
-    let config = load_config(&directory.join("dungeon.json"))?;
     println!("Configuration: {}", config.path.display());
     println!("Review policy.json and named providers, then run plan. No runtime was started.");
     Ok(0)
+}
+
+fn write_environment(directory: PathBuf, values: ConfigDoc) -> Result<Config> {
+    sandbox_name(&values.name)?;
+    for (field, value) in [
+        ("gateway", values.gateway.as_str()),
+        ("workspace", values.workspace.as_str()),
+    ] {
+        safe_name(value, field)?;
+    }
+
+    let mut seen = HashSet::new();
+    for provider in &values.providers {
+        safe_name(provider, "provider")?;
+        if !seen.insert(provider) {
+            return Err(Error::new("provider names must not repeat"));
+        }
+    }
+
+    let directory = if directory.is_absolute() {
+        directory
+    } else {
+        env::current_dir()?.join(directory)
+    };
+    if directory.starts_with(&values.project) {
+        return Err(Error::new("configuration must be outside the project"));
+    }
+    if directory.exists() {
+        return Err(Error::new(
+            "use a new configuration directory; existing directories are never overwritten",
+        ));
+    }
+
+    create_private_dir(&directory)?;
+    write_new(&directory.join("policy.json"), &starter_policy())?;
+    write_new(&directory.join("dungeon.json"), &values)?;
+    load_config(&directory.join("dungeon.json"))
 }
 
 fn ask(label: &str, default: &str) -> Result<String> {
@@ -388,17 +523,43 @@ fn ask(label: &str, default: &str) -> Result<String> {
     })
 }
 
-fn is_home(path: &std::path::Path) -> bool {
-    env::var_os("HOME")
-        .or_else(|| env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .map(|home| home.canonicalize().unwrap_or(home) == path)
-        .unwrap_or(false)
+fn confirm(label: &str) -> Result<bool> {
+    print!("{label} [y/N]: ");
+    io::stdout().flush()?;
+    let mut value = String::new();
+    io::stdin().read_line(&mut value)?;
+    Ok(matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direct_launch_accepts_current_or_explicit_project_and_subcommands_keep_precedence() {
+        let current = Cli::try_parse_from(["dungeon"]).unwrap();
+        assert!(current.project.is_none());
+        assert!(current.command.is_none());
+
+        let explicit = Cli::try_parse_from(["dungeon", "../project"]).unwrap();
+        assert_eq!(explicit.project, Some(PathBuf::from("../project")));
+        assert!(explicit.command.is_none());
+
+        let up = Cli::try_parse_from(["dungeon", "up"]).unwrap();
+        assert!(up.project.is_none());
+        assert!(matches!(up.command, Some(Commands::Up)));
+
+        let configured =
+            Cli::try_parse_from(["dungeon", "--config", "/private/dungeon.json"]).unwrap();
+        assert_eq!(
+            configured.config,
+            Some(PathBuf::from("/private/dungeon.json"))
+        );
+        assert!(configured.command.is_none());
+    }
 
     #[test]
     fn auth_is_vendor_scoped() {

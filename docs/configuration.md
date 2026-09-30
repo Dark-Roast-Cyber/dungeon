@@ -1,6 +1,6 @@
 # Configuration
 
-Use one private directory per environment and pass `--config` explicitly. Dungeon never discovers config from a repository.
+Dungeon keeps one private directory per environment and never discovers configuration or policy from a repository. For normal interactive use, `dungeon` resolves the current directory, or an explicit positional project path, to a deterministic private binding under `${XDG_CONFIG_HOME:-$HOME/.config}/dungeon/projects/<project-key>`. Explicit `--config PATH` remains the authoritative automation/recovery surface and is never silently replaced by project resolution.
 
 `dungeon setup` needs no project configuration. On Linux it uses gateway `dungeon-local`, workspace `default`, port 17670, and rootless Podman. The gateway container's config, generated mTLS/JWT keys and database live in `${XDG_STATE_HOME:-$HOME/.local/state}/dungeon/local-setup` (private host state). OpenShell owns its gateway registration and mTLS client material in `${XDG_CONFIG_HOME:-$HOME/.config}/openshell/gateways/dungeon-local`; Podman owns the `dungeon-local` network and `openshell-gateway-dungeon-local` container. Neither stores Dungeon project policy. A conflicting or partial installation requires explicit operator inspection; setup does not overwrite it. The initial `dungeon init` prompt defaults to `dungeon-local`, but use `--image localhost/dungeon-agent:0.0.3-dev` only after building the reviewed local image; the community base remains the CLI image default until a separate publication decision.
 
@@ -33,6 +33,39 @@ The starter policy requires Landlock `hard_requirement`, the non-root sandbox ac
 Dungeon does not widen policy automatically. Inspected REST/TLS endpoints must use `enforcement: enforce`.
 
 Review `plan` before `up`. `runtime.json` is Dungeon-owned identity bookkeeping and must not be edited to bypass mismatch checks.
+
+## Private project binding
+
+Direct launch accepts an optional project path:
+
+```sh
+dungeon
+dungeon ../other-project
+```
+
+Omitting the path uses the current directory. Dungeon canonicalizes that path,
+rejects filesystem root/home scope, derives a stable private project key, and
+resolves only the matching Dungeon-owned config directory. It does not scan the
+repository or other config directories.
+
+If no private binding exists, direct launch, `up`, `create`, or `plan`
+may initialize one only in an interactive terminal. Before writing files,
+Dungeon shows the canonical project, private config path, transfer mode,
+gateway, image, and default agent and requires confirmation. The generated
+binding currently starts in `copy` mode; Issue #24's live candidate remains
+explicit until its live gate passes.
+
+A moved or renamed project gets a different private project key and is never
+silently rebound. The old explicit config remains usable through `--config`
+for inspection or recovery. A partial or mismatched private binding fails
+closed rather than being guessed or overwritten. Private binding directories
+use the existing Dungeon 0700 directory and 0600 file creation rules.
+
+Subcommands without `--config` resolve the current directory's private
+binding. The positional project path is intentionally the direct-launch surface;
+for a subcommand against another project, run it from that directory or use the
+explicit config.
+
 
 Use the same explicit config for lifecycle commands: `dungeon --config PATH up`,
 `run opencode` (or another supported command), and `down`.

@@ -112,22 +112,34 @@ No host dotfiles, editor caches, agent databases, private SSH keys, engine socke
 
 ## Low-friction adoption
 
-The target interactive experience is approximately:
+The interactive project selector is a canonical host directory, not a repository
+configuration surface:
 
 ```sh
 dungeon setup
 cd project
-dungeon up
-dungeon run opencode
-dungeon code
-dungeon down
+dungeon
+dungeon ../other-project
 ```
 
-The exact CLI may evolve. The architectural requirements are:
+`dungeon [PROJECT]` resolves one deterministic private environment for the
+canonical project path and launches its configured default agent, bringing the
+environment up first when needed. Subcommands without `--config` resolve the
+current directory's same private binding.
 
-- a project can resolve one private Dungeon environment without repeated path ceremony;
+There is no mutable project-binding registry and no repository scan. The
+private config path is derived from the canonical project path under the user's
+Dungeon config root. This keeps one authoritative configuration per binding and
+eliminates ambiguous multi-match resolution. A rename or move intentionally
+produces a new binding key; the old environment is reachable only through its
+explicit config until the operator deliberately creates a new binding.
+
+The architectural requirements are:
+
+- a project resolves one private Dungeon environment without repeated config-path ceremony;
 - explicit `--config` remains available and authoritative for automation/recovery;
 - project-local material cannot grant security authority;
+- first binding is interactive and shows project, transfer mode, and security-relevant scope before files or runtime state are created;
 - first creation and security-relevant changes remain reviewable;
 - ambiguous or stale bindings fail explicitly;
 - the normal user can work through the native agent CLI, shell, VS Code, SSH, or other supported attachment rather than through a Dungeon-specific interaction model.

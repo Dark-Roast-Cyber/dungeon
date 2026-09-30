@@ -1,3 +1,4 @@
+mod binding;
 mod cli;
 mod config;
 mod export;

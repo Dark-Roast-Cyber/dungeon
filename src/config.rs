@@ -146,12 +146,8 @@ pub(crate) fn load_config(path: &Path) -> Result<Config> {
         return Err(Error::new("project must be an absolute path"));
     }
     if values.project.exists() {
-        if !values.project.is_dir() {
-            return Err(Error::new("project must be a directory"));
-        }
-        values.project = values.project.canonicalize()?;
-    }
-    if values.project.parent().is_none() || is_home(&values.project) {
+        values.project = canonical_project(&values.project)?;
+    } else if values.project.parent().is_none() || is_home(&values.project) {
         return Err(Error::new(
             "select a project directory, not a filesystem root or your home",
         ));
@@ -285,6 +281,21 @@ fn reserved_import_name(name: &std::ffi::OsStr) -> bool {
         || name.starts_with(".env.")
         || name.ends_with(".pem")
         || name.ends_with(".key")
+}
+
+pub(crate) fn canonical_project(path: &Path) -> Result<PathBuf> {
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        env::current_dir()?.join(path)
+    };
+    let project = path.canonicalize()?;
+    if !project.is_dir() || project.parent().is_none() || is_home(&project) {
+        return Err(Error::new(
+            "select a project directory, not a filesystem root or your home",
+        ));
+    }
+    Ok(project)
 }
 
 pub(crate) fn create_private_dir(path: &Path) -> Result<()> {
@@ -512,6 +523,36 @@ mod tests {
             assert!(safe_name(&"a".repeat(63), field).is_ok());
             assert!(safe_name(&"a".repeat(64), field).is_err());
         }
+    }
+
+    #[test]
+    fn canonical_project_rejects_root_and_accepts_a_real_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        fs::create_dir(&project).unwrap();
+        assert_eq!(
+            canonical_project(&project).unwrap(),
+            project.canonicalize().unwrap()
+        );
+        assert!(canonical_project(Path::new("/")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_directory_and_file_creation_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let private = root.path().join("private");
+        create_private_dir(&private).unwrap();
+        assert_eq!(
+            fs::metadata(&private).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+
+        let file = private.join("binding.json");
+        write_new(&file, &json!({"ok": true})).unwrap();
+        assert_eq!(fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     }
 
     #[test]

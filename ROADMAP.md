@@ -41,11 +41,17 @@ After the current 0.0.3 loop is stable, prioritize these slices in dependency or
 
 ### 1. Project adoption without repeated configuration ceremony, Issue #18
 
-Allow a developer to enter a project and resolve one private Dungeon environment without repeatedly passing `--config PATH`.
+A first project-binding slice is implemented on top of the existing lifecycle:
+`dungeon [PROJECT]` uses the supplied canonical directory or current directory,
+derives one private Dungeon config location, and launches the configured default
+agent after ensuring the environment is up. Normal subcommands can resolve the
+current project's same private binding without repeated `--config PATH`.
 
-The explicit config path remains the deterministic automation/recovery surface.
-
-Project-local content must not become security authority. Convenience must resolve to the existing lifecycle, identity, policy, upload, and export semantics rather than creating a second path.
+The binding is deterministic rather than registry-based, repository content is
+never configuration authority, first creation is interactive and reviewed, and
+explicit `--config` remains the automation/recovery surface. Follow-up
+ergonomics should stay on this same binding and lifecycle rather than adding a
+second project/config model.
 
 ### 2. Capability-oriented configuration, Issue #19
 

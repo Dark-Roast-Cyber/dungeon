@@ -13,6 +13,18 @@ CI checks formatting, Clippy, locked Rust tests, release compilation, CLI versio
 
 Offline tests cover strict duplicate-key JSON, safe names, schema rejection, starter-policy requirements, create arguments, auth command scope, removed provisional commands, native launcher selection, npm staging, and native archive production. They do not replace live isolation, vendor-auth, image/tooling, remote-editor, endpoint-security, or platform validation.
 
+Issue #18 private-binding contract: `dungeon` with no positional path resolves
+the canonical current directory, while `dungeon PROJECT` resolves that explicit
+directory. The project maps deterministically to one private Dungeon config
+directory; no repository file or config-directory scan participates. First
+binding requires an interactive review/confirmation and starts in copy mode.
+Repeat resolution must select the same config. Explicit `--config` remains
+authoritative. A moved/renamed project receives a different binding key; partial
+or mismatched private binding state fails closed. Static tests cover CLI
+subcommand precedence, path-key determinism, distinct same-basename projects,
+rename behavior, canonical project refusal, and existing identity/transfer
+contracts. This does not establish the Issue #24 live mount gate.
+
 Issue #8 lifecycle contract: verify first `up` creates and uploads once; resumed
 `up` starts the same bound sandbox without another upload and is a no-op when
 Ready; `run` starts a stopped bound sandbox without upload; and `down` stops it
