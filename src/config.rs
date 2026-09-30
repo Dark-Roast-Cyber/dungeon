@@ -552,7 +552,10 @@ mod tests {
 
         let file = private.join("binding.json");
         write_new(&file, &json!({"ok": true})).unwrap();
-        assert_eq!(fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 
     #[test]

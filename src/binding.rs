@@ -13,9 +13,9 @@ fn private_config_root() -> Result<PathBuf> {
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".config"));
     if !root.is_absolute()
-        || root.components().any(|component| {
-            matches!(component, Component::CurDir | Component::ParentDir)
-        })
+        || root
+            .components()
+            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
     {
         return Err(Error::new(
             "Dungeon private configuration root must be an absolute normalized path",

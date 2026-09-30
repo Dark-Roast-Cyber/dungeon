@@ -274,9 +274,8 @@ fn print_plan(config: &Config) -> Result<i32> {
         .collect::<Result<Vec<_>>>()?;
     let mut unsatisfied = Vec::new();
     if !config.values.imports.is_empty() {
-        unsatisfied.push(
-            "read-only guest import application is not yet supported; create/up refused",
-        );
+        unsatisfied
+            .push("read-only guest import application is not yet supported; create/up refused");
     }
     if config.values.project_transfer == ProjectTransfer::Live {
         unsatisfied.push(
