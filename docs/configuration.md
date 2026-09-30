@@ -60,13 +60,24 @@ OpenShell, inspect it, then run `upload --yes` explicitly to create a new
 baseline. Dungeon does not guess or synthesize the missing baseline.
 
 
-## Planned reviewed setup imports
+## Reviewed import declarations (plan-only first slice)
 
-No setup-import field exists in schema 2. The design is accepted, but implementation follows the reviewed image, local setup/lifecycle, and safe project-export slices so the normal contained development loop stabilizes first.
+Schema 2 now accepts an optional `imports` array in the same private `dungeon.json`. For the first Neovim case only, add an explicit directory source and the fixed destination:
 
-The accepted future model will extend the single authoritative Dungeon configuration rather than introduce project-local auto-discovery or a parallel plugin configuration. The model is declarative and request-only:
+```json
+{"imports": [{"source": "/home/user/.config/nvim", "destination": "/sandbox/.config/nvim"}]}
+```
 
-- `imports`: explicit host paths selected by the operator and snapshotted read-only;
+Add the `imports` member to the existing config; the example omits its other required fields.
+
+`plan` checks the directory and prints the source, destination, file hashes, requested image-owned `nvim`, and separate guest-private Neovim state paths. It does not copy or execute the files, contact OpenShell, or verify that the selected image contains `nvim`. No host content is sourced. Sources must be absolute, symlink-free ordinary directories with symlink-free regular contents, outside the project and private config; traversal, special entries, known credential/native-state paths, and duplicate destinations are rejected. Inspect all content yourself: these checks are not a secret scanner. There is no project-local discovery.
+
+**Application is not implemented:** `create`, `up`, `run`, and other runtime operations refuse configurations declaring imports. OpenShell 0.0.116 uploads as the sandbox user into writable guest scope; merely changing the uploaded file modes would not make them read-only to that user. Do not treat the plan as an applied snapshot or an isolation test. Remove the declaration to use existing runtime operations; a safe, tested guest read-only mechanism is required before enabling import application. This does not change `policy.json`, the reviewed image, or environment propagation.
+
+A live read-write workspace mount of the configured project is the accepted default direction for the contained-development loop (see architecture and ROADMAP). It is a separate, future, narrowly guarded transfer mode; it does not change this import model or remove the copied upload/export automation path.
+
+The accepted capability model continues to extend this single authoritative configuration, not a parallel plugin configuration. General declarative fields for the remaining request categories are not added in this first slice (the Neovim requirement/state paths shown in plan are derived, and existing `providers` remains the named provider binding):
+
 - `requirements`: binaries/tool versions expected from the reviewed image;
 - `state`: guest-private writable locations;
 - `network`: destinations a setup would like to use;
@@ -77,4 +88,4 @@ Raw credentials, shell snippets, host commands, arbitrary lifecycle hooks, privi
 
 The resolved plan must show the requested data and capability diff before anything is applied. Missing network/provider authority does not cause automatic policy widening. Project content may request setup in a future model, but project-local requests are untrusted and cannot grant themselves access.
 
-A Neovim import is a useful first case: copy only the selected Neovim config into a read-only guest snapshot, keep Neovim data/state/cache guest-private, and treat Lua/editor configuration as guest-executable content. A Rust toolchain is supplied by the reviewed OCI image rather than installed from a host script; Cargo network or registry credentials remain explicit policy/provider concerns.
+A Neovim import remains the first application target: copy only selected config into an enforceably read-only guest snapshot, keep Neovim data/state/cache guest-private, and treat Lua/editor configuration as guest-executable content. The Rust toolchain is supplied by the reviewed OCI image rather than installed from a host script; Cargo network or registry credentials remain explicit policy/provider concerns.

@@ -698,6 +698,7 @@ mod tests {
                 image: "localhost/test:1".into(),
                 agent: Agent::Opencode,
                 providers: vec![],
+                imports: vec![],
             },
             policy: starter_policy(),
             fingerprint: "fingerprint".into(),

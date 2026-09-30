@@ -85,6 +85,22 @@ An OpenShell MicroVM attempt on this host remained Provisioning with a guest Lan
 
 ## Live gates
 
+Issue #5 plan-only first slice: synthetic tests exercise a Neovim directory
+declaration in the existing private schema-2 config, config fingerprint change,
+duplicate destination, traversal, project/config-tree import, credential-state
+entry, symlink, and socket refusal. `plan` inventories selected files but does
+not apply a guest import. All runtime commands fail closed for a declared import;
+the OpenShell 0.0.116 upload path runs as the guest sandbox user and cannot by
+itself enforce a read-only destination under writable `/sandbox`. No live import
+or guest read-only claim has been established.
+
+A live read-write workspace mount of the configured project is now the accepted
+default-direction decision for the contained-development loop. This decision is
+architecture-level; it has not been implemented or validated. A guardrail
+design (root/home/parent-escape and credential-path refusal, imports read-only,
+no engine sockets) and live validation evidence are required before any live
+mount ships, and the copied upload/export path remains available.
+
 ### Issue #6 local image candidate (historical)
 
 The [image build instructions and supply-chain boundary](../images/agent/README.md)
@@ -233,4 +249,4 @@ EDR containment.
 
 ## Release
 
-Creating the reviewed version tag is the explicit native-release authorization step. npm publication remains a separate future gate. Runtime support claims remain limited to the exact validated combinations. Issue #5's read-only configuration imports remain a separate implementation and validation gate after the Issue #17 image-owned tool prerequisites.
+Creating the reviewed version tag is the explicit native-release authorization step. npm publication remains a separate future gate. Runtime support claims remain limited to the exact validated combinations. Issue #5's read-only configuration imports remain a separate implementation and validation gate after the Issue #17 image-owned tool prerequisites; the live workspace mount direction is tracked separately and is not yet implemented or validated.
