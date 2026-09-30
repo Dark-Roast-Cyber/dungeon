@@ -273,3 +273,103 @@ For every failure:
 6. Keep unrelated feature work out of the fix.
 
 A successful run proves only the exact tested combination. It does not automatically certify every OpenShell driver, desktop client, operating system, EDR product, or future version.
+
+
+## Issue #24 live workspace validation gate
+
+Run this matrix only against the Issue #24 pre-validation candidate after static
+CI is green. Record the exact Dungeon commit, Fedora release/kernel, OpenShell
+0.0.116 CLI/gateway, and rootless Podman 5.8.4 versions. Use a synthetic project
+with ordinary owner-writable files and no credentials.
+
+Use a dedicated disposable Dungeon/OpenShell gateway. Do not rewrite an existing
+`dungeon-local` gateway in place. Its Podman driver candidate must include:
+
+```toml
+[openshell.drivers.podman]
+enable_bind_mounts = true
+userns = "keep-id:uid=998,gid=998"
+```
+
+Create an explicit live config:
+
+```sh
+dungeon init \
+  --directory "$CONFIG_DIR" \
+  --project "$PROJECT" \
+  --gateway "$LIVE_GATEWAY" \
+  --project-transfer live \
+  --non-interactive \
+  --name issue24-live
+
+CONFIG="$CONFIG_DIR/dungeon.json"
+dungeon --config "$CONFIG" plan
+```
+
+Before contacting the runtime, verify that plan reports exactly the canonical
+host project, guest target `/sandbox/project`, read-write intent, the Podman
+host-bind requirement, the keep-id candidate, and unresolved validation status.
+It must not expose arbitrary driver JSON or claim gateway enforcement.
+
+Then run:
+
+```sh
+stat -c '%u:%g %a %n' "$PROJECT" "$PROJECT/probe.txt"
+dungeon --config "$CONFIG" up
+dungeon --config "$CONFIG" exec -- id
+dungeon --config "$CONFIG" exec -- stat -c '%u:%g %a %n' /sandbox/project /sandbox/project/probe.txt
+dungeon --config "$CONFIG" exec -- sh -lc 'printf "guest edit\n" >> /sandbox/project/probe.txt'
+cat "$PROJECT/probe.txt"
+printf 'host edit\n' >> "$PROJECT/probe.txt"
+dungeon --config "$CONFIG" exec -- tail -n 2 /sandbox/project/probe.txt
+```
+
+Required evidence:
+
+- guest effective UID/GID is the expected sandbox identity 998/998;
+- ordinary owner-mode host checkout files are writable from the guest;
+- the guest edit appears on the host immediately with the expected host
+  ownership and mode, without host chmod/chown;
+- the host edit appears immediately in the guest;
+- the only Dungeon-requested host bind is the canonical project at
+  `/sandbox/project`;
+- SELinux private-label behavior permits the intended guest access without
+  making normal host use fail unexpectedly.
+
+Exercise stop/start without upload:
+
+```sh
+dungeon --config "$CONFIG" down
+dungeon --config "$CONFIG" up
+dungeon --config "$CONFIG" exec -- tail -n 2 /sandbox/project/probe.txt
+```
+
+Verify the same sandbox is reused, the project is still live, and no project
+upload occurs.
+
+Repeat the existing hard-containment probes from this runbook. At minimum prove:
+
+- a protected path such as `/etc/shadow` remains denied by the hard Landlock
+  policy;
+- an unapproved network destination remains denied;
+- no Podman/Docker/container-engine socket is available in the guest;
+- no unintended host home, credential, SSH, agent database, or broader parent
+  path becomes visible.
+
+Verify transfer-mode refusal:
+
+```sh
+dungeon --config "$CONFIG" upload --yes
+dungeon --config "$CONFIG" export --yes
+```
+
+Both commands must refuse locally before contacting OpenShell.
+
+Finally create a separate default/copy config and rerun the existing copy-mode
+lifecycle/upload/export regression. Copy mode must remain unchanged.
+
+Record each check as `PASS | FAIL | DEGRADED | NOT TESTABLE`. A successful
+static build, plan output, gateway health check, or OpenShell policy readback is
+not sufficient evidence for this gate. Do not make live the generated/default
+mode until every required ownership, SELinux, policy-denial, visibility, and
+copy-regression check above has acceptable live evidence.

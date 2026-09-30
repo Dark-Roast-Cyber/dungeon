@@ -32,6 +32,23 @@ impl Agent {
     }
 }
 
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Serialize, clap::ValueEnum, PartialEq, Eq,
+)]
+#[serde(rename_all = "lowercase")]
+#[value(rename_all = "lower")]
+pub(crate) enum ProjectTransfer {
+    #[default]
+    Copy,
+    Live,
+}
+
+impl ProjectTransfer {
+    fn is_copy(&self) -> bool {
+        *self == Self::Copy
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ConfigDoc {
@@ -40,6 +57,8 @@ pub(crate) struct ConfigDoc {
     pub(crate) gateway: String,
     pub(crate) workspace: String,
     pub(crate) project: PathBuf,
+    #[serde(default, skip_serializing_if = "ProjectTransfer::is_copy")]
+    pub(crate) project_transfer: ProjectTransfer,
     pub(crate) image: String,
     pub(crate) agent: Agent,
     pub(crate) providers: Vec<String>,
@@ -511,6 +530,85 @@ mod tests {
             "policy": "policy.json"
         });
         assert!(serde_json::from_value::<ConfigDoc>(value).is_err());
+    }
+
+    #[test]
+    fn project_transfer_is_closed_and_defaults_to_copy() {
+        let base = json!({
+            "schema": 2,
+            "name": "demo",
+            "gateway": "local",
+            "workspace": "default",
+            "project": "/tmp/demo",
+            "image": "localhost/test:1",
+            "agent": "opencode",
+            "providers": []
+        });
+
+        let omitted: ConfigDoc = serde_json::from_value(base.clone()).unwrap();
+        assert_eq!(omitted.project_transfer, ProjectTransfer::Copy);
+
+        let mut explicit_copy = base.clone();
+        explicit_copy["project_transfer"] = json!("copy");
+        let explicit_copy: ConfigDoc = serde_json::from_value(explicit_copy).unwrap();
+        assert_eq!(explicit_copy.project_transfer, ProjectTransfer::Copy);
+
+        let mut live = base.clone();
+        live["project_transfer"] = json!("live");
+        let live: ConfigDoc = serde_json::from_value(live).unwrap();
+        assert_eq!(live.project_transfer, ProjectTransfer::Live);
+
+        let mut invalid = base;
+        invalid["project_transfer"] = json!("bind");
+        assert!(serde_json::from_value::<ConfigDoc>(invalid).is_err());
+    }
+
+    #[test]
+    fn project_transfer_changes_fingerprint_without_raw_driver_authority() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let private = root.path().join("private");
+        fs::create_dir(&project).unwrap();
+        fs::create_dir(&private).unwrap();
+        write_new(&private.join("policy.json"), &starter_policy()).unwrap();
+        let config_path = private.join("dungeon.json");
+        let mut doc = json!({
+            "schema": 2,
+            "name": "demo",
+            "gateway": "local",
+            "workspace": "default",
+            "project": project,
+            "image": "localhost/test:1",
+            "agent": "opencode",
+            "providers": []
+        });
+        let save =
+            |value: &Value| fs::write(&config_path, serde_json::to_vec(value).unwrap()).unwrap();
+
+        save(&doc);
+        let omitted = load_config(&config_path).unwrap();
+        assert_eq!(omitted.values.project_transfer, ProjectTransfer::Copy);
+        let copy_fingerprint = omitted.fingerprint.clone();
+        let policy = omitted.policy.clone();
+
+        doc["project_transfer"] = json!("copy");
+        save(&doc);
+        assert_eq!(copy_fingerprint, load_config(&config_path).unwrap().fingerprint);
+
+        doc["project_transfer"] = json!("live");
+        save(&doc);
+        let live = load_config(&config_path).unwrap();
+        assert_ne!(copy_fingerprint, live.fingerprint);
+        assert_eq!(policy, live.policy);
+
+        doc["driver_config"] = json!({"podman": {"mounts": []}});
+        save(&doc);
+        assert!(load_config(&config_path).is_err());
+        doc.as_object_mut().unwrap().remove("driver_config");
+
+        doc["mounts"] = json!([]);
+        save(&doc);
+        assert!(load_config(&config_path).is_err());
     }
 
     #[test]

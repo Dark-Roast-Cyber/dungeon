@@ -1,7 +1,10 @@
 use crate::config::{
-    Agent, ConfigDoc, create_private_dir, load_config, safe_name, sandbox_name, write_new,
+    Agent, ConfigDoc, ProjectTransfer, create_private_dir, load_config, safe_name, sandbox_name,
+    write_new,
 };
-use crate::openshell::{GUEST_PROJECT, Runtime, create_arguments};
+use crate::openshell::{
+    GUEST_PROJECT, Runtime, plan_create_arguments, project_transfer_plan,
+};
 use crate::policy::starter_policy;
 use crate::{Error, OPEN_SHELL_VERSION, Result};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -45,6 +48,8 @@ enum Commands {
         directory: PathBuf,
         #[arg(long)]
         project: PathBuf,
+        #[arg(long, value_enum, default_value = "copy")]
+        project_transfer: ProjectTransfer,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
@@ -107,6 +112,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
         Commands::Init {
             directory,
             project,
+            project_transfer,
             name,
             gateway,
             workspace,
@@ -117,6 +123,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
         } => initialize(
             directory,
             project,
+            project_transfer,
             name,
             gateway,
             workspace,
@@ -140,6 +147,17 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     }))
                 })
                 .collect::<Result<Vec<_>>>()?;
+            let mut unsatisfied = Vec::new();
+            if !config.values.imports.is_empty() {
+                unsatisfied.push(
+                    "read-only guest import application is not yet supported; create/up refused",
+                );
+            }
+            if config.values.project_transfer == ProjectTransfer::Live {
+                unsatisfied.push(
+                    "live project transfer requires trusted Podman bind-mount and keep-id gateway configuration; plan does not verify it",
+                );
+            }
             let mut command = vec![
                 "openshell".into(),
                 "--gateway".into(),
@@ -147,7 +165,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
                 "--workspace".into(),
                 config.values.workspace.clone(),
             ];
-            command.extend(create_arguments(&config, &config.policy_path));
+            command.extend(plan_create_arguments(&config, &config.policy_path));
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
@@ -160,21 +178,38 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     "tool_requirements": if config.values.imports.is_empty() { vec![] } else { vec!["nvim (reviewed image; not verified by plan)"] },
                     "guest_private_state": if config.values.imports.is_empty() { vec![] } else { vec!["/sandbox/.local/share/nvim", "/sandbox/.local/state/nvim", "/sandbox/.cache/nvim"] },
                     "provider_requests": config.values.providers,
-                    "unsatisfied": if config.values.imports.is_empty() { vec![] } else { vec!["read-only guest import application is not yet supported; create/up refused"] },
-                    "project_transfer": "separate explicit upload; no host bind mount",
+                    "unsatisfied": unsatisfied,
+                    "project_transfer": project_transfer_plan(&config),
                     "verification": "plan only; no backend contacted or enforcement verified"
                 }))?
             );
             Ok(0)
         }
-        Commands::Upload { yes: false } => Err(Error::new(
-            "review project contents, including secrets and symlinks, then repeat upload --yes",
-        )),
         command => {
             let config = load_config(&required_config(config)?)?;
             if !config.values.imports.is_empty() {
                 return Err(Error::new(
                     "read-only guest imports are not yet enforceable by the OpenShell upload path; plan is review-only; remove imports to operate this environment",
+                ));
+            }
+            if config.values.project_transfer == ProjectTransfer::Live {
+                match &command {
+                    Commands::Upload { .. } => {
+                        return Err(Error::new(
+                            "upload is unavailable in live project-transfer mode; the host project is requested directly at /sandbox/project",
+                        ));
+                    }
+                    Commands::Export { .. } => {
+                        return Err(Error::new(
+                            "export is unavailable in live project-transfer mode; live project changes are written directly to the host project",
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+            if matches!(&command, Commands::Upload { yes: false }) {
+                return Err(Error::new(
+                    "review project contents, including secrets and symlinks, then repeat upload --yes",
                 ));
             }
             let runtime = Runtime::new(&config)?;
@@ -247,6 +282,7 @@ fn required_config(path: Option<PathBuf>) -> Result<PathBuf> {
 fn initialize(
     directory: PathBuf,
     project: PathBuf,
+    project_transfer: ProjectTransfer,
     mut name: Option<String>,
     mut gateway: Option<String>,
     workspace: String,
@@ -327,6 +363,7 @@ fn initialize(
             gateway,
             workspace,
             project,
+            project_transfer,
             image,
             agent,
             providers,
@@ -414,6 +451,87 @@ mod tests {
     }
 
     #[test]
+    fn live_transfer_upload_and_export_refuse_before_runtime_lookup() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let private = root.path().join("private");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::create_dir(&private).unwrap();
+        write_new(&private.join("policy.json"), &starter_policy()).unwrap();
+        let path = private.join("dungeon.json");
+        write_new(
+            &path,
+            &ConfigDoc {
+                schema: 2,
+                name: "demo".into(),
+                gateway: "local".into(),
+                workspace: "default".into(),
+                project,
+                project_transfer: ProjectTransfer::Live,
+                image: "localhost/test:1".into(),
+                agent: Agent::Opencode,
+                providers: vec![],
+                imports: vec![],
+            },
+        )
+        .unwrap();
+
+        for args in [
+            vec!["dungeon", "--config", path.to_str().unwrap(), "upload", "--yes"],
+            vec!["dungeon", "--config", path.to_str().unwrap(), "export", "--yes"],
+        ] {
+            let error = dispatch(Cli::try_parse_from(args).unwrap())
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("live project-transfer mode"), "{error}");
+            assert!(!error.contains("OpenShell"), "{error}");
+        }
+    }
+
+    #[test]
+    fn init_exposes_only_the_closed_project_transfer_domain() {
+        assert!(
+            Cli::try_parse_from([
+                "dungeon",
+                "init",
+                "--directory",
+                "/tmp/dungeon",
+                "--project",
+                "/tmp/project",
+                "--project-transfer",
+                "live"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "dungeon",
+                "init",
+                "--directory",
+                "/tmp/dungeon",
+                "--project",
+                "/tmp/project",
+                "--project-transfer",
+                "bind"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "dungeon",
+                "init",
+                "--directory",
+                "/tmp/dungeon",
+                "--project",
+                "/tmp/project",
+                "--driver-config-json",
+                "{}"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
     fn declared_import_refuses_runtime_before_openshell_is_contacted() {
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("project");
@@ -430,6 +548,7 @@ mod tests {
             gateway: "local".into(),
             workspace: "default".into(),
             project,
+            project_transfer: ProjectTransfer::Copy,
             image: "localhost/test:1".into(),
             agent: Agent::Opencode,
             providers: vec![],

@@ -27,7 +27,7 @@ Dungeon must not weaken isolation for convenience. Project content may request c
 - Direct OpenCode, Claude Code, Codex, shell, and arbitrary command execution.
 - Vendor-native guest authentication for Codex device login and Claude Code browser login.
 - Optional VS Code and SSH attachment.
-- Explicit config, policy, project upload, runtime identity, and safe project-export checks.
+- Explicit config, policy, typed project-transfer intent, runtime identity, and safe copy-mode upload/export checks.
 - One starter OpenShell policy. Additional profiles wait for validated scenario differences.
 - A validated rootless-Podman/OpenShell path; broader runtime/platform support remains explicit future validation.
 
@@ -83,9 +83,11 @@ dungeon down
 
 The exact syntax may evolve. Explicit `--config PATH` remains the deterministic automation and recovery surface.
 
-On first `up`, Dungeon creates the sandbox and uploads the configured project to `/sandbox/project`. A later `up` resumes the bound sandbox without uploading; if it is already Ready, `up` does nothing. `run` starts a stopped bound sandbox when needed, also without uploading. `down` stops the sandbox and preserves guest state.
+The generated/default transfer mode is `copy`. On first `up`, copy mode creates the sandbox and uploads the configured project to `/sandbox/project`. A later `up` resumes the bound sandbox without uploading; if it is already Ready, `up` does nothing. `run` starts a stopped bound sandbox when needed, also without uploading. `down` stops the sandbox and preserves guest state.
 
-Export is a separate reviewed operation, allowed only while the bound sandbox is Ready on OpenShell 0.0.116. `dungeon --config "$CONFIG" export` downloads and stages guest changes, prints a deterministic summary, then requires interactive typed `yes` or explicit `--yes` before applying. Conflicts and special entries are refused. Upload remains a deliberate refresh/recovery action: `dungeon --config "$CONFIG" upload --yes` overwrites guest project contents and can discard guest-side edits. The project is copied, not bind-mounted or live-synchronized.
+Copy-mode export is a separate reviewed operation, allowed only while the bound sandbox is Ready on OpenShell 0.0.116. `dungeon --config "$CONFIG" export` downloads and stages guest changes, prints a deterministic summary, then requires interactive typed `yes` or explicit `--yes` before applying. Conflicts and special entries are refused. Upload remains a deliberate refresh/recovery action: `dungeon --config "$CONFIG" upload --yes` overwrites guest project contents and can discard guest-side edits.
+
+Issue #24 also provides an explicit `--project-transfer live` pre-validation candidate. It derives one read-write Podman bind request for the canonical configured project at `/sandbox/project`, performs no upload, and refuses upload/export. It is not a supported or default path yet. The dedicated gateway bind-mount and keep-id settings still require the recorded OpenShell 0.0.116/rootless-Podman/Fedora validation, and `dungeon setup` does not enable or migrate them automatically.
 
 ## Authentication
 

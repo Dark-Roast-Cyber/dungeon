@@ -90,9 +90,9 @@ Initialization does not execute project code or contact a runtime. Creation snap
 
 Reuse verifies identity and policy drift. These checks are not kernel/image attestation and do not prove provider content stayed unchanged.
 
-The current normal lifecycle is `up`, `run`, and `down` with an explicit config. First `up` creates the bound sandbox and uploads the project; resumed `up` starts it without upload, and is a no-op when it is already Ready. `run` starts a stopped bound sandbox when needed, without upload. `down` stops it and retains guest state.
+The lifecycle remains `up`, `run`, and `down` with one explicit config and one Runtime. In `copy` mode, first `up` creates the bound sandbox and uploads the project; resumed `up` starts it without upload, and is a no-op when it is already Ready. In the explicit pre-validation `live` candidate, creation derives exactly one read-write bind request from the canonical configured project to `/sandbox/project`; first and resumed `up` never upload. `run` starts a stopped bound sandbox when needed without upload in either mode. `down` stops it and retains environment state.
 
-A separate explicit `upload --yes` is the operator's overwrite-capable refresh/recovery action. `export` is a separate Ready-only operation for the bound sandbox on OpenShell 0.0.116. It downloads and stages the guest project, then presents a deterministic three-way diff against the last successful upload baseline and current host project. It applies only after interactive typed `yes` or explicit `--yes`; it is never part of `up`, `run`, or `down`.
+`upload --yes` and `export` remain copy-mode operations. Upload is the operator's overwrite-capable refresh/recovery action. Export is a Ready-only operation for the bound sandbox on OpenShell 0.0.116: it downloads and stages the guest project, then presents a deterministic three-way diff against the last successful upload baseline and current host project. It applies only after interactive typed `yes` or explicit `--yes`. Both commands refuse in live mode before contacting OpenShell.
 
 Low-friction project binding may remove repeated `--config` ceremony, but it must resolve to this same lifecycle and identity model. Convenience is not a parallel runtime path.
 
@@ -185,7 +185,7 @@ Unsupported or unsatisfied requests remain explicit. Missing authority never cau
 
 The plan-only slice accepts a reviewed Neovim directory declaration in the authoritative private config and inventories it in `plan`. Runtime commands refuse it: OpenShell 0.0.116 uploads as the sandbox user, so guest-writable `/sandbox` cannot enforce a read-only imported subtree using uploaded file modes. Enforceable guest read-only snapshots remain an implementation gate.
 
-Separately, a live read-write workspace mount of the configured project has been accepted as the default contained-development direction. It is a narrowly guarded transfer mode: the workspace is the only default writable host path, imports and other selected host paths stay read-only, and credentials, SSH keys, and engine sockets are never mounted. The copied upload/export path remains the explicit automation/recovery surface. Neither mode introduces a general host-mount feature.
+Separately, the live read-write workspace transfer is now implemented as an explicit pre-validation candidate. It derives one bind mount from the canonical private-config project path to `/sandbox/project`; users cannot supply raw driver JSON or arbitrary mount lists. The workspace remains the only requested writable host path, imports remain a separate read-only snapshot lifecycle, and credentials, SSH keys, and engine sockets are never implicitly mounted. The copied upload/export path remains supported. Live does not become the generated/default mode until the OpenShell 0.0.116/rootless-Podman/Fedora validation gate passes.
 
 - The host source path is selected explicitly from private Dungeon configuration.
 - Snapshot preflight rejects special files and symlinks for the initial implementation.

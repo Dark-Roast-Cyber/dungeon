@@ -94,12 +94,21 @@ the OpenShell 0.0.116 upload path runs as the guest sandbox user and cannot by
 itself enforce a read-only destination under writable `/sandbox`. No live import
 or guest read-only claim has been established.
 
-A live read-write workspace mount of the configured project is now the accepted
-default-direction decision for the contained-development loop. This decision is
-architecture-level; it has not been implemented or validated. A guardrail
-design (root/home/parent-escape and credential-path refusal, imports read-only,
-no engine sockets) and live validation evidence are required before any live
-mount ships, and the copied upload/export path remains available.
+Issue #24 now has a static pre-validation candidate: schema 2 resolves omitted
+project transfer to copy, accepts only copy/live, fingerprints live distinctly,
+derives one OpenShell 0.0.116 Podman bind from the canonical configured project
+to /sandbox/project with read_only=false and the private SELinux-label candidate,
+and keeps upload/export copy-only. Static tests must prove no raw driver-config
+or arbitrary mount authority, no live upload on fresh/resumed up, and no policy
+widening. This is not live runtime evidence.
+
+Live support and default selection remain blocked on the recorded Fedora amd64,
+rootless Podman 5.8.4, OpenShell 0.0.116 gate. That gate must validate a dedicated
+gateway with enable_bind_mounts=true and the keep-id:uid=998,gid=998 candidate,
+ordinary owner-mode host files, bidirectional edit visibility and ownership,
+stop/start, SELinux labeling, hard Landlock and network denials, no engine
+socket or unintended host visibility, and copy-mode regression. Existing
+dungeon-local setup is not migrated automatically.
 
 ### Issue #6 local image candidate (historical)
 
