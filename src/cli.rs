@@ -586,8 +586,10 @@ mod tests {
     }
 
     #[test]
-    fn telltale_command_is_not_exposed() {
-        assert!(Cli::try_parse_from(["dungeon", "telltale"]).is_err());
+    fn telltale_is_only_a_possible_project_path_not_a_command() {
+        let cli = Cli::try_parse_from(["dungeon", "telltale"]).unwrap();
+        assert_eq!(cli.project, Some(PathBuf::from("telltale")));
+        assert!(cli.command.is_none());
     }
 
     #[test]
