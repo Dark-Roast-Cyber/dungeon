@@ -291,6 +291,34 @@ enable_bind_mounts = true
 userns = "keep-id:uid=998,gid=998"
 ```
 
+The validation gateway is containerized while its Podman API socket reaches the
+host rootless Podman service. OpenShell 0.0.116 extracts the Podman supervisor
+binary under `$XDG_DATA_HOME/openshell/podman-supervisor/...` and supplies that
+absolute path back to host Podman as a bind source. Therefore the disposable
+gateway must use a private absolute driver-data directory that resolves to the
+same path on both sides of the gateway container boundary.
+
+For example, if the validation root is already a private disposable directory:
+
+```sh
+LIVE_DRIVER_DATA="$LIVE_ROOT/driver-data"
+mkdir -m 700 "$LIVE_DRIVER_DATA"
+
+# In the trusted gateway container invocation:
+#   -v "$LIVE_DRIVER_DATA:$LIVE_DRIVER_DATA"
+#   -e "XDG_DATA_HOME=$LIVE_DRIVER_DATA"
+```
+
+Do not map the gateway's driver data to a container-only path such as
+`/var/openshell/.local/share`. Host Podman cannot resolve that path even when
+the file exists inside the gateway container. The driver-data mount belongs
+only to the trusted gateway and must never be propagated into the sandbox.
+
+Apply the same host/container path-identity rule to any other OpenShell driver
+state that is later supplied to host Podman as a bind source. This requirement
+does not authorize broader host mounts and does not change the single
+`/sandbox/project` live-workspace authority.
+
 Create an explicit live config:
 
 ```sh

@@ -110,6 +110,23 @@ stop/start, SELinux labeling, hard Landlock and network denials, no engine
 socket or unintended host visibility, and copy-mode regression. Existing
 dungeon-local setup is not migrated automatically.
 
+The first Issue #24 live attempt on Fedora 44, kernel 7.2.5-200.fc44.x86_64,
+SELinux Enforcing, OpenShell 0.0.116, and rootless Podman 5.8.4 stopped before
+sandbox creation. The dedicated gateway was healthy and the offline plan was
+correct, but host Podman failed `statfs` on a supervisor path rooted at
+`/var/openshell/.local/share/openshell/podman-supervisor/...`. The gateway
+container had created that cache internally, but the host Podman service could
+not resolve the container-only absolute path.
+
+OpenShell 0.0.116 derives this supervisor cache from `XDG_DATA_HOME`. The
+rerun must give the disposable trusted gateway a private driver-data directory
+mounted at the identical absolute host/container path and set
+`XDG_DATA_HOME` to that path. No project chmod/chown, policy widening, SELinux
+weakening, or additional sandbox-visible mount is permitted. This failed
+bootstrap establishes no result for guest identity, workspace writability,
+SELinux behavior, containment denials, or copy regression; those gates remain
+unproven until the corrected topology is rerun.
+
 ### Issue #6 local image candidate (historical)
 
 The [image build instructions and supply-chain boundary](../images/agent/README.md)
