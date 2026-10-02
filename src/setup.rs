@@ -231,6 +231,7 @@ fn container_arguments(state: &Path, socket: &str) -> Vec<String> {
     let config = state.join("gateway.toml");
     let certs = state.join("certs");
     let db = state.join("db");
+    let driver_data = state.join("driver-data");
     vec![
         "run",
         "-d",
@@ -251,6 +252,8 @@ fn container_arguments(state: &Path, socket: &str) -> Vec<String> {
         "-v",
         &format!("{0}:{0}:ro", certs.display()),
         "-v",
+        &format!("{0}:{0}", driver_data.display()),
+        "-v",
         &format!("{}:/var/openshell", db.display()),
         "-v",
         &format!("{socket}:/var/run/podman.sock"),
@@ -266,6 +269,8 @@ fn container_arguments(state: &Path, socket: &str) -> Vec<String> {
         "HOME=/var/openshell",
         "-e",
         "XDG_STATE_HOME=/var/openshell",
+        "-e",
+        &format!("XDG_DATA_HOME={}", driver_data.display()),
         "-e",
         &format!("OPENSHELL_LOCAL_TLS_DIR={}", certs.display()),
         "-e",
@@ -302,9 +307,12 @@ fn check_container(tools: &Tools, state: &Path, socket: &str) -> Result<bool> {
         "gateway container inspection failed",
     )?)?;
     let c = &inspect[0];
+    let driver_data = state.join("driver-data");
+    let driver_data_env = format!("XDG_DATA_HOME={}", driver_data.display());
     let expected_mounts = [
         state.join("gateway.toml"),
         state.join("certs"),
+        driver_data.clone(),
         state.join("db"),
         PathBuf::from(socket),
     ];
@@ -329,10 +337,15 @@ fn check_container(tools: &Tools, state: &Path, socket: &str) -> Result<bool> {
                 .iter()
                 .any(|m| m["Source"] == p.to_string_lossy().as_ref())
         })
+        || !mounts.iter().any(|m| {
+            m["Source"].as_str() == Some(driver_data.to_string_lossy().as_ref())
+                && m["Destination"].as_str() == Some(driver_data.to_string_lossy().as_ref())
+        })
         || ![
             "OPENSHELL_DRIVERS=podman",
             "OPENSHELL_PODMAN_SOCKET=/var/run/podman.sock",
             "OPENSHELL_DB_URL=sqlite:/var/openshell/openshell.db",
+            driver_data_env.as_str(),
         ]
         .iter()
         .all(|v| {
@@ -436,6 +449,7 @@ pub(crate) fn run() -> Result<i32> {
         }
         create_private_dir(&state.join("certs"))?;
         create_private_dir(&state.join("db"))?;
+        create_private_dir(&state.join("driver-data"))?;
         private_text(&state.join("gateway.toml"), CONFIG)?;
         let certs = state.join("certs");
         tools.podman(
@@ -576,11 +590,20 @@ mod tests {
         assert!(require_linux("macos").is_err());
         assert!(require_version("openshell 0.0.116\n").is_ok());
         assert!(require_version("openshell 0.0.117").is_err());
-        let args = container_arguments(
-            Path::new("/tmp/dungeon"),
-            "/run/user/1000/podman/podman.sock",
-        );
+        let state = Path::new("/tmp/dungeon");
+        let args = container_arguments(state, "/run/user/1000/podman/podman.sock");
+        let driver_data = state.join("driver-data").display().to_string();
+        let driver_data_mount = format!("{driver_data}:{driver_data}");
+        let driver_data_env = format!("XDG_DATA_HOME={driver_data}");
         assert!(args.windows(2).any(|p| p == ["--network", "dungeon-local"]));
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["-v", driver_data_mount.as_str()])
+        );
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["-e", driver_data_env.as_str()])
+        );
         assert!(
             args.windows(2)
                 .any(|p| p == ["-e", "OPENSHELL_DRIVERS=podman"])

@@ -63,7 +63,7 @@ There is no backend hierarchy, daemon, plugin ABI, embedded JS runtime, second p
 
 This remains the default architectural posture. A new abstraction must earn its existence through a real substitution boundary or repeated semantic responsibility rather than anticipated integrations.
 
-Local setup keeps only private gateway TLS/configuration and persistent database files under the host XDG state directory; OpenShell registration and its mTLS client files stay under OpenShell's config directory. Dungeon does not mirror gateway metadata or select a different active gateway permanently. The rootless Podman socket is mounted only in the trusted gateway container, not in the guest.
+Local setup keeps only private gateway TLS/configuration, persistent database files, and OpenShell driver data under the host XDG state directory; OpenShell registration and its mTLS client files stay under OpenShell's config directory. Because the containerized gateway controls host Podman through its API socket, driver data that OpenShell may later use as a host bind source must have path identity across that boundary. Dungeon therefore mounts its private `driver-data` directory at the same absolute host/container path and sets the gateway's `XDG_DATA_HOME` to it. That directory remains trusted gateway state, not sandbox or project authority. Dungeon does not mirror gateway metadata or select a different active gateway permanently. The rootless Podman socket is mounted only in the trusted gateway container, not in the guest.
 
 The npm tree is distribution only: a tiny Node launcher selects a platform package and executes its Rust binary. It must never parse Dungeon config, apply policy, coordinate auth, or contact OpenShell.
 
