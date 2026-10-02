@@ -84,7 +84,11 @@ pub(crate) fn generated_name(project: &Path) -> Result<String> {
 }
 
 pub(crate) fn load(project: &Path) -> Result<Option<Config>> {
-    let path = config_path(project)?;
+    load_in(project, &private_config_root()?)
+}
+
+fn load_in(project: &Path, root: &Path) -> Result<Option<Config>> {
+    let path = config_path_in(project, root)?;
     let directory = path.parent().expect("binding config parent");
     if !directory.exists() {
         return Ok(None);
@@ -112,7 +116,35 @@ pub(crate) fn load(project: &Path) -> Result<Option<Config>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{
+        Agent, ConfigDoc, ProjectTransfer, create_private_dir, write_new,
+    };
+    use crate::policy::starter_policy;
     use std::fs;
+
+    fn write_binding(root: &Path, selector: &Path, recorded_project: &Path) -> PathBuf {
+        let path = config_path_in(selector, root).unwrap();
+        let directory = path.parent().unwrap();
+        create_private_dir(directory).unwrap();
+        write_new(&directory.join("policy.json"), &starter_policy()).unwrap();
+        write_new(
+            &path,
+            &ConfigDoc {
+                schema: 2,
+                name: "demo".into(),
+                gateway: "local".into(),
+                workspace: "default".into(),
+                project: recorded_project.to_path_buf(),
+                project_transfer: ProjectTransfer::Copy,
+                image: "localhost/test:1".into(),
+                agent: Agent::Opencode,
+                providers: vec![],
+                imports: vec![],
+            },
+        )
+        .unwrap();
+        path
+    }
 
     #[test]
     fn project_binding_path_is_deterministic_and_private() {
@@ -129,6 +161,51 @@ mod tests {
         assert!(first.starts_with(&private));
         assert!(!first.starts_with(&project));
         assert_eq!(first.file_name().unwrap(), "dungeon.json");
+    }
+
+    #[test]
+    fn binding_load_reuses_exact_match_and_fails_closed_on_partial_or_mismatch() {
+        let root = tempfile::tempdir().unwrap();
+        let private = root.path().join("private");
+        let project = root.path().join("project");
+        let other = root.path().join("other");
+        let partial = root.path().join("partial");
+        for path in [&private, &project, &other, &partial] {
+            fs::create_dir(path).unwrap();
+        }
+        let project = project.canonicalize().unwrap();
+        let other = other.canonicalize().unwrap();
+        let partial = partial.canonicalize().unwrap();
+
+        assert!(load_in(&project, &private).unwrap().is_none());
+
+        let path = write_binding(&private, &project, &project);
+        let first = load_in(&project, &private).unwrap().unwrap();
+        let second = load_in(&project, &private).unwrap().unwrap();
+        assert_eq!(first.path, path);
+        assert_eq!(second.path, path);
+        assert_eq!(first.values.project, project);
+        assert_eq!(second.values.project, project);
+
+        let partial_path = config_path_in(&partial, &private).unwrap();
+        create_private_dir(partial_path.parent().unwrap()).unwrap();
+        assert!(
+            load_in(&partial, &private)
+                .unwrap_err()
+                .to_string()
+                .contains("incomplete")
+        );
+
+        let mismatch = root.path().join("mismatch");
+        fs::create_dir(&mismatch).unwrap();
+        let mismatch = mismatch.canonicalize().unwrap();
+        write_binding(&private, &mismatch, &other);
+        assert!(
+            load_in(&mismatch, &private)
+                .unwrap_err()
+                .to_string()
+                .contains("binding mismatch")
+        );
     }
 
     #[test]

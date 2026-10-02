@@ -561,6 +561,43 @@ mod tests {
     }
 
     #[test]
+    fn explicit_config_resolution_is_authoritative() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        let private = root.path().join("private");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::create_dir(&private).unwrap();
+        let project = project.canonicalize().unwrap();
+        write_new(&private.join("policy.json"), &starter_policy()).unwrap();
+        let path = private.join("dungeon.json");
+        write_new(
+            &path,
+            &ConfigDoc {
+                schema: 2,
+                name: "demo".into(),
+                gateway: "local".into(),
+                workspace: "default".into(),
+                project: project.clone(),
+                project_transfer: ProjectTransfer::Copy,
+                image: "localhost/test:1".into(),
+                agent: Agent::Opencode,
+                providers: vec![],
+                imports: vec![],
+            },
+        )
+        .unwrap();
+
+        let resolved = resolve_environment(Some(path.clone()), None, false).unwrap();
+        assert_eq!(resolved.path, path);
+        assert_eq!(resolved.values.project, project);
+
+        let error = resolve_environment(Some(resolved.path.clone()), Some(root.path()), false)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("explicit config is authoritative"), "{error}");
+    }
+
+    #[test]
     fn auth_is_vendor_scoped() {
         assert!(Cli::try_parse_from(["dungeon", "auth", "claude"]).is_ok());
         assert!(Cli::try_parse_from(["dungeon", "auth", "codex"]).is_ok());
