@@ -594,7 +594,10 @@ mod tests {
         let error = resolve_environment(Some(resolved.path.clone()), Some(root.path()), false)
             .unwrap_err()
             .to_string();
-        assert!(error.contains("explicit config is authoritative"), "{error}");
+        assert!(
+            error.contains("explicit config is authoritative"),
+            "{error}"
+        );
     }
 
     #[test]
