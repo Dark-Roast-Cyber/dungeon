@@ -116,9 +116,7 @@ fn load_in(project: &Path, root: &Path) -> Result<Option<Config>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        Agent, ConfigDoc, ProjectTransfer, create_private_dir, write_new,
-    };
+    use crate::config::{Agent, ConfigDoc, ProjectTransfer, create_private_dir, write_new};
     use crate::policy::starter_policy;
     use std::fs;
 
