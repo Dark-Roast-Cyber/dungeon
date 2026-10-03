@@ -263,7 +263,7 @@ mod linux {
         args: &[&str],
         timeout: Duration,
     ) -> Option<Reply> {
-        let mut child = Command::new(binary)
+        let child = Command::new(binary)
             .args(args)
             .current_dir("/")
             .env_clear()
@@ -274,6 +274,10 @@ mod linux {
             .process_group(0)
             .spawn()
             .ok()?;
+        collect_query(child, timeout)
+    }
+
+    fn collect_query(mut child: std::process::Child, timeout: Duration) -> Option<Reply> {
         let mut pipe = child.stdout.take()?;
         let fd = pipe.as_raw_fd();
         let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
@@ -1015,10 +1019,44 @@ mod linux {
                     pid_file.display()
                 ),
             );
-            let start = Instant::now();
-            assert!(query(&binary, &HashMap::new(), &[], Duration::from_millis(100)).is_none());
-            assert!(start.elapsed() < Duration::from_secs(2));
+            let mut child = Command::new(&binary)
+                .current_dir("/")
+                .env_clear()
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .process_group(0)
+                .spawn()
+                .unwrap();
+            // Leader exit is the readiness handshake: the PID write completed,
+            // and WNOWAIT keeps its identity reserved for the collector.
+            let readiness = Instant::now();
+            loop {
+                let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+                let result = unsafe {
+                    libc::waitid(
+                        libc::P_PID,
+                        child.id(),
+                        &mut info,
+                        libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                    )
+                };
+                if result == 0 && unsafe { info.si_pid() } != 0 {
+                    break;
+                }
+                if result != 0 || readiness.elapsed() >= Duration::from_secs(5) {
+                    unsafe {
+                        libc::kill(-(child.id() as i32), libc::SIGKILL);
+                    }
+                    let _ = child.wait();
+                    panic!("query fixture failed its leader-exit readiness handshake");
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
             let pid = fs::read_to_string(pid_file).unwrap();
+            let start = Instant::now();
+            assert!(collect_query(child, Duration::from_millis(100)).is_none());
+            assert!(start.elapsed() < Duration::from_secs(2));
             for _ in 0..100 {
                 let stat = fs::read_to_string(format!("/proc/{pid}/stat"));
                 if stat.as_ref().is_err()

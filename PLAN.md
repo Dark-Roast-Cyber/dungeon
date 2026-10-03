@@ -45,8 +45,8 @@ Claude Code CLI testing, not as proof of remote/desktop support.
 
 ## 1. Explicit guest-service shutdown
 
-Status: implementation and disposable local live gates completed; independent
-review pending. Issue #28: **Make remote guest-service
+Status: implementation, disposable local live gates and independent review
+accepted; CI test-portability correction awaiting review/revalidation. Issue #28: **Make remote guest-service
 shutdown explicit without orphaned processes**.
 
 The opt-in `exec --owned` implementation leaves generic exec/run/forward alone.
@@ -70,8 +70,8 @@ Matched native client/session resume remains #29, not a claim of this slice.
 
 ## 2. Reviewed matched OpenCode client/server
 
-Status: disposable local matched 2.0.14 gate PASS; parent independent review
-required before publication. No host/guest upgrade or image rebuild performed.
+Status: disposable local matched 2.0.14 gate PASS and independent review accepted.
+No host/guest upgrade or image rebuild performed.
 See [matched-pair evidence](docs/validation.md#issue-29-matched-opencode-pair-2026-10-03).
 Issue #29: **Validate a reviewed
 matched OpenCode remote client/server pair**; link image Issue #6.

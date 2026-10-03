@@ -778,7 +778,7 @@ case " $* " in
   *' sandbox exec '*)
     while test "$#" -gt 0 && test "$1" != --; do shift; done
     shift
-    if test "$1" = /usr/bin/node; then exec "$@"; fi
+    if test "$1" = /usr/bin/node; then shift; exec "$root/host-node" "$@"; fi
     ;;
   *' sandbox get '*)
     test -e "$root/phase" || exit 7
@@ -1059,13 +1059,19 @@ esac
     #[test]
     fn owned_command_preserves_result_and_binding_and_refuses_drift() {
         let fixture = Fixture::new();
+        let environment = host_environment(Some(&fixture.config.values.project)).unwrap();
+        let node = find_executable("node", environment.get(&OsString::from("PATH")))
+            .expect("owned execution tests require Node 24 on a trusted host PATH");
+        std::os::unix::fs::symlink(&node, fixture.root.path().join("host-node")).unwrap();
         let runtime = fixture.runtime();
         runtime.create().unwrap();
         let state = fs::read(fixture.config.state_path()).unwrap();
         assert_eq!(
             runtime
                 .execute_owned(&[
-                    "/usr/bin/node".into(),
+                    node.to_str()
+                        .expect("host test Node path must be UTF-8")
+                        .into(),
                     "-e".into(),
                     "process.exit(19)".into()
                 ])
