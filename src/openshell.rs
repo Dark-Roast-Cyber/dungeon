@@ -1,8 +1,9 @@
-use crate::config::{Config, RuntimeState, digest, read_json, write_new};
+use crate::config::{Config, ProjectTransfer, RuntimeState, digest, read_json, write_new};
 use crate::export;
 use crate::policy::validate_policy;
 use crate::{Error, OPEN_SHELL_VERSION, Result};
-use serde_json::Value;
+use serde::Serialize;
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
@@ -26,6 +27,57 @@ pub(crate) fn setup() -> Result<i32> {
 
 const LABEL: &str = "agentarchaeology.ai/dungeon-config";
 pub(crate) const GUEST_PROJECT: &str = "/sandbox/project";
+
+#[derive(Clone, Debug, Serialize)]
+struct LiveProjectMount {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    source: String,
+    target: &'static str,
+    read_only: bool,
+    selinux_label: &'static str,
+}
+
+fn live_project_mount(config: &Config) -> Option<LiveProjectMount> {
+    (config.values.project_transfer == ProjectTransfer::Live).then(|| LiveProjectMount {
+        kind: "bind",
+        source: config.values.project.to_string_lossy().into_owned(),
+        target: GUEST_PROJECT,
+        read_only: false,
+        selinux_label: "private",
+    })
+}
+
+fn live_driver_config(config: &Config) -> Option<String> {
+    live_project_mount(config).map(|mount| json!({"podman": {"mounts": [mount]}}).to_string())
+}
+
+pub(crate) fn project_transfer_plan(config: &Config) -> Value {
+    match live_project_mount(config) {
+        Some(mount) => json!({
+            "mode": "live",
+            "host_source": mount.source,
+            "guest_target": mount.target,
+            "read_only": mount.read_only,
+            "selinux_label_candidate": mount.selinux_label,
+            "runtime_capability": {
+                "driver": "podman",
+                "host_bind_mounts": "required",
+                "gateway_setting": "enable_bind_mounts=true",
+                "user_namespace_candidate": "keep-id:uid=998,gid=998"
+            },
+            "validation": "unresolved; offline plan does not verify gateway capability or live enforcement"
+        }),
+        None => json!({
+            "mode": "copy",
+            "guest_target": GUEST_PROJECT,
+            "transfer": "explicit OpenShell upload",
+            "export": "reviewed staged export",
+            "runtime_capability": null,
+            "validation": "offline plan; backend enforcement is not verified by plan"
+        }),
+    }
+}
 
 #[derive(PartialEq, Eq)]
 enum Phase {
@@ -53,21 +105,37 @@ impl<'a> Runtime<'a> {
     pub(crate) fn up(&self) -> Result<i32> {
         if !self.config.state_path().exists() {
             self.create()?;
-            let code = self.upload().map_err(|error| Error::new(format!(
-                "environment created, but initial project upload failed: {error}; sandbox preserved; retry with upload --yes"
-            )))?;
-            if code != 0 {
-                return Err(Error::new(format!(
-                    "environment created, but initial project upload failed (exit {code}); sandbox preserved; retry with upload --yes"
-                )));
+            match self.config.values.project_transfer {
+                ProjectTransfer::Copy => {
+                    let code = self.upload().map_err(|error| Error::new(format!(
+                        "environment created, but initial project upload failed: {error}; sandbox preserved; retry with upload --yes"
+                    )))?;
+                    if code != 0 {
+                        return Err(Error::new(format!(
+                            "environment created, but initial project upload failed (exit {code}); sandbox preserved; retry with upload --yes"
+                        )));
+                    }
+                    println!("Environment Ready; initial project uploaded.");
+                }
+                ProjectTransfer::Live => {
+                    println!(
+                        "Environment Ready; live project mount requested at {GUEST_PROJECT}; no upload performed."
+                    );
+                }
             }
-            println!("Environment Ready; initial project uploaded.");
         } else {
             match Self::phase(&self.checked(false, true)?)? {
-                Phase::Ready => println!("Environment already up; guest project unchanged."),
+                Phase::Ready => match self.config.values.project_transfer {
+                    ProjectTransfer::Copy => {
+                        println!("Environment already up; guest project unchanged.")
+                    }
+                    ProjectTransfer::Live => {
+                        println!("Environment already up; live project mount unchanged.")
+                    }
+                },
                 Phase::Stopped => {
                     self.start()?;
-                    println!("Environment Ready; existing guest work preserved (no upload).");
+                    println!("Environment Ready; existing environment resumed (no upload).");
                 }
             }
         }
@@ -203,10 +271,16 @@ impl<'a> Runtime<'a> {
             },
         )?;
 
-        println!(
-            "Created {}. Project upload is a separate action.",
-            self.config.values.name
-        );
+        match self.config.values.project_transfer {
+            ProjectTransfer::Copy => println!(
+                "Created {}. Project upload is a separate action.",
+                self.config.values.name
+            ),
+            ProjectTransfer::Live => println!(
+                "Created {} with the configured live project mount request. Live transfer support remains pending the recorded validation gate.",
+                self.config.values.name
+            ),
+        }
         Ok(0)
     }
 
@@ -236,6 +310,11 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn upload(&self) -> Result<i32> {
+        if self.config.values.project_transfer == ProjectTransfer::Live {
+            return Err(Error::new(format!(
+                "upload is unavailable in live project-transfer mode; the host project is requested directly at {GUEST_PROJECT}"
+            )));
+        }
         if !self.config.values.project.is_dir() {
             return Err(Error::new("the host project must exist for upload"));
         }
@@ -268,6 +347,11 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn export(&self, yes: bool) -> Result<i32> {
+        if self.config.values.project_transfer == ProjectTransfer::Live {
+            return Err(Error::new(
+                "export is unavailable in live project-transfer mode; live project changes are written directly to the host project",
+            ));
+        }
         self.checked(true, true)?;
         let baseline = export::load_baseline(self.config)?;
         let stage = self.download_project()?;
@@ -461,6 +545,19 @@ pub(crate) fn create_arguments(config: &Config, policy_path: &Path) -> Vec<Strin
     for provider in &config.values.providers {
         args.extend(["--provider".into(), provider.clone()]);
     }
+    if let Some(driver_config) = live_driver_config(config) {
+        args.extend(["--driver-config-json".into(), driver_config]);
+    }
+    args
+}
+
+pub(crate) fn plan_create_arguments(config: &Config, policy_path: &Path) -> Vec<String> {
+    let mut args = create_arguments(config, policy_path);
+    if let Some(index) = args.iter().position(|arg| arg == "--driver-config-json")
+        && let Some(value) = args.get_mut(index + 1)
+    {
+        *value = "<derived from project_transfer>".into();
+    }
     args
 }
 
@@ -574,7 +671,7 @@ fn preflight_upload(path: &Path, root: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Agent, ConfigDoc};
+    use crate::config::{Agent, ConfigDoc, ProjectTransfer};
     use crate::policy::starter_policy;
 
     #[cfg(unix)]
@@ -603,6 +700,7 @@ mod tests {
                     gateway: "local".into(),
                     workspace: "default".into(),
                     project,
+                    project_transfer: ProjectTransfer::Copy,
                     image: "localhost/test:1".into(),
                     agent: Agent::Opencode,
                     providers: vec![],
@@ -693,6 +791,50 @@ esac
         assert_eq!(fixture.calls("download"), 1);
         assert_eq!(fixture.calls("create"), 1);
         assert_eq!(fixture.calls("delete"), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_up_never_uploads_and_resume_reuses_the_bound_sandbox() {
+        let mut fixture = Fixture::new();
+        fixture.config.values.project_transfer = ProjectTransfer::Live;
+        let runtime = fixture.runtime();
+
+        runtime.up().unwrap();
+        assert_eq!(fixture.calls("create"), 1);
+        assert_eq!(fixture.calls("upload"), 0);
+        assert_eq!(fixture.calls("download"), 0);
+        assert!(!fixture.config.baseline_path().exists());
+
+        runtime.up().unwrap();
+        assert_eq!(fixture.calls("create"), 1);
+        assert_eq!(fixture.calls("upload"), 0);
+
+        runtime.down().unwrap();
+        runtime.up().unwrap();
+        assert_eq!(fixture.calls("start"), 1);
+        assert_eq!(fixture.calls("upload"), 0);
+        assert_eq!(fixture.calls("download"), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_upload_and_export_refuse_before_openshell_contact() {
+        let mut fixture = Fixture::new();
+        fixture.config.values.project_transfer = ProjectTransfer::Live;
+        let runtime = fixture.runtime();
+
+        assert!(runtime.upload().unwrap_err().to_string().contains("live"));
+        assert!(
+            runtime
+                .export(true)
+                .unwrap_err()
+                .to_string()
+                .contains("live")
+        );
+        assert_eq!(fixture.calls("get"), 0);
+        assert_eq!(fixture.calls("upload"), 0);
+        assert_eq!(fixture.calls("download"), 0);
     }
 
     #[cfg(unix)]
@@ -869,6 +1011,7 @@ esac
                 gateway: "local".into(),
                 workspace: "default".into(),
                 project: PathBuf::from("/tmp/arbitrary-repo"),
+                project_transfer: ProjectTransfer::Copy,
                 image: "ghcr.io/nvidia/openshell-community/sandboxes/base:latest".into(),
                 agent: Agent::Opencode,
                 providers: vec![],
@@ -882,6 +1025,7 @@ esac
         assert!(args.iter().any(|arg| arg == "--no-auto-providers"));
         assert!(!args.iter().any(|arg| arg == "--upload"));
         assert!(!args.iter().any(|arg| arg == "--env"));
+        assert!(!args.iter().any(|arg| arg == "--driver-config-json"));
         assert_eq!(
             upload_arguments(&config),
             ["sandbox", "upload", "demo", ".", "/sandbox/project"]
@@ -918,6 +1062,60 @@ esac
                 .command(&["sandbox".into(), "get".into()], true)
                 .get_current_dir(),
             config.path.parent()
+        );
+
+        let mut live = config.clone();
+        live.values.project_transfer = ProjectTransfer::Live;
+        let live_args = create_arguments(&live, &live.policy_path);
+        let index = live_args
+            .iter()
+            .position(|arg| arg == "--driver-config-json")
+            .unwrap();
+        let driver_config: Value = serde_json::from_str(&live_args[index + 1]).unwrap();
+        assert_eq!(
+            driver_config,
+            json!({
+                "podman": {
+                    "mounts": [{
+                        "type": "bind",
+                        "source": "/tmp/arbitrary-repo",
+                        "target": GUEST_PROJECT,
+                        "read_only": false,
+                        "selinux_label": "private"
+                    }]
+                }
+            })
+        );
+        assert_eq!(
+            driver_config["podman"]["mounts"].as_array().unwrap().len(),
+            1
+        );
+
+        let plan_args = plan_create_arguments(&live, &live.policy_path);
+        let index = plan_args
+            .iter()
+            .position(|arg| arg == "--driver-config-json")
+            .unwrap();
+        assert_eq!(plan_args[index + 1], "<derived from project_transfer>");
+
+        let plan = project_transfer_plan(&live);
+        assert_eq!(plan["mode"], "live");
+        assert_eq!(plan["host_source"], "/tmp/arbitrary-repo");
+        assert_eq!(plan["guest_target"], GUEST_PROJECT);
+        assert_eq!(plan["read_only"], false);
+        assert_eq!(
+            plan["runtime_capability"]["gateway_setting"],
+            "enable_bind_mounts=true"
+        );
+        assert_eq!(
+            plan["runtime_capability"]["user_namespace_candidate"],
+            "keep-id:uid=998,gid=998"
+        );
+        assert!(
+            plan["validation"]
+                .as_str()
+                .unwrap()
+                .contains("does not verify")
         );
     }
 }

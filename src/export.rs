@@ -547,7 +547,7 @@ fn review_and_apply_with_hooks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Agent, ConfigDoc, RuntimeState, write_new};
+    use crate::config::{Agent, ConfigDoc, ProjectTransfer, RuntimeState, write_new};
     use crate::policy::starter_policy;
 
     fn file(value: &str) -> Entry {
@@ -695,6 +695,7 @@ mod tests {
                 gateway: "local".into(),
                 workspace: "default".into(),
                 project,
+                project_transfer: ProjectTransfer::Copy,
                 image: "localhost/test:1".into(),
                 agent: Agent::Opencode,
                 providers: vec![],

@@ -94,12 +94,38 @@ the OpenShell 0.0.116 upload path runs as the guest sandbox user and cannot by
 itself enforce a read-only destination under writable `/sandbox`. No live import
 or guest read-only claim has been established.
 
-A live read-write workspace mount of the configured project is now the accepted
-default-direction decision for the contained-development loop. This decision is
-architecture-level; it has not been implemented or validated. A guardrail
-design (root/home/parent-escape and credential-path refusal, imports read-only,
-no engine sockets) and live validation evidence are required before any live
-mount ships, and the copied upload/export path remains available.
+Issue #24 now has a static pre-validation candidate: schema 2 resolves omitted
+project transfer to copy, accepts only copy/live, fingerprints live distinctly,
+derives one OpenShell 0.0.116 Podman bind from the canonical configured project
+to /sandbox/project with read_only=false and the private SELinux-label candidate,
+and keeps upload/export copy-only. Static tests must prove no raw driver-config
+or arbitrary mount authority, no live upload on fresh/resumed up, and no policy
+widening. This is not live runtime evidence.
+
+Live support and default selection remain blocked on the recorded Fedora amd64,
+rootless Podman 5.8.4, OpenShell 0.0.116 gate. That gate must validate a dedicated
+gateway with enable_bind_mounts=true and the keep-id:uid=998,gid=998 candidate,
+ordinary owner-mode host files, bidirectional edit visibility and ownership,
+stop/start, SELinux labeling, hard Landlock and network denials, no engine
+socket or unintended host visibility, and copy-mode regression. Existing
+dungeon-local setup is not migrated automatically.
+
+The first Issue #24 live attempt on Fedora 44, kernel 7.2.5-200.fc44.x86_64,
+SELinux Enforcing, OpenShell 0.0.116, and rootless Podman 5.8.4 stopped before
+sandbox creation. The dedicated gateway was healthy and the offline plan was
+correct, but host Podman failed `statfs` on a supervisor path rooted at
+`/var/openshell/.local/share/openshell/podman-supervisor/...`. The gateway
+container had created that cache internally, but the host Podman service could
+not resolve the container-only absolute path.
+
+OpenShell 0.0.116 derives this supervisor cache from `XDG_DATA_HOME`. The
+rerun must give the disposable trusted gateway a private driver-data directory
+mounted at the identical absolute host/container path and set
+`XDG_DATA_HOME` to that path. No project chmod/chown, policy widening, SELinux
+weakening, or additional sandbox-visible mount is permitted. This failed
+bootstrap establishes no result for guest identity, workspace writability,
+SELinux behavior, containment denials, or copy regression; those gates remain
+unproven until the corrected topology is rerun.
 
 ### Issue #6 local image candidate (historical)
 

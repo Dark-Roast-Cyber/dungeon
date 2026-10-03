@@ -2,7 +2,7 @@
 
 Use one private directory per environment and pass `--config` explicitly. Dungeon never discovers config from a repository.
 
-`dungeon setup` needs no project configuration. On Linux it uses gateway `dungeon-local`, workspace `default`, port 17670, and rootless Podman. The gateway container's config, generated mTLS/JWT keys and database live in `${XDG_STATE_HOME:-$HOME/.local/state}/dungeon/local-setup` (private host state). OpenShell owns its gateway registration and mTLS client material in `${XDG_CONFIG_HOME:-$HOME/.config}/openshell/gateways/dungeon-local`; Podman owns the `dungeon-local` network and `openshell-gateway-dungeon-local` container. Neither stores Dungeon project policy. A conflicting or partial installation requires explicit operator inspection; setup does not overwrite it. The initial `dungeon init` prompt defaults to `dungeon-local`, but use `--image localhost/dungeon-agent:0.0.3-dev` only after building the reviewed local image; the community base remains the CLI image default until a separate publication decision.
+`dungeon setup` needs no project configuration. On Linux it uses gateway `dungeon-local`, workspace `default`, port 17670, and rootless Podman. The gateway container's config, generated mTLS/JWT keys, database, and private OpenShell driver data live in `${XDG_STATE_HOME:-$HOME/.local/state}/dungeon/local-setup` (private host state). The `driver-data` directory is mounted at the identical absolute path inside the trusted gateway and supplied as `XDG_DATA_HOME`; OpenShell 0.0.116 may later give a supervisor binary from that directory back to host Podman as a bind source when sandbox user namespaces require extraction. This path is gateway-only and is never mounted into the sandbox as Dungeon project authority. OpenShell owns its gateway registration and mTLS client material in `${XDG_CONFIG_HOME:-$HOME/.config}/openshell/gateways/dungeon-local`; Podman owns the `dungeon-local` network and `openshell-gateway-dungeon-local` container. Neither stores Dungeon project policy. A conflicting or partial installation requires explicit operator inspection; setup does not overwrite it. The initial `dungeon init` prompt defaults to `dungeon-local`, but use `--image localhost/dungeon-agent:0.0.3-dev` only after building the reviewed local image; the community base remains the CLI image default until a separate publication decision.
 
 `dungeon.json` schema 2:
 
@@ -13,6 +13,7 @@ Use one private directory per environment and pass `--config` explicitly. Dungeo
   "gateway": "local",
   "workspace": "default",
   "project": "/home/user/projects/demo",
+  "project_transfer": "copy",
   "image": "ghcr.io/nvidia/openshell-community/sandboxes/base:latest",
   "agent": "opencode",
   "providers": []
@@ -21,7 +22,7 @@ Use one private directory per environment and pass `--config` explicitly. Dungeo
 
 Schema 2 deliberately removes the old `policy` field. `policy.json` is always the adjacent policy file, so making its path configurable created an invalid state without adding capability. This pre-1.0 preview does not carry schema-1 compatibility code.
 
-Names are lowercase DNS labels; sandbox `name` is limited to 19 characters by OpenShell 0.0.116. `project` must be an absolute project directory, not root/home, and Dungeon config must be outside it. Providers are names, never secret values. Local image build paths and unqualified image names are rejected.
+Names are lowercase DNS labels; sandbox `name` is limited to 19 characters by OpenShell 0.0.116. `project` must be an absolute project directory, not root/home, and Dungeon config must be outside it. `project_transfer` is the closed domain `copy` or `live`; omission preserves copy semantics and the same fingerprint as explicit `copy`. Selecting `live` changes environment identity. Providers are names, never secret values. Local image build paths and unqualified image names are rejected.
 
 ## Native policy
 
@@ -34,21 +35,38 @@ Dungeon does not widen policy automatically. Inspected REST/TLS endpoints must u
 Review `plan` before `up`. `runtime.json` is Dungeon-owned identity bookkeeping and must not be edited to bypass mismatch checks.
 
 Use the same explicit config for lifecycle commands: `dungeon --config PATH up`,
-`run opencode` (or another supported command), and `down`. First `up` creates
-the sandbox and uploads the configured project once. Subsequent `up` resumes
-without uploading, and does nothing if the sandbox is already Ready. `run`
-starts a stopped sandbox already bound to this config without uploading.
-`down` stops but preserves guest state. To intentionally refresh/recover the
-guest project, use `dungeon --config PATH upload --yes`; it overwrites the guest
-copy and may discard guest-side changes. To return changes, use
-`dungeon --config PATH export` only while the bound OpenShell 0.0.116 sandbox is
-Ready. Dungeon downloads/stages the complete guest tree, prints a
+`run opencode` (or another supported command), and `down`.
+
+In `copy` mode, first `up` creates the sandbox and uploads the configured
+project once. Subsequent `up` resumes without uploading, and does nothing if
+the sandbox is already Ready. `run` starts a stopped sandbox already bound to
+this config without uploading. `down` stops but preserves guest state. To
+intentionally refresh/recover the guest project, use
+`dungeon --config PATH upload --yes`; it overwrites the guest copy and may
+discard guest-side changes. To return changes, use
+`dungeon --config PATH export` only while the bound OpenShell 0.0.116 sandbox
+is Ready. Dungeon downloads/stages the complete guest tree, prints a
 deterministic summary, and waits for typed `yes`; `--yes` explicitly approves
 without the prompt. Host-only files are preserved and three-way conflicts or
 special entries are refused. It applies regular contents, directories, and the
 Unix executable bit only. On failed apply, affected host files have private
-adjacent backups for manual recovery. Export is not live sync and uses no host
-mount.
+adjacent backups for manual recovery.
+
+`live` is an explicit pre-validation candidate. First `up` derives one
+Podman bind request from the canonical configured project to
+`/sandbox/project`, read-write, with the OpenShell 0.0.116
+`selinux_label = "private"` candidate, and performs no upload. Resume/start
+reuses the same sandbox without upload. `upload` and `export` refuse before
+contacting OpenShell. Dungeon does not accept raw driver JSON or arbitrary
+mount lists.
+
+The live candidate requires trusted gateway configuration with
+`enable_bind_mounts = true` and the currently unvalidated
+`userns = "keep-id:uid=998,gid=998"` mapping. Those are Podman driver settings,
+not `policy.json` capability. Existing/default `dungeon init` remains
+`copy`; select `--project-transfer live` only for the pending live validation.
+The current `dungeon-local` setup is not migrated automatically, and no host
+chmod/chown workaround is part of the design.
 
 The three-way baseline is `baseline.json` in the private config directory,
 bound to the config fingerprint and sandbox ID. It stores only pre-upload host
@@ -74,7 +92,7 @@ Add the `imports` member to the existing config; the example omits its other req
 
 **Application is not implemented:** `create`, `up`, `run`, and other runtime operations refuse configurations declaring imports. OpenShell 0.0.116 uploads as the sandbox user into writable guest scope; merely changing the uploaded file modes would not make them read-only to that user. Do not treat the plan as an applied snapshot or an isolation test. Remove the declaration to use existing runtime operations; a safe, tested guest read-only mechanism is required before enabling import application. This does not change `policy.json`, the reviewed image, or environment propagation.
 
-A live read-write workspace mount of the configured project is the accepted default direction for the contained-development loop (see architecture and ROADMAP). It is a separate, future, narrowly guarded transfer mode; it does not change this import model or remove the copied upload/export automation path.
+The live read-write workspace transfer candidate is implemented separately from imports. It is narrowly guarded to the canonical configured project and is not yet a supported/default path; it does not change the import model or remove the copied upload/export automation path. Runtime support remains blocked on the OpenShell 0.0.116, rootless Podman 5.8.4, Fedora/SELinux validation gate.
 
 The accepted capability model continues to extend this single authoritative configuration, not a parallel plugin configuration. General declarative fields for the remaining request categories are not added in this first slice (the Neovim requirement/state paths shown in plan are derived, and existing `providers` remains the named provider binding):
 
