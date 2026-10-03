@@ -53,7 +53,7 @@ may initialize one only in an interactive terminal. Before writing files,
 Dungeon shows the canonical project, private config path, transfer mode,
 gateway, image, and default agent and requires confirmation. The generated
 binding currently starts in `copy` mode; Issue #24's live candidate remains
-explicit until its live gate passes.
+explicit pending a separate promotion decision.
 
 A moved or renamed project gets a different private project key and is never
 silently rebound. The old explicit config remains usable through `--config`
@@ -94,12 +94,13 @@ contacting OpenShell. Dungeon does not accept raw driver JSON or arbitrary
 mount lists.
 
 The live candidate requires trusted gateway configuration with
-`enable_bind_mounts = true` and the currently unvalidated
-`userns = "keep-id:uid=998,gid=998"` mapping. Those are Podman driver settings,
-not `policy.json` capability. Existing/default `dungeon init` remains
-`copy`; select `--project-transfer live` only for the pending live validation.
-The current `dungeon-local` setup is not migrated automatically, and no host
-chmod/chown workaround is part of the design.
+`enable_bind_mounts = true` and
+`userns = "keep-id:uid=998,gid=998"`. Those are Podman driver settings, not
+`policy.json` capability. The 2026-10-01 Fedora/OpenShell/Podman record is in
+[validation](validation.md); it does not make live the generated default.
+Existing/default `dungeon init` remains `copy`. The current `dungeon-local`
+setup is not migrated automatically, and no host chmod/chown workaround is
+part of the design.
 
 The three-way baseline is `baseline.json` in the private config directory,
 bound to the config fingerprint and sandbox ID. It stores only pre-upload host
@@ -110,6 +111,77 @@ baseline is refused: manually download and recover the guest project with
 OpenShell, inspect it, then run `upload --yes` explicitly to create a new
 baseline. Dungeon does not guess or synthesize the missing baseline.
 
+
+## Remote-first attachment
+
+Keep UI/editor configuration on the host; run the agent, tools, credentials,
+and sessions in the guest. A host editor can watch the configured checkout
+directly when `project_transfer` is explicitly `live` on the validated local
+Podman gateway. This is a local bind, not cross-machine file synchronization:
+the source must exist on the gateway's Podman host. A remote gateway does not
+make a laptop checkout live automatically. Copy mode remains available with
+reviewed export.
+
+Existing `code` and `ssh-config` use OpenShell's native remote attachment.
+Run `up` first. VS Code Remote and each vendor's SSH/desktop integration need
+their own validation; generic SSH does not establish support for Codex remote
+mode or Claude Desktop. Editor configuration need not be imported just to use
+these paths. Guest-installed extensions and tools still execute inside isolation.
+
+For HTTP clients, `forward` uses OpenShell 0.0.116's gRPC service forwarding:
+
+```sh
+dungeon --config "$CONFIG" up
+
+# Terminal 1: interactive foreground service in /sandbox/project
+dungeon --config "$CONFIG" exec --tty -- opencode serve --hostname 127.0.0.1 --port 4096
+
+# Terminal 2: forward only while needed
+dungeon --config "$CONFIG" forward --port 4096 --local-port 14096
+```
+
+Both commands run in the foreground. `forward` accepts nonzero ports only;
+`--local-port` defaults to `--port`. Both ends are fixed to `127.0.0.1`.
+It verifies the existing Ready sandbox's identity and policy before delegating
+to OpenShell, does not create/start a sandbox, and preserves OpenShell's exit
+status. In a real terminal, Ctrl-C through `exec --tty` stopped the guest
+server on the tested pair. Non-TTY process-group interruption did not guarantee
+server cleanup and left it running. Ctrl-C in Terminal 2 stops only the forward,
+not the guest server or sandbox; stop the server separately when finished. No background registry, host listener daemon,
+SSH config mutation, container port publication, or policy widening is added.
+
+OpenCode V2 generates and prints its own server password. Treat it as a secret;
+do not put it in Dungeon config, logs shared with others, shell arguments, or
+project files. The forwarded API grants control of the guest agent: trust the
+client, keep service authentication enabled, and remember that host loopback
+is reachable by other local users/processes. Dungeon does not store the password
+or synchronize host agent credentials/configuration.
+
+In a third host terminal, use the server password printed in Terminal 1.
+OpenCode V2's native client reads `OPENCODE_PASSWORD` for remote Basic auth;
+enter it without putting it in shell history or command arguments:
+
+```sh
+read -r -s -p 'Guest OpenCode server password: ' OPENCODE_PASSWORD
+printf '\n'
+OPENCODE_PASSWORD="$OPENCODE_PASSWORD" opencode --server http://127.0.0.1:14096
+unset OPENCODE_PASSWORD
+```
+
+Do not supply `/sandbox/project` as a host positional directory: OpenCode tries
+to `chdir` locally. With no directory argument, the tested TUI opened the
+guest server's `/sandbox/project` location. This uses a native client setting,
+not a new Dungeon password option or store ([V2 source](https://github.com/anomalyco/opencode/blob/v2.0.22/packages/cli/src/services/server-connection.ts)).
+
+**Validated observation:** host OpenCode 2.0.22 authenticated to guest 2.0.14
+(with a version warning), opened the remote TUI, and completed a native remote
+AI read/edit/test task. The same session and exact message history survived
+guest restart and resumed successfully. A real terminal Ctrl-C through
+`exec --tty` stopped the guest server. By contrast, interrupting non-TTY host
+Dungeon exec left the guest service running; interrupting `forward` stops only
+the forward. Interactive TUI message submission remains unverified, and this
+version pair is not a matched-version validation. See the
+[recorded evidence](validation.md#remote-first-service-forwarding).
 
 ## Reviewed import declarations (plan-only first slice)
 
@@ -125,7 +197,7 @@ Add the `imports` member to the existing config; the example omits its other req
 
 **Application is not implemented:** `create`, `up`, `run`, and other runtime operations refuse configurations declaring imports. OpenShell 0.0.116 uploads as the sandbox user into writable guest scope; merely changing the uploaded file modes would not make them read-only to that user. Do not treat the plan as an applied snapshot or an isolation test. Remove the declaration to use existing runtime operations; a safe, tested guest read-only mechanism is required before enabling import application. This does not change `policy.json`, the reviewed image, or environment propagation.
 
-The live read-write workspace transfer candidate is implemented separately from imports. It is narrowly guarded to the canonical configured project and is not yet a supported/default path; it does not change the import model or remove the copied upload/export automation path. Runtime support remains blocked on the OpenShell 0.0.116, rootless Podman 5.8.4, Fedora/SELinux validation gate.
+The live read-write workspace transfer candidate is implemented separately from imports. It is narrowly guarded to the canonical configured project and is not the generated/default path; it does not change the import model or remove the copied upload/export automation path. The recorded OpenShell 0.0.116, rootless Podman 5.8.4, Fedora/SELinux gate is in [validation](validation.md). Promotion remains a separate decision.
 
 The accepted capability model continues to extend this single authoritative configuration, not a parallel plugin configuration. General declarative fields for the remaining request categories are not added in this first slice (the Neovim requirement/state paths shown in plan are derived, and existing `providers` remains the named provider binding):
 

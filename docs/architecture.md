@@ -16,6 +16,12 @@ developer / agent CLI / editor / external harness
 
 The design goal is native-feeling development inside isolation, not a new agent orchestration framework.
 
+Remote-first means the familiar UI/editor can remain on the host while the
+agent server, tools, credentials, and sessions run inside the guest. Live local
+project transfer lets the host editor see guest writes immediately without
+importing its configuration. This does not imply file synchronization across
+machines or support for every vendor's desktop/SSH protocol.
+
 ## Product responsibility
 
 Dungeon owns:
@@ -83,6 +89,13 @@ For supported combinations, Dungeon may:
 Dungeon must not silently install privileged dependencies, overwrite incompatible OpenShell/runtime state, or fall back to weaker containment.
 
 Setup health is not containment attestation.
+
+Service attachment reuses OpenShell's foreground gRPC forwarding, not a new
+Dungeon server or proxy. `forward` checks the existing Ready binding and policy
+before opening host loopback to a guest-loopback service. It neither starts the
+service nor manages its authentication. This first slice has no automatic
+serve/attach process manager; the full native-client workflow must pass before
+hiding that lifecycle.
 
 ## Runtime identity
 
@@ -197,7 +210,7 @@ Unsupported or unsatisfied requests remain explicit. Missing authority never cau
 
 The plan-only slice accepts a reviewed Neovim directory declaration in the authoritative private config and inventories it in `plan`. Runtime commands refuse it: OpenShell 0.0.116 uploads as the sandbox user, so guest-writable `/sandbox` cannot enforce a read-only imported subtree using uploaded file modes. Enforceable guest read-only snapshots remain an implementation gate.
 
-Separately, the live read-write workspace transfer is now implemented as an explicit pre-validation candidate. It derives one bind mount from the canonical private-config project path to `/sandbox/project`; users cannot supply raw driver JSON or arbitrary mount lists. The workspace remains the only requested writable host path, imports remain a separate read-only snapshot lifecycle, and credentials, SSH keys, and engine sockets are never implicitly mounted. The copied upload/export path remains supported. Live does not become the generated/default mode until the OpenShell 0.0.116/rootless-Podman/Fedora validation gate passes.
+Separately, the live read-write workspace transfer is now implemented as an explicit pre-validation candidate. It derives one bind mount from the canonical private-config project path to `/sandbox/project`; users cannot supply raw driver JSON or arbitrary mount lists. The workspace remains the only requested writable host path, imports remain a separate read-only snapshot lifecycle, and credentials, SSH keys, and engine sockets are never implicitly mounted. The copied upload/export path remains supported. The OpenShell 0.0.116/rootless-Podman/Fedora gate now has a recorded result; live still does not become the generated/default mode without an explicit promotion decision.
 
 - The host source path is selected explicitly from private Dungeon configuration.
 - Snapshot preflight rejects special files and symlinks for the initial implementation.
@@ -236,11 +249,13 @@ External harnesses own prompts, loops, model choices, branch strategies, issue q
 
 Sandcastle is the first concrete compatibility target because its isolated-provider seam closely matches this boundary. Functional compatibility is desirable. Copying Sandcastle's internal orchestration into Dungeon is not.
 
-A Sandcastle adapter should live on the Sandcastle/integration side when possible and may be contributed upstream. It must not require Dungeon to add writable host bind mounts, a host-execution fallback, Node as a native runtime dependency, or automatic project merge that bypasses Dungeon's reviewed return path.
+A Sandcastle adapter should live on the Sandcastle/integration side when possible and may be contributed upstream. It must not require arbitrary additional writable host binds, a host-execution fallback, Node as a native runtime dependency, or automatic project merge that bypasses Dungeon's reviewed copy-mode return path. Explicit live mode remains limited to the canonical configured project bind.
 
 ## Project return boundary
 
-The host project remains authoritative. Dungeon does not make the sandbox a writable view of the host project.
+The host project remains authoritative. In explicit live mode, the canonical
+project is a writable guest view. The staged return contract below applies only
+to copy mode.
 
 The initial copy is uploaded on first `up`; subsequent starts do not silently refresh it. OpenShell uploads may filter ignored files and leave old guest files in place. Export downloads the complete guest tree.
 

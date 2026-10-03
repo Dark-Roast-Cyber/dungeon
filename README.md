@@ -21,12 +21,13 @@ OpenShell owns workload isolation and policy enforcement. Agent tools and harnes
 
 Dungeon must not weaken isolation for convenience. Project content may request capabilities in future configuration surfaces, but it cannot grant itself filesystem, network, credential, provider, mount, or privilege access.
 
-## What ships on main
+## Current implementation
 
 - One Rust CLI. Python, Node, and Bun are not runtime dependencies.
 - Direct OpenCode, Claude Code, Codex, shell, and arbitrary command execution.
 - Vendor-native guest authentication for Codex device login and Claude Code browser login.
 - Optional VS Code and SSH attachment.
+- Foreground forwarding from host loopback to guest-loopback services.
 - Explicit config, policy, typed project-transfer intent, runtime identity, and safe copy-mode upload/export checks.
 - One starter OpenShell policy. Additional profiles wait for validated scenario differences.
 - A validated rootless-Podman/OpenShell path; broader runtime/platform support remains explicit future validation.
@@ -107,7 +108,7 @@ The generated/default transfer mode is `copy`. On first `up`, copy mode creates 
 
 Copy-mode export is a separate reviewed operation, allowed only while the bound sandbox is Ready on OpenShell 0.0.116. `dungeon --config "$CONFIG" export` downloads and stages guest changes, prints a deterministic summary, then requires interactive typed `yes` or explicit `--yes` before applying. Conflicts and special entries are refused. Upload remains a deliberate refresh/recovery action: `dungeon --config "$CONFIG" upload --yes` overwrites guest project contents and can discard guest-side edits.
 
-Issue #24 also provides an explicit `--project-transfer live` pre-validation candidate. It derives one read-write Podman bind request for the canonical configured project at `/sandbox/project`, performs no upload, and refuses upload/export. It is not a supported or default path yet. The dedicated gateway bind-mount and keep-id settings still require the recorded OpenShell 0.0.116/rootless-Podman/Fedora validation, and `dungeon setup` does not enable or migrate them automatically.
+Issue #24 also provides an explicit `--project-transfer live` pre-validation candidate. It derives one read-write Podman bind request for the canonical configured project at `/sandbox/project`, performs no upload, and refuses upload/export. It is not the generated/default path. The dedicated gateway bind-mount and keep-id settings have one recorded OpenShell 0.0.116/rootless-Podman/Fedora result, and `dungeon setup` does not enable or migrate them automatically.
 
 ## Authentication
 
@@ -123,10 +124,22 @@ Codex uses `codex login --device-auth`. Claude starts inside the guest so the us
 ```sh
 dungeon --config "$CONFIG" code
 dungeon --config "$CONFIG" ssh-config
+dungeon --config "$CONFIG" forward --port 4096 --local-port 14096
 dungeon --config "$CONFIG" status
 ```
 
 Remote/editor attachment should remain a first-class way to use an isolated environment. Dungeon manages the environment boundary; the user should otherwise experience the normal CLI, editor, or remote workflow.
+
+Start remote-first: keep the editor and its configuration on the host, and run
+the agent/tools inside the guest. With explicit `live` transfer on the validated
+local gateway, guest edits appear immediately in the host checkout; no Neovim
+config import is needed. Copy mode still requires reviewed export.
+
+`forward` exposes only a guest-loopback service on host `127.0.0.1`, runs in the
+foreground, and requires the bound sandbox to be Ready with unchanged identity
+and policy. It does not start a server, publish a container port, or manage
+credentials. See [configuration](docs/configuration.md#remote-first-attachment)
+for the OpenCode serve/forward/attach workflow and its validation limits.
 
 ## Harness interoperability
 

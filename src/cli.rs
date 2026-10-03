@@ -11,6 +11,7 @@ use serde_json::json;
 use std::collections::HashSet;
 use std::env;
 use std::io::{self, IsTerminal, Write};
+use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_IMAGE: &str = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest";
@@ -80,6 +81,13 @@ enum Commands {
     Shell,
     Code,
     SshConfig,
+    /// Forward a guest-loopback service to host loopback (foreground; Ctrl-C to stop).
+    Forward {
+        #[arg(long, help = "service port inside the guest")]
+        port: NonZeroU16,
+        #[arg(long, help = "host loopback port (defaults to --port)")]
+        local_port: Option<NonZeroU16>,
+    },
     Upload {
         #[arg(long)]
         yes: bool,
@@ -404,6 +412,7 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         Commands::Shell => runtime.execute(&["/bin/bash".into(), "-l".into()], true, "/sandbox"),
         Commands::Code => runtime.connect_vscode(),
         Commands::SshConfig => runtime.ssh_config(),
+        Commands::Forward { port, local_port } => runtime.forward_service(port, local_port),
         Commands::Start => runtime.start(),
         Commands::Init { .. }
         | Commands::Setup
@@ -609,6 +618,64 @@ mod tests {
     }
 
     #[test]
+    fn forwarding_accepts_only_nonzero_ports_not_addresses_or_background_mode() {
+        let cli = Cli::try_parse_from([
+            "dungeon",
+            "forward",
+            "--port",
+            "4096",
+            "--local-port",
+            "14096",
+        ])
+        .unwrap();
+        assert!(cli.project.is_none());
+        assert!(
+            matches!(cli.command, Some(Commands::Forward { port, local_port })
+            if port.get() == 4096 && local_port.unwrap().get() == 14096)
+        );
+        let cli = Cli::try_parse_from(["dungeon", "forward", "--port", "65535"]).unwrap();
+        assert!(
+            matches!(cli.command, Some(Commands::Forward { port, local_port: None })
+            if port.get() == 65535)
+        );
+        for args in [
+            vec!["dungeon", "forward"],
+            vec!["dungeon", "forward", "--port", "0"],
+            vec!["dungeon", "forward", "--port", "65536"],
+            vec!["dungeon", "forward", "--port", "-1"],
+            vec!["dungeon", "forward", "--port", "127.0.0.1:4096"],
+            vec!["dungeon", "forward", "--port", "4096", "--local-port", "0"],
+            vec![
+                "dungeon",
+                "forward",
+                "--port",
+                "4096",
+                "--local-port",
+                "65536",
+            ],
+            vec![
+                "dungeon",
+                "forward",
+                "--port",
+                "4096",
+                "--local-port",
+                "0.0.0.0:4096",
+            ],
+            vec![
+                "dungeon",
+                "forward",
+                "--port",
+                "4096",
+                "--target-host",
+                "example.com",
+            ],
+            vec!["dungeon", "forward", "--port", "4096", "--background"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
+    }
+
+    #[test]
     fn init_has_no_profile_flag() {
         assert!(
             Cli::try_parse_from([
@@ -770,10 +837,13 @@ mod tests {
         doc["imports"] = json!([{"source": source, "destination": "/sandbox/.config/nvim"}]);
         let path = private.join("dungeon.json");
         write_new(&path, &doc).unwrap();
-        for action in ["create", "up", "run", "upload", "down"] {
+        for action in ["create", "up", "run", "upload", "down", "forward"] {
             let mut args = vec!["dungeon", "--config", path.to_str().unwrap(), action];
             if action == "upload" {
                 args.push("--yes");
+            }
+            if action == "forward" {
+                args.extend(["--port", "4096"]);
             }
             assert!(
                 dispatch(Cli::try_parse_from(args).unwrap())

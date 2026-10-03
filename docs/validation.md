@@ -102,15 +102,37 @@ and keeps upload/export copy-only. Static tests must prove no raw driver-config
 or arbitrary mount authority, no live upload on fresh/resumed up, and no policy
 widening. This is not live runtime evidence.
 
-Live support and default selection remain blocked on the recorded Fedora amd64,
-rootless Podman 5.8.4, OpenShell 0.0.116 gate. That gate must validate a dedicated
-gateway with enable_bind_mounts=true and the keep-id:uid=998,gid=998 candidate,
-ordinary owner-mode host files, bidirectional edit visibility and ownership,
-stop/start, SELinux labeling, hard Landlock and network denials, no engine
-socket or unintended host visibility, and copy-mode regression. Existing
-dungeon-local setup is not migrated automatically.
+The Issue #24 live gate was recorded on 2026-10-01 against Fedora 44, kernel
+7.2.5-200.fc44.x86_64, SELinux Enforcing, OpenShell 0.0.116, and rootless Podman
+5.8.4. Dedicated gateway `issue24-brntyu` used `enable_bind_mounts=true`,
+`userns=keep-id:uid=998,gid=998`, and an identity-mounted `XDG_DATA_HOME`. An
+earlier failed attempt is recorded separately below. Source was
+`321e4a300fe58997874df0353e3121dc5515ce0e` plus the uncommitted cache fix;
+the disposable gateway was provisioned explicitly with the corrected layout,
+not by migrating or rerunning `dungeon setup` against `dungeon-local`. The agent
+image digest was
+`sha256:5a5353c130370361934d4826ee792e2f8038de40763f2713025dbb4ba83e0ce5`.
+On the corrected gateway, sandbox
+`47ea5729-4105-44de-8b9c-75064709c997` became Ready with no upload. Guest
+identity was 998/998. Ordinary host files at 1000:1000 modes 755/644 were
+writable from the guest without chmod/chown; both edit directions appeared
+immediately and host ownership/mode stayed unchanged. Stop/start reused that
+sandbox without upload. Private SELinux labeling relabeled the project to
+`container_file_t:s0:c81,c893`; the unconfined host user could still read and
+write it, and enforcement stayed on. Opening mode-1777 `/var/tmp` and `/boot`
+was denied, while `/tmp` writes and `/etc/passwd` reads succeeded. `/etc/shadow`
+reads were denied, but that file is also mode 640. Unapproved
+`https://1.1.1.1` and `https://example.com` returned CONNECT 403. No engine
+socket, host home, SSH key, credential store, or parent path was accessible.
+The only Dungeon-requested writable host bind was the project at
+`/sandbox/project`. Live upload and export refused locally. Separate copy
+sandbox `ef02d75c-504c-4c60-a429-40d84f2ea8fd` still uploaded once, resumed
+without upload, preserved guest-only state, auto-started through `run`, and
+exported only after review. Generated/default transfer remains copy. This
+record does not promote live, certify other platforms, or prove `sudo` (the
+binary was absent).
 
-The first Issue #24 live attempt on Fedora 44, kernel 7.2.5-200.fc44.x86_64,
+The historical first Issue #24 live attempt on Fedora 44, kernel 7.2.5-200.fc44.x86_64,
 SELinux Enforcing, OpenShell 0.0.116, and rootless Podman 5.8.4 stopped before
 sandbox creation. The dedicated gateway was healthy and the offline plan was
 correct, but host Podman failed `statfs` on a supervisor path rooted at
@@ -119,13 +141,67 @@ container had created that cache internally, but the host Podman service could
 not resolve the container-only absolute path.
 
 OpenShell 0.0.116 derives this supervisor cache from `XDG_DATA_HOME`. The
-rerun must give the disposable trusted gateway a private driver-data directory
+required correction was to give the disposable trusted gateway a private driver-data directory
 mounted at the identical absolute host/container path and set
 `XDG_DATA_HOME` to that path. No project chmod/chown, policy widening, SELinux
-weakening, or additional sandbox-visible mount is permitted. This failed
+weakening, or additional sandbox-visible mount was permitted. This failed
 bootstrap establishes no result for guest identity, workspace writability,
-SELinux behavior, containment denials, or copy regression; those gates remain
-unproven until the corrected topology is rerun.
+SELinux behavior, containment denials, or copy regression; those gates were
+unproven by that attempt. The corrected-gateway run recorded above is separate
+evidence and does not turn the failed bootstrap into a successful validation.
+
+### Remote-first service forwarding
+
+A synthetic local run at `e90d24de9d18804a646ee0534b7e99c06588988a` plus
+uncommitted cache/forward changes used the same Fedora/kernel/SELinux,
+OpenShell 0.0.116, rootless Podman 5.8.4, and agent-image digest as the live gate
+above. Dedicated gateways and sandbox `remote-probe` were removed afterward.
+The guest ran OpenCode 2.0.14 `serve` on `127.0.0.1:4096`; Dungeon forwarded
+host `127.0.0.1:14096` through OpenShell's gRPC service transport.
+
+| Check | Result |
+| --- | --- |
+| Guest server reachable through host-loopback forwarding | PASS; `/api/info` reported guest OpenCode 2.0.14 and its guest PID |
+| Service authentication | PASS; unauthenticated and Bearer requests returned 401; the generated password with HTTP Basic authentication succeeded |
+| Remote file write appears immediately on host | PASS; server filesystem API wrote synthetic `probe.txt`, preserving host owner/group/mode |
+| Host write appears through remote server | PASS; remote file read returned the host edit |
+| Host native client authentication | PASS; client-only `OPENCODE_PASSWORD` authenticated `opencode api --server ... get /api/info` |
+| Native-client remote shell edit | PASS; its `/api/shell` request appended to guest `probe.txt`, immediately visible on the host |
+| Forward listener removed on interrupt | PASS; host connection failed after SIGINT |
+| Native host OpenCode TUI attachment | PASS; host 2.0.22 rendered the guest `/sandbox/project` location when supplied the generated password, with a version warning |
+| Interactive TUI shell submission | NOT TESTABLE; the automated terminal input did not establish a command result |
+| Explicit guest path passed to host client | FAIL for that invocation; `/sandbox/project` caused a local `chdir` error; omit the positional argument |
+| Remote model/AI task, VS Code, Codex remote, Claude remote/desktop | NOT TESTABLE in this run |
+
+The initial forwarding probe above was limited to API/live-file, native-client
+shell, and TUI-attachment observations. A subsequent run using the same recorded
+Fedora/OpenShell/Podman combination and agent-image digest established:
+
+| Check | Result |
+| --- | --- |
+| Native remote AI task | PASS; synthetic `add.js` edit and guest test succeeded; separately approved host tests passed before and after restart/resume |
+| Restart and resume | PASS; same sandbox ID reused, exact native session history persisted, and a conversation-only synthetic marker was recovered without being re-supplied; guest tests passed |
+| Forward lifecycle | PASS; interrupt removed the local listener, reconnect reached the same guest server process, and forwarding a stopped sandbox was refused |
+| Configuration and bounded probes | PASS; synthetic default-agent drift was refused; `/var/tmp` write and unapproved network requests were denied, `/tmp` write succeeded, and engine socket paths were absent |
+| Non-TTY exec interrupt | DEGRADED; host process-group SIGINT left the guest server running |
+| Real-terminal `exec --tty` Ctrl-C | PASS; the foreground command and guest server stopped, and guest port 4096 was absent |
+| Guest server after sandbox restart | Explicitly relaunched; restart did not itself promise service supervision |
+
+Interactive TUI message submission remains unverified. Forward interruption
+removes only its host listener and does not stop the independently started
+service. Do not conflate these distinct shutdown paths. Before setting
+`OPENCODE_PASSWORD`, the native client rejected the health response with `UnsupportedContentType` and
+showed no password prompt. Authenticated revalidation resolved that failure;
+it did not establish a version incompatibility. Client/server versions differed
+and the client warned but continued. Keep service authentication enabled and
+do not alias guest paths on the host. Prefer matching reviewed versions for
+the next matched-version workflow check. The sanitized evidence summary and
+separate TTY report were retained locally; this page records the durable claims
+without copying raw session or credential material.
+
+Focused mock tests cover nonzero-port parsing, both fixed loopback addresses,
+gateway/workspace scope, Ready/identity/policy refusal, unchanged lifecycle,
+and faithful forwarding exit status. They do not establish remote UI support.
 
 ### Issue #6 local image candidate (historical)
 
@@ -275,4 +351,4 @@ EDR containment.
 
 ## Release
 
-Creating the reviewed version tag is the explicit native-release authorization step. npm publication remains a separate future gate. Runtime support claims remain limited to the exact validated combinations. Issue #5's read-only configuration imports remain a separate implementation and validation gate after the Issue #17 image-owned tool prerequisites; the live workspace mount direction is tracked separately and is not yet implemented or validated.
+Creating the reviewed version tag is the explicit native-release authorization step. npm publication remains a separate future gate. Runtime support claims remain limited to the exact validated combinations. Issue #5's read-only configuration imports remain a separate implementation and validation gate after the Issue #17 image-owned tool prerequisites. The Issue #24 live mount has the recorded Fedora/OpenShell/Podman evidence above; generated/default transfer remains copy until an explicit promotion decision.

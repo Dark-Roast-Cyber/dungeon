@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
+use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -277,7 +278,7 @@ impl<'a> Runtime<'a> {
                 self.config.values.name
             ),
             ProjectTransfer::Live => println!(
-                "Created {} with the configured live project mount request. Live transfer support remains pending the recorded validation gate.",
+                "Created {} with the configured live project mount request. Live transfer has recorded Fedora/OpenShell 0.0.116/rootless-Podman validation only; default-mode promotion remains explicit.",
                 self.config.values.name
             ),
         }
@@ -400,6 +401,26 @@ impl<'a> Runtime<'a> {
             "sandbox".into(),
             "ssh-config".into(),
             self.config.values.name.clone(),
+        ])
+    }
+
+    pub(crate) fn forward_service(
+        &self,
+        port: NonZeroU16,
+        local_port: Option<NonZeroU16>,
+    ) -> Result<i32> {
+        self.checked(true, true)?;
+        let local_port = local_port.unwrap_or(port);
+        self.status(&[
+            "forward".into(),
+            "service".into(),
+            self.config.values.name.clone(),
+            "--target-host".into(),
+            "127.0.0.1".into(),
+            "--target-port".into(),
+            port.to_string(),
+            "--local".into(),
+            format!("127.0.0.1:{local_port}"),
         ])
     }
 
@@ -715,6 +736,10 @@ mod tests {
 root='{}'
 printf '%s\n' "$*" >> "$root/calls"
 case " $* " in
+  *' forward service '*)
+    printf '%s\n' "$PWD" "${{CARGO_MANIFEST_DIR-unset}}" "${{OPENCODE_PASSWORD-unset}}" >> "$root/forward-context"
+    test ! -e "$root/fail-forward" || exit 6
+    ;;
   *' sandbox create '*) echo Ready > "$root/phase" ;;
   *' sandbox start '*) test ! -e "$root/fail-start" || exit 9; echo Ready > "$root/phase" ;;
   *' sandbox stop '*) echo Stopped > "$root/phase" ;;
@@ -924,6 +949,75 @@ esac
         runtime.run_agent(&["opencode".into()], false).unwrap();
         assert_eq!(fixture.calls("exec"), 2);
         assert_eq!(fixture.calls("upload"), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn forwarding_is_scoped_loopback_only_ready_only_and_preserves_exit_status() {
+        let fixture = Fixture::new();
+        let runtime = fixture.runtime();
+        let port = NonZeroU16::new(4096).unwrap();
+        let local_port = NonZeroU16::new(14096).unwrap();
+        let forward_calls = || {
+            fs::read_to_string(fixture.root.path().join("calls"))
+                .unwrap_or_default()
+                .lines()
+                .filter(|line| line.contains("forward service"))
+                .count()
+        };
+        assert!(runtime.forward_service(port, Some(local_port)).is_err());
+        assert_eq!(forward_calls(), 0);
+        assert_eq!(fixture.calls("create"), 0);
+        runtime.create().unwrap();
+        let state = fs::read(fixture.config.state_path()).unwrap();
+        assert_eq!(runtime.forward_service(port, Some(local_port)).unwrap(), 0);
+        assert_eq!(runtime.forward_service(port, None).unwrap(), 0);
+        let calls = fs::read_to_string(fixture.root.path().join("calls")).unwrap();
+        assert!(calls.contains("--gateway local --workspace default forward service demo --target-host 127.0.0.1 --target-port 4096 --local 127.0.0.1:14096\n"));
+        assert!(calls.contains("--gateway local --workspace default forward service demo --target-host 127.0.0.1 --target-port 4096 --local 127.0.0.1:4096\n"));
+        assert_eq!(
+            fs::read_to_string(fixture.root.path().join("forward-context")).unwrap(),
+            format!(
+                "{0}\nunset\nunset\n{0}\nunset\nunset\n",
+                fixture.root.path().canonicalize().unwrap().display()
+            )
+        );
+        fixture.flag("fail-forward");
+        assert_eq!(runtime.forward_service(port, Some(local_port)).unwrap(), 6);
+        runtime.down().unwrap();
+        assert!(runtime.forward_service(port, Some(local_port)).is_err());
+        assert_eq!(forward_calls(), 3);
+        assert_eq!(fixture.calls("start"), 0);
+        assert_eq!(fixture.calls("upload"), 0);
+        assert_eq!(fixture.calls("create"), 1);
+        runtime.start().unwrap();
+        for flag in ["mismatch", "replaced", "drift"] {
+            fixture.flag(flag);
+            assert!(
+                runtime.forward_service(port, Some(local_port)).is_err(),
+                "{flag}"
+            );
+            fs::remove_file(fixture.root.path().join(flag)).unwrap();
+        }
+        for phase in ["Provisioning", "Starting", "Stopping", "Error"] {
+            fs::write(fixture.root.path().join("phase"), phase).unwrap();
+            assert!(runtime.forward_service(port, None).is_err(), "{phase}");
+        }
+        fs::remove_file(fixture.root.path().join("phase")).unwrap();
+        assert!(runtime.forward_service(port, None).is_err());
+        fs::write(fixture.root.path().join("phase"), "Ready").unwrap();
+        let mut invalid_state: Value = serde_json::from_slice(&state).unwrap();
+        invalid_state["config"] = json!("changed");
+        fs::write(fixture.config.state_path(), invalid_state.to_string()).unwrap();
+        assert!(runtime.forward_service(port, None).is_err());
+        fs::write(fixture.config.state_path(), b"not json").unwrap();
+        assert!(runtime.forward_service(port, None).is_err());
+        fs::write(fixture.config.state_path(), &state).unwrap();
+        assert_eq!(forward_calls(), 3);
+        assert_eq!(fixture.calls("create"), 1);
+        assert_eq!(fixture.calls("start"), 1);
+        assert_eq!(fixture.calls("upload"), 0);
+        assert_eq!(fs::read(fixture.config.state_path()).unwrap(), state);
     }
 
     #[cfg(unix)]
