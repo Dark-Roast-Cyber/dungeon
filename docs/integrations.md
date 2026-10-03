@@ -12,9 +12,12 @@ not a requirement to use a particular agent protocol.
 | Claude Code login | `auth claude`, then `/login` | Reached login-method screen; account-dependent completion not tested (Issue #11). |
 | Other compatible CLI | `exec -- COMMAND ARG...` | Generic argument transport tested. |
 | Interactive shell | `shell` | PTY/Ctrl-C tested on the Issue #1 OpenShell Podman combination. |
-| VS Code | `code` | Delegates OpenShell editor connection. |
+| VS Code | `code` | NOT TESTABLE: client/Remote SSH extension/display unavailable in the recorded Issue #30 checkpoint. |
+| Guest terminal editor over native SSH | `ssh-config`, private OpenSSH config, guest `nvim` | Edit/save/test and saved-state reconnect/restart passed; SSH disconnect left editor processes alive (Issue #30 partial). |
 | Claude Desktop / ChatGPT remote projects | `ssh-config`, then client setup | Documented integration target, not live-certified. |
-| OpenCode remote TUI | Guest server plus protected tunnel | Manual alternative, not managed server lifecycle. |
+| OpenCode remote client | Guest `serve`, `forward`, native `--server` | Matched 2.0.14 AI edit/test and native session restart/resume passed; interactive TUI message submission unverified. |
+| Owned foreground service | `exec --owned -- COMMAND ARG...` | Explicit opt-in shutdown/live gates passed on the recorded Linux pair; not a daemon or containment guarantee. |
+| Read-only diagnostics | `doctor [--json]` | Inventory/private-state safety checks passed; does not dynamically certify integrations. |
 
 Native Windows applications do not become Linux workloads by connecting to
 Dungeon. Windows users can run the manager in WSL2 or connect through a supported
@@ -55,9 +58,14 @@ OpenCode remains provider-dependent and has no `dungeon auth opencode` command.
 
 Run `ssh-config` and inspect the generated Host block. Install it deliberately
 in your SSH configuration using the upstream workflow; do not blindly append
-multiple duplicate entries. `code` uses OpenShell's managed SSH installation
-instead. It may modify host SSH configuration. Select `/sandbox/project` in
-the remote editor after upload.
+multiple duplicate entries. A private file passed to native `ssh -F` avoids
+changing `~/.ssh/config`. Trust only the reviewed native OpenShell executable
+and generated ProxyCommand, never a project/tool-output shell snippet. The
+recorded terminal-editor run disabled host identity keys, agents and forwarding; see
+[its scope and disconnect limitation](validation.md#issue-30-native-ssh-terminal-editor-2026-10-03).
+`code` uses OpenShell's managed SSH installation instead. It may modify host
+SSH configuration. Select `/sandbox/project` in
+the remote editor after `up`.
 
 A desktop client must support the resulting SSH ProxyCommand connection and
 the remote Linux tools it launches. Configure Claude Code's SSH environment or
@@ -71,33 +79,24 @@ that every desktop feature or all its tools execute inside the boundary.
 
 ## OpenCode server alternative
 
-From `dungeon shell`, create a private server credential without placing it in
-your shell history, then start the server:
+Use the authoritative [remote-first configuration guide](configuration.md#remote-first-attachment)
+for the OpenCode V2 foreground `serve` / loopback `forward` / native `--server`
+workflow. V2 generates its server password; supply it only to the host client
+through ephemeral `OPENCODE_PASSWORD`. Do not pass a guest directory as a host
+positional path: it triggers local `chdir`, not remote workspace selection.
 
-```sh
-cd /sandbox/project
-umask 077
-read -r -s -p 'Server password: ' OPENCODE_SERVER_PASSWORD; printf '\n'
-export OPENCODE_SERVER_PASSWORD
-opencode serve --hostname 127.0.0.1 --port 4096
-```
-
-From another host terminal, use the explicitly scoped OpenShell port-forward
-workflow for port 4096. Confirm the listener is loopback-only, then connect the
-host OpenCode client with `opencode attach http://127.0.0.1:4096 --dir
-/sandbox/project` and its documented authentication mechanism. Use the guest
-path, not the host project path. Verify the exact client version's flags.
-
-Do not publish an unauthenticated server, place a password in a checked-in
-configuration, or expose HTTP Basic Auth on an untrusted network. Keep the
-forwarding process alive for the connection and stop it afterward. Dungeon does
-not manage server credentials, service restarts, or forwarding lifecycle yet.
+For explicit non-TTY service ownership, see [owned foreground execution](configuration.md#owned-foreground-execution).
+Interrupting `forward` removes only its host listener, not the independently
+started guest service. Dungeon stores no password and does not supervise service
+restarts. The [matched-pair record](validation.md#issue-29-matched-opencode-pair-2026-10-03)
+states the tested versions and remaining UI limits.
 
 ## Primary references
 
 - [Pinned OpenShell CLI](https://github.com/NVIDIA/OpenShell/blob/v0.0.116/crates/openshell-cli/src/main.rs)
 - [OpenShell environment management](https://docs.nvidia.com/openshell/latest/sandboxes/manage-sandboxes)
-- [OpenCode server](https://opencode.ai/docs/server/)
+- [OpenCode V2 CLI and explicit server connection](https://opencode.ai/v2/docs/cli)
+- [OpenCode V2 API](https://opencode.ai/v2/docs/api)
 - [Claude Code Desktop](https://code.claude.com/docs/en/desktop)
 - [ChatGPT remote connections](https://learn.chatgpt.com/docs/remote-connections)
 

@@ -46,7 +46,9 @@ Claude Code CLI testing, not as proof of remote/desktop support.
 ## 1. Explicit guest-service shutdown
 
 Status: implementation, disposable local live gates and independent review
-accepted; CI test-portability correction awaiting review/revalidation. Issue #28: **Make remote guest-service
+accepted, including the test-portability correction at `3965d7d34e6e0ee28483fc0e68ebc708ef880c48`;
+all seven jobs in [CI run 37113253413](https://github.com/Dark-Roast-Cyber/dungeon/actions/runs/37113253413)
+passed. Issue #28: **Make remote guest-service
 shutdown explicit without orphaned processes**.
 
 The opt-in `exec --owned` implementation leaves generic exec/run/forward alone.
@@ -90,7 +92,11 @@ matched OpenCode remote client/server pair**; link image Issue #6.
 Status: prerequisite checkpoint complete; VS Code Remote SSH NOT TESTABLE
 (client/extension/display unavailable), no installation performed. See
 [editor checkpoint](docs/validation.md#issue-30-editor-prerequisite-checkpoint-2026-10-03).
-No editor integration pass is claimed. Validate one integration at a time. GitHub
+The separate [native SSH/guest Neovim gate](docs/validation.md#issue-30-native-ssh-terminal-editor-2026-10-03)
+passed real-PTY render/edit/save/test and saved-state reconnect/restart, with
+degraded disconnect cleanup (editor processes survived until the dedicated
+sandbox was stopped). This is partial #30 evidence, not VS Code, host Neovim UI,
+vendor desktop support or full issue acceptance. Validate one integration at a time. GitHub
 issue #30: **Validate native remote clients against Dungeon-backed environments**.
 
 - **VS Code Remote:** repeated PATH/RPM/Flatpak and standard-directory inventory
@@ -114,8 +120,9 @@ issue #30: **Validate native remote clients against Dungeon-backed environments*
 
 ## Read-only diagnostics (Issue #22)
 
-Issue #22 adds `doctor`/`doctor --json` read-only diagnostics; parent independent
-review is required before delivery acceptance. Scope is Linux/OpenShell 0.0.116,
+Issue #22 adds `doctor`/`doctor --json` read-only diagnostics; independent review
+and safety rereview are accepted at `3965d7d34e6e0ee28483fc0e68ebc708ef880c48`,
+with all seven jobs in CI run 37113253413 passing. Scope is Linux/OpenShell 0.0.116,
 existing rootless Podman and selected existing private config only. Independent
 checks, bounded sanitized native queries, explicit blocking exit semantics and
 configuration-only live capability/mapping observations do not install/migrate,
@@ -125,7 +132,7 @@ Independent-review safety corrections cover descriptor-relative private
 config/policy reads, all-project helper PATH exclusion, exact driver-data
 environment identity, WNOWAIT query cleanup and empty-store initialization
 avoidance. Focused regressions and native scratch evidence are recorded;
-independent rereview remains the next acceptance gate.
+accepted rereview does not establish new runtime/editor containment claims.
 
 ## Deferred
 

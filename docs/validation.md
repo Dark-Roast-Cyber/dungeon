@@ -496,10 +496,62 @@ nor WAYLAND_DISPLAY was set in this session. A supported installed GUI client,
 Remote SSH extension, usable interactive display and explicit installation
 approval if needed are prerequisites. Nothing was installed.
 
-Host Neovim 0.11.6 and OpenSSH 10.2p1 are available. A separately chosen bounded
-interactive Neovim/SSH workflow could be useful, but was not exercised and would
-not substitute for a VS Code pass. No editor/vendor authentication, host-home
-sharing or policy widening was attempted.
+Host Neovim 0.11.6 and OpenSSH 10.2p1 were available. That checkpoint did not
+exercise an editor. The separate native SSH/guest Neovim run below does not
+substitute for a VS Code pass.
+
+### Issue #30 native SSH terminal editor (2026-10-03)
+
+**Partial gate: interactive guest Neovim PASS; disconnect cleanup DEGRADED.**
+Dungeon source was `3965d7d34e6e0ee28483fc0e68ebc708ef880c48`, with unchanged
+runtime/image inputs. The tested debug binary SHA-256 was
+`58e1d2065d632601045daba35877b809fcd2aa4cdafe9f8744b93a0124a5ae0e`.
+The run used Fedora 44, kernel 7.2.5-200.fc44.x86_64, SELinux Enforcing,
+OpenShell CLI/gateway 0.0.116, rootless Podman 5.8.4, host OpenSSH 10.2p1 and
+image-owned guest Neovim 0.12.5. The unchanged immutable agent and gateway
+digests were respectively
+`sha256:5a5353c130370361934d4826ee792e2f8038de40763f2713025dbb4ba83e0ce5` and
+`sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645`.
+
+Pinned upstream [SSH configuration/proxy source](https://github.com/NVIDIA/OpenShell/blob/v0.0.116/crates/openshell-cli/src/ssh.rs)
+and [supervisor SSH source](https://github.com/NVIDIA/OpenShell/blob/v0.0.116/crates/openshell-supervisor-process/src/ssh.rs)
+plus exact installed help established native remote-command/PTY support. The
+emitted `dungeon ssh-config` block matched the reviewed fixed native ProxyCommand
+using the installed canonical OpenShell path, test gateway/name and workspace.
+Only that explicitly trusted SSH mechanism executed on the host; no arbitrary
+output or project snippet was evaluated. Native `ssh -F` used a private 0600
+file, isolated HOME/XDG registration, `User sandbox`, no identity files/agent,
+no public-key/password/keyboard-interactive auth, no forwarding/multiplexing and
+no local commands. OpenShell's mTLS-backed session proxy supplies native SSH
+none-auth access; no host SSH credentials were needed. Upstream disables host-key
+checking/known-host storage for this proxy path; this is not ordinary SSH host-key
+validation. No `~/.ssh` modification occurred.
+
+The synthetic live project used its own disposable gateway with keep-id and
+identity-mounted driver data. A foreground `uv run` Python harness allocated a
+real controlling PTY (`pty.fork`) to native host OpenSSH, which launched guest
+`nvim -u NONE -i NONE` in `/sandbox/project`. This was not headless Neovim or a
+host Neovim UI/config import.
+
+| Check | Result |
+| --- | --- |
+| Interactive rendering/input/edit/save | PASS; terminal screen rendered the fixture and accepted an arithmetic substitution and `:w` |
+| Guest context and test | PASS; `/sandbox/project`, `HOME=/sandbox`, UID 998 and terminal input confirmed; `:!node test.js` printed `tests passed` |
+| Host-visible edit and approved host test | PASS; exact arithmetic-only fix inspected before host execution; unchanged test SHA-256 `702e699d68d016175147d366080cdff34768f1564505b4eb0f306a06622216ba`; owner/group/modes preserved |
+| Editor state | PASS; synthetic state under `/sandbox/.local/state/nvim`, owner/group 998:998, mode 0700, persisted after restart; data/cache directories were absent under this minimal invocation |
+| SSH disconnect lifetime | DEGRADED; closing the host PTY returned SSH exit 255 but two guest Neovim processes remained sleeping; disconnect is not editor shutdown |
+| Reconnect and same sandbox stop/start | PASS; saved edit reopened through SSH, same sandbox ID reused after stop/start, guest test passed again; no unsaved-buffer recovery claim |
+| Bounded denials | PASS; SSH `/var/tmp` write denied, `/tmp` write allowed, unapproved example.com CONNECT returned 403, checked engine sockets absent; no credential reads |
+| Cleanup | PASS; stopping only the dedicated test sandbox removed surviving editor processes; final guest editor inventory empty; disposable sandbox/gateway/network/private registrations/certificates/database/HOME/project/config removed, gateway port absent |
+
+Existing container identities/names/states matched before/after. No tools were
+installed/upgraded, images rebuilt, host configuration/credentials shared, policy
+widened or live default promoted. Sanitized gates, binary/upstream/harness/source
+hashes and cleanup comparisons are retained at
+`/tmp/opencode/dungeon-ssh30-73pUNm/evidence`; no raw terminal/auth output or
+editor/session databases are retained.
+VS Code, host editor UI, vendor remote/desktop clients, other platforms and full
+Issue #30 acceptance remain unproven.
 
 ### Remaining gates
 
