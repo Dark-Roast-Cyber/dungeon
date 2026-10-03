@@ -401,3 +401,34 @@ static build, plan output, gateway health check, or OpenShell policy readback is
 not sufficient evidence for this gate. Do not make live the generated/default
 mode until every required ownership, SELinux, policy-denial, visibility, and
 copy-regression check above has acceptable live evidence.
+
+## Remote-first service attachment gate
+
+Use a dedicated synthetic live project on the validated local gateway layout
+above. Freeze source, image digest, host/client and guest/server versions.
+Do not alter `dungeon-local`, import host configuration/credentials, expose an
+external listener, or weaken policy to make attachment pass.
+
+1. Run `up`, then a foreground guest service bound to `127.0.0.1` using `exec`.
+   For the reviewed OpenCode image: `exec -- opencode serve --hostname
+   127.0.0.1 --port 4096`. Keep its generated password out of saved evidence.
+2. Run `forward --port 4096 --local-port 14096`. Verify only host loopback is
+   listening; no container port publication or SSH-config change is required.
+3. Check that unauthenticated requests fail and an authenticated health request
+   identifies the guest server. Use vendor-native authentication, not a Dungeon
+   credential store or an authentication-disable flag.
+4. With a supported native client, select `/sandbox/project` as a **remote**
+   location. Confirm that this does not require the directory to exist on the
+   host. Record API connectivity separately if native attachment fails.
+5. Through the remote service, edit a synthetic file and check it immediately
+   from the host editor/filesystem. Edit it on the host and read it remotely.
+   Verify owner/group/mode and the single project-bind boundary remain intact.
+6. Run a bounded remote AI edit/test only when attachment/authentication work.
+   Repeat the policy-denial and no-engine-socket checks. Do not count direct
+   `exec` or server filesystem API writes as an AI-task pass.
+7. Interrupt forwarding and verify its host listener disappears. Stop the
+   server separately, and clean up only this run's resources.
+
+Record `PASS | FAIL | DEGRADED | NOT TESTABLE` per check. VS Code Remote and
+vendor SSH/desktop products each need their own record, not a generic SSH or
+HTTP pass carried over as support.

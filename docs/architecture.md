@@ -16,6 +16,12 @@ developer / agent CLI / editor / external harness
 
 The design goal is native-feeling development inside isolation, not a new agent orchestration framework.
 
+Remote-first means the familiar UI/editor can remain on the host while the
+agent server, tools, credentials, and sessions run inside the guest. Live local
+project transfer lets the host editor see guest writes immediately without
+importing its configuration. This does not imply file synchronization across
+machines or support for every vendor's desktop/SSH protocol.
+
 ## Product responsibility
 
 Dungeon owns:
@@ -58,6 +64,7 @@ A feature that belongs primarily to those orchestration concerns should live in 
 - `policy`: the starter policy and policy safety validation.
 - `openshell`: the single OpenShell subprocess boundary and lifecycle operations.
 - `openshell::local_setup`: local gateway bootstrap within the same OpenShell boundary and sanitized executable resolution; OpenShell remains the registration/health authority, Podman the container/network authority.
+- `openshell::diagnostics`: read-only prerequisite/capability reporting with bounded native queries, sharing setup predicates without invoking setup.
 
 There is no backend hierarchy, daemon, plugin ABI, embedded JS runtime, second policy language, or framework layer.
 
@@ -83,6 +90,46 @@ For supported combinations, Dungeon may:
 Dungeon must not silently install privileged dependencies, overwrite incompatible OpenShell/runtime state, or fall back to weaker containment.
 
 Setup health is not containment attestation.
+
+`doctor` is a read-only diagnostic responsibility within the same OpenShell
+subprocess owner, not another runtime implementation. It shares setup's pinned
+version, rootless, registration and health predicates but never calls setup or
+constructs Runtime. Checks remain independent when a prerequisite is missing.
+Only native inventory queries run, with null stdin, a narrowed host environment,
+project-excluded executable resolution, five-second deadlines and capped output.
+Doctor's descriptor-checked config/policy bytes reuse the existing config schema
+and policy validator; ordinary runtime loading retains its existing contract.
+The diagnostic subprocess PATH excludes all selected/current project directories
+for helper resolution too. Native engine inventory requires an established
+store, and query leader identities remain reserved until group teardown/reap.
+Foreign gateways are not adopted or inferred from local gateway files. No
+credential/auth inspection or dynamic integration/containment testing occurs.
+
+Service attachment reuses OpenShell's foreground gRPC forwarding, not a new
+Dungeon server or proxy. `forward` checks the existing Ready binding and policy
+before opening host loopback to a guest-loopback service. It neither starts the
+service nor manages its authentication. This first slice has no automatic
+serve/attach process manager; the full native-client workflow must pass before
+hiding that lifecycle.
+
+Explicit `exec --owned` owns only one foreground guest process group. It uses
+fixed guest Node code with a live group guardian and an outer status/cleanup
+owner, through the same OpenShell subprocess boundary. A random temporary
+invocation control directory is not a service/PID registry. The host handles
+INT/TERM and verifies cleanup separately from command output; ordinary exec,
+run, and forwarding remain native and unchanged. This is lifecycle assistance,
+not protection against group escape, same-UID sabotage or lost transport.
+
+`ssh --owned` is the distinct real-terminal path within that same ownership
+boundary. Native OpenSSH/OpenShell own PTY allocation, raw input and resize;
+Dungeon does not proxy terminal bytes. The host hands foreground access to its
+private unreaped SSH leader and restores its original group/termios afterward.
+The guest guardian remains the native session/foreground-group leader; a detached
+silent observer owns exclusive invocation controls and a strict nullable-status
+receipt. Only the live guardian signals its own group. The observer observes group
+absence and never signals a reaped leader. Handshakes are bounded, transport faults
+are sticky, and receipts cannot override primary transport or restoration errors.
+The responsibility seam is `owned_ssh` under `owned`, not a second backend.
 
 ## Runtime identity
 
@@ -112,22 +159,34 @@ No host dotfiles, editor caches, agent databases, private SSH keys, engine socke
 
 ## Low-friction adoption
 
-The target interactive experience is approximately:
+The interactive project selector is a canonical host directory, not a repository
+configuration surface:
 
 ```sh
 dungeon setup
 cd project
-dungeon up
-dungeon run opencode
-dungeon code
-dungeon down
+dungeon
+dungeon ../other-project
 ```
 
-The exact CLI may evolve. The architectural requirements are:
+`dungeon [PROJECT]` resolves one deterministic private environment for the
+canonical project path and launches its configured default agent, bringing the
+environment up first when needed. Subcommands without `--config` resolve the
+current directory's same private binding.
 
-- a project can resolve one private Dungeon environment without repeated path ceremony;
+There is no mutable project-binding registry and no repository scan. The
+private config path is derived from the canonical project path under the user's
+Dungeon config root. This keeps one authoritative configuration per binding and
+eliminates ambiguous multi-match resolution. A rename or move intentionally
+produces a new binding key; the old environment is reachable only through its
+explicit config until the operator deliberately creates a new binding.
+
+The architectural requirements are:
+
+- a project resolves one private Dungeon environment without repeated config-path ceremony;
 - explicit `--config` remains available and authoritative for automation/recovery;
 - project-local material cannot grant security authority;
+- first binding is interactive and shows project, transfer mode, and security-relevant scope before files or runtime state are created;
 - first creation and security-relevant changes remain reviewable;
 - ambiguous or stale bindings fail explicitly;
 - the normal user can work through the native agent CLI, shell, VS Code, SSH, or other supported attachment rather than through a Dungeon-specific interaction model.
@@ -185,7 +244,7 @@ Unsupported or unsatisfied requests remain explicit. Missing authority never cau
 
 The plan-only slice accepts a reviewed Neovim directory declaration in the authoritative private config and inventories it in `plan`. Runtime commands refuse it: OpenShell 0.0.116 uploads as the sandbox user, so guest-writable `/sandbox` cannot enforce a read-only imported subtree using uploaded file modes. Enforceable guest read-only snapshots remain an implementation gate.
 
-Separately, the live read-write workspace transfer is now implemented as an explicit pre-validation candidate. It derives one bind mount from the canonical private-config project path to `/sandbox/project`; users cannot supply raw driver JSON or arbitrary mount lists. The workspace remains the only requested writable host path, imports remain a separate read-only snapshot lifecycle, and credentials, SSH keys, and engine sockets are never implicitly mounted. The copied upload/export path remains supported. Live does not become the generated/default mode until the OpenShell 0.0.116/rootless-Podman/Fedora validation gate passes.
+Separately, the live read-write workspace transfer is now implemented as an explicit pre-validation candidate. It derives one bind mount from the canonical private-config project path to `/sandbox/project`; users cannot supply raw driver JSON or arbitrary mount lists. The workspace remains the only requested writable host path, imports remain a separate read-only snapshot lifecycle, and credentials, SSH keys, and engine sockets are never implicitly mounted. The copied upload/export path remains supported. The OpenShell 0.0.116/rootless-Podman/Fedora gate now has a recorded result; live still does not become the generated/default mode without an explicit promotion decision.
 
 - The host source path is selected explicitly from private Dungeon configuration.
 - Snapshot preflight rejects special files and symlinks for the initial implementation.
@@ -224,11 +283,13 @@ External harnesses own prompts, loops, model choices, branch strategies, issue q
 
 Sandcastle is the first concrete compatibility target because its isolated-provider seam closely matches this boundary. Functional compatibility is desirable. Copying Sandcastle's internal orchestration into Dungeon is not.
 
-A Sandcastle adapter should live on the Sandcastle/integration side when possible and may be contributed upstream. It must not require Dungeon to add writable host bind mounts, a host-execution fallback, Node as a native runtime dependency, or automatic project merge that bypasses Dungeon's reviewed return path.
+A Sandcastle adapter should live on the Sandcastle/integration side when possible and may be contributed upstream. It must not require arbitrary additional writable host binds, a host-execution fallback, Node as a native runtime dependency, or automatic project merge that bypasses Dungeon's reviewed copy-mode return path. Explicit live mode remains limited to the canonical configured project bind.
 
 ## Project return boundary
 
-The host project remains authoritative. Dungeon does not make the sandbox a writable view of the host project.
+The host project remains authoritative. In explicit live mode, the canonical
+project is a writable guest view. The staged return contract below applies only
+to copy mode.
 
 The initial copy is uploaded on first `up`; subsequent starts do not silently refresh it. OpenShell uploads may filter ignored files and leave old guest files in place. Export downloads the complete guest tree.
 

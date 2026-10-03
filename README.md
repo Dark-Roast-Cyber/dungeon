@@ -21,12 +21,13 @@ OpenShell owns workload isolation and policy enforcement. Agent tools and harnes
 
 Dungeon must not weaken isolation for convenience. Project content may request capabilities in future configuration surfaces, but it cannot grant itself filesystem, network, credential, provider, mount, or privilege access.
 
-## What ships on main
+## Current implementation
 
 - One Rust CLI. Python, Node, and Bun are not runtime dependencies.
 - Direct OpenCode, Claude Code, Codex, shell, and arbitrary command execution.
 - Vendor-native guest authentication for Codex device login and Claude Code browser login.
 - Optional VS Code and SSH attachment.
+- Foreground forwarding from host loopback to guest-loopback services.
 - Explicit config, policy, typed project-transfer intent, runtime identity, and safe copy-mode upload/export checks.
 - One starter OpenShell policy. Additional profiles wait for validated scenario differences.
 - A validated rootless-Podman/OpenShell path; broader runtime/platform support remains explicit future validation.
@@ -55,39 +56,66 @@ The [local reviewed agent image](images/agent/README.md) pins reviewed OpenCode,
 
 ## First environment
 
-The current explicit flow is:
+Before initializing or changing anything, use `dungeon doctor` or
+`dungeon doctor --json`. It checks read-only prerequisites and an existing
+current-directory private binding, if any; `--config PATH` selects an explicit
+configuration. It never prompts, initializes a binding, installs prerequisites,
+starts a gateway/sandbox, or enables live mounts. Missing capabilities remain
+explicit. See [diagnostic states and limits](docs/configuration.md#read-only-diagnostics).
 
-```sh
-dungeon setup
-dungeon init --directory "$HOME/.config/dungeon/demo" --project "$PWD" --gateway dungeon-local --image localhost/dungeon-agent:0.0.3-dev
-CONFIG="$HOME/.config/dungeon/demo/dungeon.json"
-
-dungeon --config "$CONFIG" plan
-dungeon --config "$CONFIG" up
-dungeon --config "$CONFIG" run opencode
-dungeon --config "$CONFIG" exec -- git status
-dungeon --config "$CONFIG" export
-dungeon --config "$CONFIG" down
-```
-
-The planned low-friction path keeps the same security and lifecycle semantics while removing repeated configuration ceremony for normal interactive use. The target experience is approximately:
+After machine-level setup, the normal interactive launcher is project-oriented:
 
 ```sh
 dungeon setup
 cd my-project
+dungeon
+```
+
+With no positional path, `dungeon` uses the current directory. Pass a directory
+to launch another project directly:
+
+```sh
+dungeon ../other-project
+dungeon /home/user/projects/demo
+```
+
+Dungeon canonicalizes the selected project and resolves one deterministic
+private environment under
+`${XDG_CONFIG_HOME:-$HOME/.config}/dungeon/projects/<project-key>`. It never
+loads policy or security authority from the repository. On first use, an
+interactive terminal is required: Dungeon shows the project, private config
+path, copy transfer mode, gateway, image, and default agent, asks for
+confirmation, writes the private configuration, then brings the environment up
+and launches the configured agent.
+
+After that, lifecycle commands resolve the same private environment from the
+current directory without repeated config-path ceremony:
+
+```sh
 dungeon up
 dungeon run opencode
 dungeon code
 dungeon down
 ```
 
-The exact syntax may evolve. Explicit `--config PATH` remains the deterministic automation and recovery surface.
+The explicit configuration flow remains supported for deterministic automation,
+recovery, and hand-authored environments:
+
+```sh
+dungeon init --directory "$HOME/.config/dungeon/demo" --project "$PWD" --gateway dungeon-local --image localhost/dungeon-agent:0.0.3-dev
+CONFIG="$HOME/.config/dungeon/demo/dungeon.json"
+dungeon --config "$CONFIG" plan
+dungeon --config "$CONFIG" up
+```
+
+Explicit configs are not scanned or silently adopted as project bindings.
+`--config PATH` remains authoritative when supplied.
 
 The generated/default transfer mode is `copy`. On first `up`, copy mode creates the sandbox and uploads the configured project to `/sandbox/project`. A later `up` resumes the bound sandbox without uploading; if it is already Ready, `up` does nothing. `run` starts a stopped bound sandbox when needed, also without uploading. `down` stops the sandbox and preserves guest state.
 
 Copy-mode export is a separate reviewed operation, allowed only while the bound sandbox is Ready on OpenShell 0.0.116. `dungeon --config "$CONFIG" export` downloads and stages guest changes, prints a deterministic summary, then requires interactive typed `yes` or explicit `--yes` before applying. Conflicts and special entries are refused. Upload remains a deliberate refresh/recovery action: `dungeon --config "$CONFIG" upload --yes` overwrites guest project contents and can discard guest-side edits.
 
-Issue #24 also provides an explicit `--project-transfer live` pre-validation candidate. It derives one read-write Podman bind request for the canonical configured project at `/sandbox/project`, performs no upload, and refuses upload/export. It is not a supported or default path yet. The dedicated gateway bind-mount and keep-id settings still require the recorded OpenShell 0.0.116/rootless-Podman/Fedora validation, and `dungeon setup` does not enable or migrate them automatically.
+Issue #24 also provides an explicit `--project-transfer live` pre-validation candidate. It derives one read-write Podman bind request for the canonical configured project at `/sandbox/project`, performs no upload, and refuses upload/export. It is not the generated/default path. The dedicated gateway bind-mount and keep-id settings have one recorded OpenShell 0.0.116/rootless-Podman/Fedora result, and `dungeon setup` does not enable or migrate them automatically.
 
 ## Authentication
 
@@ -103,10 +131,40 @@ Codex uses `codex login --device-auth`. Claude starts inside the guest so the us
 ```sh
 dungeon --config "$CONFIG" code
 dungeon --config "$CONFIG" ssh-config
+dungeon --config "$CONFIG" forward --port 4096 --local-port 14096
 dungeon --config "$CONFIG" status
 ```
 
 Remote/editor attachment should remain a first-class way to use an isolated environment. Dungeon manages the environment boundary; the user should otherwise experience the normal CLI, editor, or remote workflow.
+
+Start remote-first: keep the editor and its configuration on the host, and run
+the agent/tools inside the guest. With explicit `live` transfer on the validated
+local gateway, guest edits appear immediately in the host checkout; no Neovim
+config import is needed. Copy mode still requires reviewed export.
+
+`forward` exposes only a guest-loopback service on host `127.0.0.1`, runs in the
+foreground, and requires the bound sandbox to be Ready with unchanged identity
+and policy. It does not start a server, publish a container port, or manage
+credentials. See [configuration](docs/configuration.md#remote-first-attachment)
+for the OpenCode serve/forward/attach workflow and its validation limits.
+
+For an explicitly owned foreground command, use
+`dungeon --config "$CONFIG" exec --owned -- COMMAND ARG...`.
+This Linux-only, non-TTY mode supplies no stdin and requires guest
+`/usr/bin/node` and Linux `/proc`. It requires the bound sandbox already Ready.
+Normal exit and host INT/TERM trigger bounded shutdown of only its launched
+process group; cleanup failure is an error, not success. Ordinary `exec`,
+`run`, and `forward` are unchanged. See [configuration](docs/configuration.md#owned-foreground-execution)
+for scope and failure limits.
+
+For one explicitly owned interactive command, use
+`dungeon --config "$CONFIG" ssh --owned -- nvim FILE`.
+This Linux-only mode requires a real foreground terminal, host OpenSSH, guest
+`/usr/bin/node` and Linux `/proc`, and an already Ready binding. Native SSH owns
+input and resize; Dungeon requests bounded cleanup of only that invocation's
+guest process group on exit, host HUP/INT/TERM or detected SSH/terminal failure.
+It does not change `ssh-config`, editor attachment or ordinary execution.
+See [owned interactive SSH](docs/configuration.md#owned-interactive-ssh).
 
 ## Harness interoperability
 

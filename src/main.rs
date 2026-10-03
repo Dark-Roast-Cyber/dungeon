@@ -1,3 +1,4 @@
+mod binding;
 mod cli;
 mod config;
 mod export;
@@ -41,7 +42,8 @@ fn main() {
     std::process::exit(match cli::run() {
         Ok(code) => code,
         Err(error) => {
-            eprintln!("dungeon: {error}");
+            use std::io::Write;
+            let _ = writeln!(std::io::stderr(), "dungeon: {error}");
             1
         }
     });

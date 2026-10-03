@@ -8,8 +8,17 @@ use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
+use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+#[path = "doctor.rs"]
+mod diagnostics;
+pub(crate) use diagnostics::run as doctor;
+
+#[cfg(target_os = "linux")]
+#[path = "owned.rs"]
+mod owned;
 
 #[cfg(target_os = "linux")]
 #[path = "setup.rs"]
@@ -92,6 +101,30 @@ pub(crate) struct Runtime<'a> {
 }
 
 impl<'a> Runtime<'a> {
+    pub(crate) fn ssh_owned(&self, arguments: &[String]) -> Result<i32> {
+        #[cfg(target_os = "linux")]
+        {
+            owned::ssh(self, arguments)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = arguments;
+            Err(Error::new("owned SSH requires a Linux host and guest"))
+        }
+    }
+    pub(crate) fn execute_owned(&self, arguments: &[String]) -> Result<i32> {
+        #[cfg(target_os = "linux")]
+        {
+            owned::run(self, arguments)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = arguments;
+            Err(Error::new(
+                "owned execution requires a Linux host and guest",
+            ))
+        }
+    }
     fn phase(remote: &Value) -> Result<Phase> {
         match Self::remote_str(remote, "phase")? {
             "Ready" => Ok(Phase::Ready),
@@ -277,7 +310,7 @@ impl<'a> Runtime<'a> {
                 self.config.values.name
             ),
             ProjectTransfer::Live => println!(
-                "Created {} with the configured live project mount request. Live transfer support remains pending the recorded validation gate.",
+                "Created {} with the configured live project mount request. Live transfer has recorded Fedora/OpenShell 0.0.116/rootless-Podman validation only; default-mode promotion remains explicit.",
                 self.config.values.name
             ),
         }
@@ -403,6 +436,26 @@ impl<'a> Runtime<'a> {
         ])
     }
 
+    pub(crate) fn forward_service(
+        &self,
+        port: NonZeroU16,
+        local_port: Option<NonZeroU16>,
+    ) -> Result<i32> {
+        self.checked(true, true)?;
+        let local_port = local_port.unwrap_or(port);
+        self.status(&[
+            "forward".into(),
+            "service".into(),
+            self.config.values.name.clone(),
+            "--target-host".into(),
+            "127.0.0.1".into(),
+            "--target-port".into(),
+            port.to_string(),
+            "--local".into(),
+            format!("127.0.0.1:{local_port}"),
+        ])
+    }
+
     fn lifecycle_command(&self, action: &str) -> Result<i32> {
         self.status(&[
             "sandbox".into(),
@@ -479,6 +532,16 @@ impl<'a> Runtime<'a> {
     }
 
     fn checked(&self, ready: bool, policy: bool) -> Result<Value> {
+        self.bound_state()?;
+        let remote = self.get().map_err(|error| {
+            Error::new(format!(
+                "bound sandbox unavailable; refusing to create or adopt a replacement: {error}"
+            ))
+        })?;
+        self.check_remote(remote, ready, policy)
+    }
+
+    fn bound_state(&self) -> Result<RuntimeState> {
         let state: RuntimeState = serde_json::from_value(read_json(&self.config.state_path())?)
             .map_err(|error| Error::new(format!("invalid runtime.json: {error}")))?;
 
@@ -487,12 +550,11 @@ impl<'a> Runtime<'a> {
                 "launch configuration changed; restore it or initialize a new environment",
             ));
         }
+        Ok(state)
+    }
 
-        let remote = self.get().map_err(|error| {
-            Error::new(format!(
-                "bound sandbox unavailable; refusing to create or adopt a replacement: {error}"
-            ))
-        })?;
+    fn check_remote(&self, remote: Value, ready: bool, policy: bool) -> Result<Value> {
+        let state = self.bound_state()?;
         self.check_identity(&remote)?;
 
         if Self::remote_str(&remote, "id")? != state.id {
@@ -715,11 +777,20 @@ mod tests {
 root='{}'
 printf '%s\n' "$*" >> "$root/calls"
 case " $* " in
+  *' forward service '*)
+    printf '%s\n' "$PWD" "${{CARGO_MANIFEST_DIR-unset}}" "${{OPENCODE_PASSWORD-unset}}" >> "$root/forward-context"
+    test ! -e "$root/fail-forward" || exit 6
+    ;;
   *' sandbox create '*) echo Ready > "$root/phase" ;;
   *' sandbox start '*) test ! -e "$root/fail-start" || exit 9; echo Ready > "$root/phase" ;;
   *' sandbox stop '*) echo Stopped > "$root/phase" ;;
   *' sandbox upload '*) test ! -e "$root/fail-upload" || exit 8 ;;
   *' sandbox download '*) for dest do :; done; cp "$root/project/file" "$dest/file" ;;
+  *' sandbox exec '*)
+    while test "$#" -gt 0 && test "$1" != --; do shift; done
+    shift
+    if test "$1" = /usr/bin/node; then shift; exec "$root/host-node" "$@"; fi
+    ;;
   *' sandbox get '*)
     test -e "$root/phase" || exit 7
     phase=$(cat "$root/phase")
@@ -924,6 +995,107 @@ esac
         runtime.run_agent(&["opencode".into()], false).unwrap();
         assert_eq!(fixture.calls("exec"), 2);
         assert_eq!(fixture.calls("upload"), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn forwarding_is_scoped_loopback_only_ready_only_and_preserves_exit_status() {
+        let fixture = Fixture::new();
+        let runtime = fixture.runtime();
+        let port = NonZeroU16::new(4096).unwrap();
+        let local_port = NonZeroU16::new(14096).unwrap();
+        let forward_calls = || {
+            fs::read_to_string(fixture.root.path().join("calls"))
+                .unwrap_or_default()
+                .lines()
+                .filter(|line| line.contains("forward service"))
+                .count()
+        };
+        assert!(runtime.forward_service(port, Some(local_port)).is_err());
+        assert_eq!(forward_calls(), 0);
+        assert_eq!(fixture.calls("create"), 0);
+        runtime.create().unwrap();
+        let state = fs::read(fixture.config.state_path()).unwrap();
+        assert_eq!(runtime.forward_service(port, Some(local_port)).unwrap(), 0);
+        assert_eq!(runtime.forward_service(port, None).unwrap(), 0);
+        let calls = fs::read_to_string(fixture.root.path().join("calls")).unwrap();
+        assert!(calls.contains("--gateway local --workspace default forward service demo --target-host 127.0.0.1 --target-port 4096 --local 127.0.0.1:14096\n"));
+        assert!(calls.contains("--gateway local --workspace default forward service demo --target-host 127.0.0.1 --target-port 4096 --local 127.0.0.1:4096\n"));
+        assert_eq!(
+            fs::read_to_string(fixture.root.path().join("forward-context")).unwrap(),
+            format!(
+                "{0}\nunset\nunset\n{0}\nunset\nunset\n",
+                fixture.root.path().canonicalize().unwrap().display()
+            )
+        );
+        fixture.flag("fail-forward");
+        assert_eq!(runtime.forward_service(port, Some(local_port)).unwrap(), 6);
+        runtime.down().unwrap();
+        assert!(runtime.forward_service(port, Some(local_port)).is_err());
+        assert_eq!(forward_calls(), 3);
+        assert_eq!(fixture.calls("start"), 0);
+        assert_eq!(fixture.calls("upload"), 0);
+        assert_eq!(fixture.calls("create"), 1);
+        runtime.start().unwrap();
+        for flag in ["mismatch", "replaced", "drift"] {
+            fixture.flag(flag);
+            assert!(
+                runtime.forward_service(port, Some(local_port)).is_err(),
+                "{flag}"
+            );
+            fs::remove_file(fixture.root.path().join(flag)).unwrap();
+        }
+        for phase in ["Provisioning", "Starting", "Stopping", "Error"] {
+            fs::write(fixture.root.path().join("phase"), phase).unwrap();
+            assert!(runtime.forward_service(port, None).is_err(), "{phase}");
+        }
+        fs::remove_file(fixture.root.path().join("phase")).unwrap();
+        assert!(runtime.forward_service(port, None).is_err());
+        fs::write(fixture.root.path().join("phase"), "Ready").unwrap();
+        let mut invalid_state: Value = serde_json::from_slice(&state).unwrap();
+        invalid_state["config"] = json!("changed");
+        fs::write(fixture.config.state_path(), invalid_state.to_string()).unwrap();
+        assert!(runtime.forward_service(port, None).is_err());
+        fs::write(fixture.config.state_path(), b"not json").unwrap();
+        assert!(runtime.forward_service(port, None).is_err());
+        fs::write(fixture.config.state_path(), &state).unwrap();
+        assert_eq!(forward_calls(), 3);
+        assert_eq!(fixture.calls("create"), 1);
+        assert_eq!(fixture.calls("start"), 1);
+        assert_eq!(fixture.calls("upload"), 0);
+        assert_eq!(fs::read(fixture.config.state_path()).unwrap(), state);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn owned_command_preserves_result_and_binding_and_refuses_drift() {
+        let fixture = Fixture::new();
+        let environment = host_environment(Some(&fixture.config.values.project)).unwrap();
+        let node = find_executable("node", environment.get(&OsString::from("PATH")))
+            .expect("owned execution tests require Node 24 on a trusted host PATH");
+        std::os::unix::fs::symlink(&node, fixture.root.path().join("host-node")).unwrap();
+        let runtime = fixture.runtime();
+        runtime.create().unwrap();
+        let state = fs::read(fixture.config.state_path()).unwrap();
+        assert_eq!(
+            runtime
+                .execute_owned(&[
+                    node.to_str()
+                        .expect("host test Node path must be UTF-8")
+                        .into(),
+                    "-e".into(),
+                    "process.exit(19)".into()
+                ])
+                .unwrap(),
+            19
+        );
+        assert_eq!(fs::read(fixture.config.state_path()).unwrap(), state);
+        assert_eq!(fixture.calls("create"), 1);
+        assert_eq!(fixture.calls("upload"), 0);
+        fixture.flag("drift");
+        let before = fixture.calls("exec");
+        assert!(runtime.execute_owned(&["/bin/true".into()]).is_err());
+        assert_eq!(fixture.calls("exec"), before);
     }
 
     #[cfg(unix)]
