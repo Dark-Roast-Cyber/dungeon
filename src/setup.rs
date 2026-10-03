@@ -12,13 +12,13 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::Duration;
 
-const GATEWAY: &str = "dungeon-local";
-const CONTAINER: &str = "openshell-gateway-dungeon-local";
+pub(super) const GATEWAY: &str = "dungeon-local";
+pub(super) const CONTAINER: &str = "openshell-gateway-dungeon-local";
 const ENDPOINT: &str = "https://127.0.0.1:17670";
-const IMAGE: &str = "ghcr.io/nvidia/openshell/gateway@sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645";
-const AGENT_IMAGE: &str = "localhost/dungeon-agent:0.0.3-dev";
-const LABEL: &str = "agentarchaeology.ai/dungeon-gateway";
-const CONFIG: &str = "[openshell]\nversion = 1\n\n[openshell.drivers.podman]\nnetwork_name = \"dungeon-local\"\ngrpc_endpoint = \"https://openshell-gateway-dungeon-local:8080\"\nimage_pull_policy = \"missing\"\nenable_bind_mounts = false\n";
+pub(super) const IMAGE: &str = "ghcr.io/nvidia/openshell/gateway@sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645";
+pub(super) const AGENT_IMAGE: &str = "localhost/dungeon-agent:0.0.3-dev";
+pub(super) const LABEL: &str = "agentarchaeology.ai/dungeon-gateway";
+pub(super) const CONFIG: &str = "[openshell]\nversion = 1\n\n[openshell.drivers.podman]\nnetwork_name = \"dungeon-local\"\ngrpc_endpoint = \"https://openshell-gateway-dungeon-local:8080\"\nimage_pull_policy = \"missing\"\nenable_bind_mounts = false\n";
 
 struct Tools {
     openshell: PathBuf,
@@ -75,7 +75,7 @@ fn require_linux(os: &str) -> Result<()> {
     Ok(())
 }
 
-fn require_version(version: &str) -> Result<()> {
+pub(super) fn require_version(version: &str) -> Result<()> {
     if version.trim() != format!("openshell {OPEN_SHELL_VERSION}")
         && version.trim() != format!("openshell v{OPEN_SHELL_VERSION}")
     {
@@ -87,7 +87,7 @@ fn require_version(version: &str) -> Result<()> {
     Ok(())
 }
 
-fn executable(
+pub(super) fn executable(
     name: &str,
     env: &HashMap<OsString, OsString>,
     project: Option<&Path>,
@@ -105,7 +105,7 @@ fn executable(
     Ok(path)
 }
 
-fn rootless(info: &Value) -> Result<()> {
+pub(super) fn rootless(info: &Value) -> Result<()> {
     if info.pointer("/host/security/rootless") != Some(&Value::Bool(true)) {
         return Err(Error::new(
             "rootless Podman required; check podman info as your normal user (no sudo)",
@@ -193,7 +193,7 @@ fn registrations(tools: &Tools) -> Result<(Option<Value>, Option<String>)> {
     ))
 }
 
-fn compatible_registration(record: &Value) -> Result<()> {
+pub(super) fn compatible_registration(record: &Value) -> Result<()> {
     for (key, expected) in [
         ("endpoint", ENDPOINT),
         ("type", "local"),
@@ -210,7 +210,7 @@ fn compatible_registration(record: &Value) -> Result<()> {
     Ok(())
 }
 
-fn gateway_health(info: &Value) -> Result<()> {
+pub(super) fn gateway_health(info: &Value) -> Result<()> {
     if info["gateway"] != GATEWAY
         || info["version"] != OPEN_SHELL_VERSION
         || info["status"] != "healthy"

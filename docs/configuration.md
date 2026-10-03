@@ -1,5 +1,90 @@
 # Configuration
 
+## Read-only diagnostics
+
+```sh
+dungeon doctor
+dungeon doctor --json
+dungeon --config "$CONFIG" doctor --json
+```
+
+Doctor selects only an explicitly supplied configuration or an already existing
+private binding for the current directory. Missing binding is informational and
+does not prompt or create directories. Invalid selected config/policy is
+blocking, but does not hide independent machine checks. Imports remain
+**plan-only, runtime blocked**; nothing is imported or executed.
+
+Diagnostic config/policy reads require a private user-owned configuration
+directory and private user-owned regular files (no symlink, FIFO or hardlink).
+Linux descriptor-relative `O_NOFOLLOW|O_NONBLOCK` opens, descriptor metadata and
+bounded bytes feed the existing strict parser/validator; doctor does not reopen
+the paths after a safety preflight. This is a diagnostic-only read restriction,
+not a change to other commands' configuration-loading contract.
+
+The supported diagnostic runtime boundary is Linux, OpenShell **0.0.116** and
+rootless Podman. Other platforms report unsupported without invoking runtime
+tools. Checks cover pinned CLI, rootless info/API socket readiness, local images,
+`dungeon-local` registration, container, bridge network and gateway/driver health.
+Queries never pull/install, register/select, start/stop, create a sandbox, exec,
+upload, change policy or migrate a gateway. Only an existing default rootless
+Podman store with an existing nonempty user-owned regular `db.sql` marker and
+without a custom user `storage.conf` is queried. Missing, empty, legacy or custom
+storage remains unknown rather than being initialized. Marker metadata is
+checked; engine database contents are never read. A missing OpenShell
+registration directory is not created.
+Native tools may use their existing engine locks/caches; read-only here means no
+Dungeon configuration/resource/lifecycle mutation, not syscall-level immutability.
+
+Each query has a five-second deadline, 256 KiB stdout limit, discarded stderr,
+null stdin and a cleared, narrowed HOME/XDG/locale/PATH environment. Executables
+inside the current or selected project are refused, including symlink targets.
+Every subprocess PATH also excludes both projects and canonical symlink-directory
+aliases, so trusted runtime binaries cannot resolve helpers from those projects.
+Query leaders are observed with `WNOWAIT`; their process-group identity remains
+reserved until group teardown and reap, even if a descendant retains stdout.
+Malformed/oversized/timed-out output becomes unknown/incompatible; raw output,
+errors, provider values, certificates, passwords and environment dumps are never
+printed. Findings contain fixed safe text and remediation links, not commands
+executed on the operator's behalf.
+
+Live findings distinguish `disabled-but-healthy`, `enabled-compatible`,
+`unknown-incompatible`, and `requested-but-unavailable`. `keep_id_mapping` is
+separate: it refers to **Podman driver** `userns = "keep-id:uid=998,gid=998"`,
+not the gateway container's own user namespace. Ordinary `keep-id` is not enough.
+Only the recognized Dungeon-owned local gateway config/container/image can
+provide a configuration observation. This deliberately accepts the exact setup
+config, its bind-enabled variant, and an optional exact driver userns line;
+other TOML layouts/settings remain unknown. A config newer than the running
+container is unknown, not assumed active. Local capability also remains unknown
+unless the container reports exactly one matching private
+driver-data `XDG_DATA_HOME` assignment and the identity-mounted path required by
+the recorded live gate. Missing, wrong or duplicate assignments do not establish
+compatibility. No complete environment values are returned by inspection.
+Dedicated/foreign/remote gateways
+remain unknown without an independently supported inspection contract. No local
+file can establish a remote setting. These states are prerequisite observations,
+not proof that a live bind works, that an agent can write it, or that containment
+is enforced. Doctor does not promote live mode or enable it.
+
+JSON schema **1** contains `schema`, `supported_openshell`, `read_only`,
+`containment_verified` (always false), `exit_code`, and `checks`. Each check has
+`check` (stable identifier), `state`, `blocking`, `detail`, `remediation`, and
+`reference`. States also include `missing`, `healthy`, `incompatible`, `partial`,
+`unknown`, `unsupported`, `blocked`, and `recorded-not-verified`. Exit 0 means no
+blocking finding; exit 1 means at least one blocking prerequisite/configuration
+finding. Missing binding and recorded integration gates alone are nonblocking;
+requested live without recognized capability/mapping is blocking. An unsupported
+foreign gateway observation alone is informational, but missing local machine
+prerequisites can still block. CLI usage errors retain normal CLI exit semantics.
+
+Claude account, matched native-client, nested Codex sandbox and editor gates are
+reported as **recorded-not-verified**. Doctor performs no login, auth database
+inspection, AI task, guest probe or native-client compatibility test. Consult
+[validation](validation.md) for the exact recorded combinations and remaining
+gates.
+
+## Environment configuration
+
 Dungeon keeps one private directory per environment and never discovers configuration or policy from a repository. For normal interactive use, `dungeon` resolves the current directory, or an explicit positional project path, to a deterministic private binding under `${XDG_CONFIG_HOME:-$HOME/.config}/dungeon/projects/<project-key>`. Explicit `--config PATH` remains the authoritative automation/recovery surface and is never silently replaced by project resolution.
 
 `dungeon setup` needs no project configuration. On Linux it uses gateway `dungeon-local`, workspace `default`, port 17670, and rootless Podman. The gateway container's config, generated mTLS/JWT keys, database, and private OpenShell driver data live in `${XDG_STATE_HOME:-$HOME/.local/state}/dungeon/local-setup` (private host state). The `driver-data` directory is mounted at the identical absolute path inside the trusted gateway and supplied as `XDG_DATA_HOME`; OpenShell 0.0.116 may later give a supervisor binary from that directory back to host Podman as a bind source when sandbox user namespaces require extraction. This path is gateway-only and is never mounted into the sandbox as Dungeon project authority. OpenShell owns its gateway registration and mTLS client material in `${XDG_CONFIG_HOME:-$HOME/.config}/openshell/gateways/dungeon-local`; Podman owns the `dungeon-local` network and `openshell-gateway-dungeon-local` container. Neither stores Dungeon project policy. A conflicting or partial installation requires explicit operator inspection; setup does not overwrite it. The initial `dungeon init` prompt defaults to `dungeon-local`, but use `--image localhost/dungeon-agent:0.0.3-dev` only after building the reviewed local image; the community base remains the CLI image default until a separate publication decision.
@@ -23,6 +108,59 @@ Dungeon keeps one private directory per environment and never discovers configur
 Schema 2 deliberately removes the old `policy` field. `policy.json` is always the adjacent policy file, so making its path configurable created an invalid state without adding capability. This pre-1.0 preview does not carry schema-1 compatibility code.
 
 Names are lowercase DNS labels; sandbox `name` is limited to 19 characters by OpenShell 0.0.116. `project` must be an absolute project directory, not root/home, and Dungeon config must be outside it. `project_transfer` is the closed domain `copy` or `live`; omission preserves copy semantics and the same fingerprint as explicit `copy`. Selecting `live` changes environment identity. Providers are names, never secret values. Local image build paths and unqualified image names are rejected.
+
+## Owned foreground execution
+
+```sh
+dungeon --config "$CONFIG" exec --owned -- opencode serve --hostname 127.0.0.1 --port 4096
+```
+
+`--owned` is explicit lifecycle assistance, not process containment or a
+background-service manager. It requires a Linux host/guest, guest `/usr/bin/node`
+with the built-in Node APIs used by the shim, and readable Linux `/proc`.
+Missing primitives refuse execution; Dungeon installs nothing and changes no
+policy. The reviewed image already supplies Node. This first slice is non-TTY,
+rejects `--tty`, supplies null stdin, and requires an existing Ready binding;
+it does not create/start a sandbox or upload files.
+
+A fixed guest-only shim forwards argv without shell evaluation. Its live
+session/group guardian keeps group identity reserved until final group KILL.
+An outer guest wrapper receives the primary command status over private IPC,
+reaps the guardian, verifies kernel process-group absence, and records completion in an exclusive ephemeral guest
+`/tmp/dungeon-owned-<invocation>` directory. The workload inherits neither
+control descriptors nor IPC. Secondary OpenShell exec requests STOP; it never
+accepts a PID or process-group ID. Regular control files are opened nonblocking
+without following symlinks, without truncation, and through a held directory
+descriptor. Completion is read separately from workload output; successful
+confirmation removes the control directory without recursive deletion.
+
+Normal command exit (including nonzero) cleans up lingering group members and
+returns that exit code. Host INT/TERM returns 130/143 only after confirmation.
+The guardian sends TERM to its own group, then KILL after one second; it remains
+the live leader through the final signal.
+External/OOM guardian death alone never confirms cleanup: the outer wrapper
+requires an `ESRCH` result from a signal-zero group existence query within two
+seconds. It never signals a reaped guardian's group. Surviving members retain
+the group ID; ID reuse can cause conservative refusal, not hide those members.
+Unreaped zombies can likewise cause unconfirmed cleanup, even if no work runs.
+Host transports run in separate groups
+and are killed/reaped without signalling a recycled host PID. Identity/policy
+are checked before launch and cleanup against the original binding. Cleanup and
+each prelaunch identity check are bounded to ten seconds. Transport failure,
+invalid/missing completion or identity drift produces `owned cleanup unconfirmed`
+and nonzero exit; temporary state and guest work may remain for inspection.
+A failed primary transport remains an error even when INT/TERM is also pending;
+130/143 require both confirmed guest cleanup and a valid primary transport exit.
+
+There is no guarantee after abrupt host SIGKILL or total transport loss, no
+protection against same-UID guest sabotage, and no cleanup guarantee for processes
+that escape the group (for example daemonizing/`setsid` descendants). Do not use
+`--owned` around vendor background-service start commands or infer ownership
+from `/api/info` PID. Forced KILL can affect application durability; Dungeon never
+deletes project/session state. No password/credential store or persistent PID
+registry is added. Ordinary `exec`/`run` retain native transport semantics;
+interrupting an independently launched `forward` stops its listener only and
+leaves the service running.
 
 ## Native policy
 

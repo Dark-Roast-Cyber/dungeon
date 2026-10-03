@@ -106,7 +106,20 @@ pub(crate) struct RuntimeState {
 
 pub(crate) fn load_config(path: &Path) -> Result<Config> {
     let path = path.canonicalize()?;
-    let mut values: ConfigDoc = serde_json::from_value(read_json(&path)?)
+    let value = read_json(&path)?;
+    load_config_data(path, value, |policy_path| {
+        let policy_path = policy_path.canonicalize()?;
+        let policy = read_json(&policy_path)?;
+        Ok((policy_path, policy))
+    })
+}
+
+pub(crate) fn load_config_data(
+    path: PathBuf,
+    value: Value,
+    read_policy: impl FnOnce(&Path) -> Result<(PathBuf, Value)>,
+) -> Result<Config> {
+    let mut values: ConfigDoc = serde_json::from_value(value)
         .map_err(|error| Error::new(format!("invalid dungeon.json: {error}")))?;
 
     if values.schema != 2 {
@@ -177,14 +190,13 @@ pub(crate) fn load_config(path: &Path) -> Result<Config> {
     }
 
     let parent = path.parent().expect("config parent");
-    let policy_path = parent.join("policy.json").canonicalize()?;
+    let (policy_path, policy) = read_policy(&parent.join("policy.json"))?;
     if policy_path.parent() != Some(parent) || policy_path.starts_with(&values.project) {
         return Err(Error::new(
             "policy must stay in the private configuration directory",
         ));
     }
 
-    let policy = read_json(&policy_path)?;
     validate_policy(&policy)?;
     let fingerprint = digest(&json!({
         "adapter": OPEN_SHELL_VERSION,

@@ -11,6 +11,50 @@ CI checks formatting, Clippy, locked Rust tests, release compilation, CLI versio
 - npm launcher validation targets Node 24 LTS.
 - OpenShell 0.0.116 is an intentional compatibility pin because Dungeon consumes version-sensitive CLI and structured-output contracts.
 
+## Issue #22 read-only diagnostics
+
+`dungeon doctor [--json]` has synthetic coverage for independent inventory when
+OpenShell is missing, an exact query allowlist, malformed/untrusted version
+output, incompatible registration refusal without gateway contact, bounded
+time/output, project-owned executable refusal, separate bind/mapping states,
+stale/unrecognized local configuration and unchanged fixture state. The native
+CLI integration test repeats diagnosis from an unbound project and verifies
+stable schema-1 JSON/nonzero blocking status with no private binding creation;
+invalid explicit selection is sanitized and remains blocking. These checks do
+not establish live-bind, authentication, editor, nested-sandbox or containment
+claims. See [the diagnostic contract](configuration.md#read-only-diagnostics).
+
+A read-only local inventory run on Fedora 44/kernel 7.2.5-200.fc44.x86_64,
+OpenShell 0.0.116 and rootless Podman 5.8.4 returned blocking `partial` for the
+already stopped local gateway without starting it. Before/after private Dungeon
+and OpenShell registration-tree metadata and container identities/names/states
+were unchanged. Repeated diagnosis was identical. With the installed native
+CLIs but an isolated empty HOME/XDG/project, doctor returned missing/unknown
+prerequisites and left those directories empty. No live mount, authentication,
+AI task, sandbox creation or containment probe was performed. Sanitized reports,
+source/binary hashes and corrected metadata comparisons are retained at
+`/tmp/opencode/dungeon-doctor22-K7TkW6`; that pre-review release binary SHA-256 was
+`887750363ec58c00ae92c6ac0fabbd5f88d4bdac602b0aec6eda6174200dd716`.
+
+Independent-review corrections added private descriptor-relative config/policy
+reads with FIFO/symlink/mode refusal, selected-project helper PATH exclusion,
+exact single driver-data environment-assignment observation, and `WNOWAIT`
+query-group cleanup after leader exit. A native Podman 5.8.4 `info` probe with
+explicit disposable root/runroot initialized an empty storage directory
+(including `db.sql`, locks and network/storage directories). Doctor therefore
+requires an established regular user-owned nonempty `db.sql` marker before
+engine inventory. With the corrected binary and installed native CLIs, an empty
+isolated store remained empty and HOME/XDG/project metadata unchanged; engine
+checks reported unknown. The scratch engine store was removed. The native
+boolean-only inspect template parsed successfully against the older local
+container, whose missing driver-data assignment returned `[]` (unknown), not
+enabled-compatible. Synthetic cases cover absent/wrong/duplicate assignments
+and leader-exited descendants retaining stdout. Corrected source/binary hashes
+and comparisons are under `review-*` in the same evidence root; no live mount or
+AI/owned-lifecycle matrix was repeated.
+
+## Existing runtime and transfer evidence
+
 Offline tests cover strict duplicate-key JSON, safe names, schema rejection, starter-policy requirements, create arguments, auth command scope, removed provisional commands, native launcher selection, npm staging, and native archive production. They do not replace live isolation, vendor-auth, image/tooling, remote-editor, endpoint-security, or platform validation.
 
 Issue #8 lifecycle contract: verify first `up` creates and uploads once; resumed
@@ -334,6 +378,128 @@ Issue #17's local image/tooling acceptance is PASS on this tested Linux
 amd64/Podman combination, unblocking Issue #5's first image-owned prerequisites.
 It does not validate Issue #5 imports, other platforms, desktop clients, or
 EDR containment.
+
+### Issue #28 owned foreground command
+
+`exec --owned` has focused synthetic guest-shim coverage for argv/no-stdin,
+nonzero primary exit with a lingering descendant, TERM-resistant work,
+concurrent ownership/unrelated sentinel preservation, early/repeated STOP,
+absent/stale controls, exclusive creation and substituted-symlink refusal.
+Rust tests cover opt-in/non-TTY parsing, normal exit/binding preservation and
+prelaunch policy-drift refusal. Run `node --test tests/owned.test.cjs` alongside
+the normal Rust/launcher gates. These do not establish live OpenShell cleanup.
+The disposable live gate on Fedora 44, kernel 7.2.5-200.fc44.x86_64, SELinux
+Enforcing, OpenShell CLI/gateway 0.0.116 and rootless Podman 5.8.4 passed:
+normal exit 23 with a TERM-resistant lingering child; PID INT and process-group
+TERM; repeated startup INT/TERM; concurrent owned services with unrelated service
+preservation; forwarding interruption leaving its independently owned service
+alive; primary transport SIGKILL followed by confirmed guest cleanup and error
+exit; clean relaunch and synthetic guest/project state preservation. Native
+OpenCode 2.0.14 foreground `serve` stopped on TERM/INT, relaunched cleanly and
+retained its database file. This is not native conversation/session-resume
+validation, which remains Issue #29.
+
+Pausing the dedicated gateway during shutdown produced bounded nonzero
+`cleanup unconfirmed`; the guest service remained alive after transport restored.
+Synthetic binding drift likewise refused cleanup and left the original service
+alive. After restoring the test prerequisites, explicit invocation STOP/receipt
+removal cleaned up both fixtures. No temporary controls remained. All disposable
+sandboxes/gateways/registrations were removed; reviewed agent digest remained
+`sha256:5a5353c130370361934d4826ee792e2f8038de40763f2713025dbb4ba83e0ce5`.
+The source was `d8e269eff46c5c6815344dd0c0abd650b3beaad9` plus the owned-execution
+diff recorded in the local evidence roots. No credentials, host session state,
+policy widening or tool upgrades were used. Host SIGKILL, same-UID sabotage,
+group escape and other runtime/platform combinations remain unproven/unsupported
+as described in configuration; this is lifecycle assistance, not containment.
+
+Independent-review corrections additionally verified guardian SIGKILL after
+STOP and after primary exit status: a resistant group member stayed alive, no
+completion receipt was emitted, and Dungeon returned bounded unconfirmed error.
+The outer wrapper now requires kernel group absence rather than treating any
+guardian SIGKILL as its final group kill. Combined host INT plus primary-transport
+SIGKILL returned a transport error, not 130. Affected live normal-exit/lingering
+child and ordinary INT/TERM gates passed again; temporary controls were removed.
+The earlier live matrix is evidence for the preceding revision, not a repeated
+full matrix on this correction. Synthetic tests also cover guardian faults and
+primary transport status independently. Zombie-only groups may conservatively
+refuse confirmation until reaped; no signal is sent to a reaped guardian's group.
+
+### Issue #29 matched OpenCode pair (2026-10-03)
+
+A separate disposable run passed with **host and guest OpenCode 2.0.14** on
+Fedora 44, kernel 7.2.5-200.fc44.x86_64, SELinux Enforcing, OpenShell
+CLI/gateway 0.0.116 and rootless Podman 5.8.4. The existing reviewed agent
+image was selected only by immutable digest
+`sha256:5a5353c130370361934d4826ee792e2f8038de40763f2713025dbb4ba83e0ce5`;
+the dedicated gateway image was
+`sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645`.
+Neither image was rebuilt, and the installed host client was not replaced.
+Rootless Podman `create`/`cp` extracted the image's native client into a private
+`/tmp/opencode` directory. Its SHA-256, also verified inside the guest, was
+`78accad0f9fa61f681c4e0342ce4960ab784d27ddf34796ce12d156f9b5c3abb`.
+
+The exact official registry tarball for `@opencode/cli-linux-x64@2.0.14`
+matched the checked-in lock's SHA-512 integrity
+`sha512-YFGnck40hBmD8S785zHi1sCZMVodoyxy615SrEo+YXJj/i92I8ViETodsY6Yde0H0VJk/ZuLu8mrllOA4wbAlQ==`.
+Its binary matched the extracted image and guest hashes. Registry metadata
+identified the anomalyco/opencode repository and GitHub Actions trusted
+publisher; signatures/provenance attestations were **not independently verified**.
+The reviewed V2 source tag `v2.0.14` resolves to
+`08462140ec0de1e4b17d4a353d8d5827f53cf7b0`; the native explicit-server,
+session-target and foreground-password behavior was checked against that source
+and the V2 CLI/API documentation.
+
+Dungeon source was `d8e269eff46c5c6815344dd0c0abd650b3beaad9` with the accepted
+Issue #28 review corrections. The tested debug binary SHA-256 was
+`abccbb33b157844d4b7a941dea4a1d678dc385d7101ad3704c3cae49da154dfa`.
+The runtime-source diff hash (tracked `src`/Cargo diff plus the named untracked
+owned sources) was
+`98e8ec9418323ea0adcf30b19cca524238ecc18fe9fabc1609f1e49da9a1bfcf`;
+the complete pre-documentation diff plus named untracked-file contents hashed to
+`9118c51245925cfc58d5e558cff3ebe66027625e3f3927ec8cd26e54e9112b19`.
+Per-file hashes confirmed runtime/image inputs remained unchanged during this run.
+
+The gateway used private XDG registrations, mTLS and the corrected identity-mounted
+driver-data layout. Host client HOME and every XDG state directory were isolated
+from real host state. The project/config were synthetic. Native guest `serve`
+ran through `dungeon exec --owned`; generated passwords were consumed in memory
+and supplied only to the host client through ephemeral `OPENCODE_PASSWORD`.
+No password was passed in argv or written to configuration/evidence. The native
+host client used explicit `--server`, with no positional guest path.
+
+| Check | Result |
+| --- | --- |
+| Exact host/guest version, binary identity and native authentication | PASS; both printed `opencode v2.0.14`; unauthenticated health returned 401; native authenticated API succeeded |
+| Actual native remote AI read/edit/test | PASS; guest-listed `opencode/mimo-v2.6-flash-free` completed the synthetic arithmetic fix and guest test; no account or host auth imported |
+| Host-visible edit and approved host tests | PASS; arithmetic-only output was checked before host execution; test unchanged and original owner/group/modes preserved |
+| Independent forward interrupt/reconnect | PASS; process-group INT removed the host listener; reconnect reached the same guest service PID |
+| Owned guest-service shutdown/relaunch | PASS; PID TERM returned 143 and PID INT returned 130, each with direct guest-listener absence; clean relaunch retained the native session |
+| Same bound sandbox restart and native history | PASS; identical sandbox/session IDs, guest location `/sandbox/project`, project state and exact message history survived explicit restart/relaunch |
+| Same-conversation recovery | PASS; native resume recovered a conversation-only synthetic marker without re-supplying it; guest and approved host tests passed again |
+| Stopped forwarding and bounded denials | PASS; stopped sandbox refused forwarding; `/var/tmp` write denied, `/tmp` allowed, unapproved example.com CONNECT returned 403, checked engine sockets absent |
+| Cleanup | PASS; owned controls absent; disposable sandbox, gateway, network, private registrations, credentials, client state and project removed; host listeners absent |
+
+The model selection was a validation-client argument, not Dungeon product policy.
+The prior Issue #28 generic fault matrix is not claimed as rerun here. Interactive
+TUI message submission and other versions/platforms remain unverified. Sanitized
+summaries, artifact/source hashes and provenance are retained locally at
+`/tmp/opencode/dungeon-matched29-V9AyIi/evidence`; no whole conversations,
+passwords, raw prompt files or client databases are retained.
+
+### Issue #30 editor prerequisite checkpoint (2026-10-03)
+
+**VS Code Remote SSH: NOT TESTABLE.** After the matched-pair gate, neither
+`code`, `code-insiders` nor `codium` was on PATH; RPM and Flatpak inventories
+showed no matching application. Checked standard installation/extension
+directories were absent, including Remote SSH extension roots. Neither DISPLAY
+nor WAYLAND_DISPLAY was set in this session. A supported installed GUI client,
+Remote SSH extension, usable interactive display and explicit installation
+approval if needed are prerequisites. Nothing was installed.
+
+Host Neovim 0.11.6 and OpenSSH 10.2p1 are available. A separately chosen bounded
+interactive Neovim/SSH workflow could be useful, but was not exercised and would
+not substitute for a VS Code pass. No editor/vendor authentication, host-home
+sharing or policy widening was attempted.
 
 ### Remaining gates
 

@@ -8,6 +8,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 cargo build --release
 node --test npm/launcher/test/platform.test.mjs
+node --test tests/owned.test.cjs
 ```
 
 Keep changes independently reviewable. Include a concrete contract or failure mode when proposing abstractions, backend support, or policy changes. Never commit real credentials or personal session stores.

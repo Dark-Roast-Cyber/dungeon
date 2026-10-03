@@ -32,6 +32,7 @@ jobs:
           node-version: 24
           package-manager-cache: false
       - run: node --test npm/launcher/test/platform.test.mjs npm/test/stage-packages.test.mjs
+      - run: node --test tests/owned.test.cjs
       - run: npm pack --dry-run ./npm/launcher
       - name: Check package versions
         run: |

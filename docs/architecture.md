@@ -64,6 +64,7 @@ A feature that belongs primarily to those orchestration concerns should live in 
 - `policy`: the starter policy and policy safety validation.
 - `openshell`: the single OpenShell subprocess boundary and lifecycle operations.
 - `openshell::local_setup`: local gateway bootstrap within the same OpenShell boundary and sanitized executable resolution; OpenShell remains the registration/health authority, Podman the container/network authority.
+- `openshell::diagnostics`: read-only prerequisite/capability reporting with bounded native queries, sharing setup predicates without invoking setup.
 
 There is no backend hierarchy, daemon, plugin ABI, embedded JS runtime, second policy language, or framework layer.
 
@@ -90,12 +91,34 @@ Dungeon must not silently install privileged dependencies, overwrite incompatibl
 
 Setup health is not containment attestation.
 
+`doctor` is a read-only diagnostic responsibility within the same OpenShell
+subprocess owner, not another runtime implementation. It shares setup's pinned
+version, rootless, registration and health predicates but never calls setup or
+constructs Runtime. Checks remain independent when a prerequisite is missing.
+Only native inventory queries run, with null stdin, a narrowed host environment,
+project-excluded executable resolution, five-second deadlines and capped output.
+Doctor's descriptor-checked config/policy bytes reuse the existing config schema
+and policy validator; ordinary runtime loading retains its existing contract.
+The diagnostic subprocess PATH excludes all selected/current project directories
+for helper resolution too. Native engine inventory requires an established
+store, and query leader identities remain reserved until group teardown/reap.
+Foreign gateways are not adopted or inferred from local gateway files. No
+credential/auth inspection or dynamic integration/containment testing occurs.
+
 Service attachment reuses OpenShell's foreground gRPC forwarding, not a new
 Dungeon server or proxy. `forward` checks the existing Ready binding and policy
 before opening host loopback to a guest-loopback service. It neither starts the
 service nor manages its authentication. This first slice has no automatic
 serve/attach process manager; the full native-client workflow must pass before
 hiding that lifecycle.
+
+Explicit `exec --owned` owns only one foreground guest process group. It uses
+fixed guest Node code with a live group guardian and an outer status/cleanup
+owner, through the same OpenShell subprocess boundary. A random temporary
+invocation control directory is not a service/PID registry. The host handles
+INT/TERM and verifies cleanup separately from command output; ordinary exec,
+run, and forwarding remain native and unchanged. This is lifecycle assistance,
+not protection against group escape, same-UID sabotage or lost transport.
 
 ## Runtime identity
 

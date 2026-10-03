@@ -17,8 +17,10 @@ Validated on the recorded Fedora/OpenShell 0.0.116/rootless-Podman combination
 - Real terminal Ctrl-C through `exec --tty` stopped the guest server. Non-TTY
   host process-group interruption left it running; explicit guest TERM worked.
 
-Host OpenCode 2.0.22 and guest 2.0.14 remain mismatched. Native TUI attachment
-passed previously, but interactive TUI message submission remains unverified.
+The earlier host 2.0.22/guest 2.0.14 evidence remains historical. A separate
+private extracted host 2.0.14/guest 2.0.14 pair now passed the Issue #29 native
+AI/session/lifecycle gate; the installed host client was unchanged.
+Native TUI attachment passed previously, but interactive TUI message submission remains unverified.
 Imports are plan-only/fail-closed. Telltale is not integrated.
 
 ## Tracking
@@ -43,8 +45,16 @@ Claude Code CLI testing, not as proof of remote/desktop support.
 
 ## 1. Explicit guest-service shutdown
 
-Status: open follow-up. Issue #28: **Make remote guest-service
+Status: implementation and disposable local live gates completed; independent
+review pending. Issue #28: **Make remote guest-service
 shutdown explicit without orphaned processes**.
+
+The opt-in `exec --owned` implementation leaves generic exec/run/forward alone.
+It uses existing guest Node primitives, a live group guardian, private IPC and
+ephemeral nonblocking/no-follow control files, not user PID authority. Live
+signal/concurrency/forward/relaunch and bounded unconfirmed-failure results are
+recorded in [validation](docs/validation.md#issue-28-owned-foreground-command).
+Matched native client/session resume remains #29, not a claim of this slice.
 
 - Reproduce non-TTY interruption at the Dungeon/OpenShell boundary and determine
   what the native transport and vendor service support. Do not change generic
@@ -60,7 +70,10 @@ shutdown explicit without orphaned processes**.
 
 ## 2. Reviewed matched OpenCode client/server
 
-Status: open follow-up; no host/guest upgrade authorized. Issue #29: **Validate a reviewed
+Status: disposable local matched 2.0.14 gate PASS; parent independent review
+required before publication. No host/guest upgrade or image rebuild performed.
+See [matched-pair evidence](docs/validation.md#issue-29-matched-opencode-pair-2026-10-03).
+Issue #29: **Validate a reviewed
 matched OpenCode remote client/server pair**; link image Issue #6.
 
 - Choose a reviewed common version and record artifact provenance/hashes plus
@@ -74,11 +87,15 @@ matched OpenCode remote client/server pair**; link image Issue #6.
 
 ## 3. Separate editor/vendor remote gates
 
-Status: separate, not yet validated. Validate one integration at a time. GitHub
+Status: prerequisite checkpoint complete; VS Code Remote SSH NOT TESTABLE
+(client/extension/display unavailable), no installation performed. See
+[editor checkpoint](docs/validation.md#issue-30-editor-prerequisite-checkpoint-2026-10-03).
+No editor integration pass is claimed. Validate one integration at a time. GitHub
 issue #30: **Validate native remote clients against Dungeon-backed environments**.
 
-- **VS Code Remote:** no code/code-insiders/codium executable was on PATH in the
-  inventory; GUI/extension prerequisites and explicit installation approval are
+- **VS Code Remote:** repeated PATH/RPM/Flatpak and standard-directory inventory
+  found no code/code-insiders/codium or extension installation; no GUI display
+  was available in this session. GUI/extension prerequisites and explicit installation approval are
   needed. Verify workspace, remote tool execution, live edits and disconnect/
   reconnect. SSH-config output alone is not a pass.
 - **Codex:** host 0.155.1 and guest 0.156.1 advertise app-server/remote endpoints.
@@ -94,6 +111,21 @@ issue #30: **Validate native remote clients against Dungeon-backed environments*
   guest execution/state ownership, check restart/reconnect/interrupt and expected
   denials, then clean up disposable resources. No host-home/auth sharing or policy
   widening. Help/version checks are inventory, not integration validation.
+
+## Read-only diagnostics (Issue #22)
+
+Issue #22 adds `doctor`/`doctor --json` read-only diagnostics; parent independent
+review is required before delivery acceptance. Scope is Linux/OpenShell 0.0.116,
+existing rootless Podman and selected existing private config only. Independent
+checks, bounded sanitized native queries, explicit blocking exit semantics and
+configuration-only live capability/mapping observations do not install/migrate,
+promote live, implement imports or dynamically verify recorded integrations.
+Unknown foreign gateways/custom engine storage remain explicit, not adopted.
+Independent-review safety corrections cover descriptor-relative private
+config/policy reads, all-project helper PATH exclusion, exact driver-data
+environment identity, WNOWAIT query cleanup and empty-store initialization
+avoidance. Focused regressions and native scratch evidence are recorded;
+independent rereview remains the next acceptance gate.
 
 ## Deferred
 

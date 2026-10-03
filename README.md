@@ -56,6 +56,13 @@ The [local reviewed agent image](images/agent/README.md) pins reviewed OpenCode,
 
 ## First environment
 
+Before initializing or changing anything, use `dungeon doctor` or
+`dungeon doctor --json`. It checks read-only prerequisites and an existing
+current-directory private binding, if any; `--config PATH` selects an explicit
+configuration. It never prompts, initializes a binding, installs prerequisites,
+starts a gateway/sandbox, or enables live mounts. Missing capabilities remain
+explicit. See [diagnostic states and limits](docs/configuration.md#read-only-diagnostics).
+
 After machine-level setup, the normal interactive launcher is project-oriented:
 
 ```sh
@@ -140,6 +147,15 @@ foreground, and requires the bound sandbox to be Ready with unchanged identity
 and policy. It does not start a server, publish a container port, or manage
 credentials. See [configuration](docs/configuration.md#remote-first-attachment)
 for the OpenCode serve/forward/attach workflow and its validation limits.
+
+For an explicitly owned foreground command, use
+`dungeon --config "$CONFIG" exec --owned -- COMMAND ARG...`.
+This Linux-only, non-TTY mode supplies no stdin and requires guest
+`/usr/bin/node` and Linux `/proc`. It requires the bound sandbox already Ready.
+Normal exit and host INT/TERM trigger bounded shutdown of only its launched
+process group; cleanup failure is an error, not success. Ordinary `exec`,
+`run`, and `forward` are unchanged. See [configuration](docs/configuration.md#owned-foreground-execution)
+for scope and failure limits.
 
 ## Harness interoperability
 

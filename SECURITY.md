@@ -16,6 +16,19 @@ foreground forward when finished. Other local users/processes can reach host
 loopback; an agent API can execute commands and write the live project. Dungeon
 does not store service passwords or publish listeners on external interfaces.
 
+`exec --owned` is opt-in Linux foreground lifecycle assistance, not stronger
+containment. A live guest guardian signals only its own process group; command
+output and user-supplied PIDs never authorize signalling. Cleanup is bounded and
+refuses changed identity/policy. Host SIGKILL, transport loss, same-UID guest
+sabotage and process-group escape can leave work running; unconfirmed cleanup
+is an error.
+External/OOM guardian death is not proof of cleanup: kernel group absence is
+required, with conservative refusal for unreaped zombies or recycled group IDs.
+Failed primary transport remains an error even alongside a pending host signal.
+Forced group KILL can affect application durability but does not
+delete project/session state. Temporary guest control files are not a persistent
+PID registry or credential store. See [configuration](docs/configuration.md#owned-foreground-execution).
+
 Project selection is launch context, not security authority. The low-friction
 launcher canonicalizes the selected/current directory and derives a private
 Dungeon-owned config location from that path. It never loads policy, transfer

@@ -12,6 +12,14 @@ use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+#[path = "doctor.rs"]
+mod diagnostics;
+pub(crate) use diagnostics::run as doctor;
+
+#[cfg(target_os = "linux")]
+#[path = "owned.rs"]
+mod owned;
+
 #[cfg(target_os = "linux")]
 #[path = "setup.rs"]
 mod local_setup;
@@ -93,6 +101,19 @@ pub(crate) struct Runtime<'a> {
 }
 
 impl<'a> Runtime<'a> {
+    pub(crate) fn execute_owned(&self, arguments: &[String]) -> Result<i32> {
+        #[cfg(target_os = "linux")]
+        {
+            owned::run(self, arguments)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = arguments;
+            Err(Error::new(
+                "owned execution requires a Linux host and guest",
+            ))
+        }
+    }
     fn phase(remote: &Value) -> Result<Phase> {
         match Self::remote_str(remote, "phase")? {
             "Ready" => Ok(Phase::Ready),
@@ -500,6 +521,16 @@ impl<'a> Runtime<'a> {
     }
 
     fn checked(&self, ready: bool, policy: bool) -> Result<Value> {
+        self.bound_state()?;
+        let remote = self.get().map_err(|error| {
+            Error::new(format!(
+                "bound sandbox unavailable; refusing to create or adopt a replacement: {error}"
+            ))
+        })?;
+        self.check_remote(remote, ready, policy)
+    }
+
+    fn bound_state(&self) -> Result<RuntimeState> {
         let state: RuntimeState = serde_json::from_value(read_json(&self.config.state_path())?)
             .map_err(|error| Error::new(format!("invalid runtime.json: {error}")))?;
 
@@ -508,12 +539,11 @@ impl<'a> Runtime<'a> {
                 "launch configuration changed; restore it or initialize a new environment",
             ));
         }
+        Ok(state)
+    }
 
-        let remote = self.get().map_err(|error| {
-            Error::new(format!(
-                "bound sandbox unavailable; refusing to create or adopt a replacement: {error}"
-            ))
-        })?;
+    fn check_remote(&self, remote: Value, ready: bool, policy: bool) -> Result<Value> {
+        let state = self.bound_state()?;
         self.check_identity(&remote)?;
 
         if Self::remote_str(&remote, "id")? != state.id {
@@ -745,6 +775,11 @@ case " $* " in
   *' sandbox stop '*) echo Stopped > "$root/phase" ;;
   *' sandbox upload '*) test ! -e "$root/fail-upload" || exit 8 ;;
   *' sandbox download '*) for dest do :; done; cp "$root/project/file" "$dest/file" ;;
+  *' sandbox exec '*)
+    while test "$#" -gt 0 && test "$1" != --; do shift; done
+    shift
+    if test "$1" = /usr/bin/node; then exec "$@"; fi
+    ;;
   *' sandbox get '*)
     test -e "$root/phase" || exit 7
     phase=$(cat "$root/phase")
@@ -1018,6 +1053,32 @@ esac
         assert_eq!(fixture.calls("start"), 1);
         assert_eq!(fixture.calls("upload"), 0);
         assert_eq!(fs::read(fixture.config.state_path()).unwrap(), state);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn owned_command_preserves_result_and_binding_and_refuses_drift() {
+        let fixture = Fixture::new();
+        let runtime = fixture.runtime();
+        runtime.create().unwrap();
+        let state = fs::read(fixture.config.state_path()).unwrap();
+        assert_eq!(
+            runtime
+                .execute_owned(&[
+                    "/usr/bin/node".into(),
+                    "-e".into(),
+                    "process.exit(19)".into()
+                ])
+                .unwrap(),
+            19
+        );
+        assert_eq!(fs::read(fixture.config.state_path()).unwrap(), state);
+        assert_eq!(fixture.calls("create"), 1);
+        assert_eq!(fixture.calls("upload"), 0);
+        fixture.flag("drift");
+        let before = fixture.calls("exec");
+        assert!(runtime.execute_owned(&["/bin/true".into()]).is_err());
+        assert_eq!(fixture.calls("exec"), before);
     }
 
     #[cfg(unix)]

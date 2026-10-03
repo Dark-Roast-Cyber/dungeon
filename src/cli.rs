@@ -49,6 +49,11 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     Setup,
+    /// Read-only prerequisite and capability diagnostics; never initializes an environment.
+    Doctor {
+        #[arg(long)]
+        json: bool,
+    },
     Init {
         #[arg(long)]
         directory: PathBuf,
@@ -109,6 +114,12 @@ enum Commands {
     Exec {
         #[arg(long)]
         tty: bool,
+        #[arg(
+            long,
+            conflicts_with = "tty",
+            help = "Own a Linux foreground guest command; no stdin; bounded shutdown"
+        )]
+        owned: bool,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         arguments: Vec<String>,
     },
@@ -126,6 +137,14 @@ fn dispatch(cli: Cli) -> Result<i32> {
     } = cli;
 
     match command {
+        Some(Commands::Doctor { json }) => {
+            if project.is_some() {
+                return Err(Error::new(
+                    "doctor accepts --config or the existing current-directory binding, not PROJECT",
+                ));
+            }
+            crate::openshell::doctor(config, json)
+        }
         Some(Commands::Setup) => {
             if project.is_some() {
                 return Err(Error::new(
@@ -408,7 +427,17 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
                 io::stdin().is_terminal() && io::stdout().is_terminal(),
             )
         }
-        Commands::Exec { tty, arguments } => runtime.execute(&arguments, tty, GUEST_PROJECT),
+        Commands::Exec {
+            tty,
+            owned,
+            arguments,
+        } => {
+            if owned {
+                runtime.execute_owned(&arguments)
+            } else {
+                runtime.execute(&arguments, tty, GUEST_PROJECT)
+            }
+        }
         Commands::Shell => runtime.execute(&["/bin/bash".into(), "-l".into()], true, "/sandbox"),
         Commands::Code => runtime.connect_vscode(),
         Commands::SshConfig => runtime.ssh_config(),
@@ -416,6 +445,7 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         Commands::Start => runtime.start(),
         Commands::Init { .. }
         | Commands::Setup
+        | Commands::Doctor { .. }
         | Commands::Plan
         | Commands::Upload { yes: false } => unreachable!(),
     }
@@ -615,6 +645,23 @@ mod tests {
         assert!(Cli::try_parse_from(["dungeon", "auth", "codex"]).is_ok());
         assert!(Cli::try_parse_from(["dungeon", "auth", "grok"]).is_err());
         assert!(Cli::try_parse_from(["dungeon", "auth", "opencode"]).is_err());
+    }
+
+    #[test]
+    fn owned_execution_is_explicit_and_non_tty() {
+        assert!(Cli::try_parse_from(["dungeon", "exec", "--owned", "--", "node", "-v"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["dungeon", "exec", "--owned", "--tty", "--", "true"]).is_err()
+        );
+        let generic = Cli::try_parse_from(["dungeon", "exec", "--", "true"]).unwrap();
+        assert!(matches!(
+            generic.command,
+            Some(Commands::Exec {
+                owned: false,
+                tty: false,
+                ..
+            })
+        ));
     }
 
     #[test]
