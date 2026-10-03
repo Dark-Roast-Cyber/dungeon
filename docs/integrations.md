@@ -17,6 +17,7 @@ not a requirement to use a particular agent protocol.
 | Claude Desktop / ChatGPT remote projects | `ssh-config`, then client setup | Documented integration target, not live-certified. |
 | OpenCode remote client | Guest `serve`, `forward`, native `--server` | Matched 2.0.14 AI edit/test and native session restart/resume passed; interactive TUI message submission unverified. |
 | Owned foreground service | `exec --owned -- COMMAND ARG...` | Explicit opt-in shutdown/live gates passed on the recorded Linux pair; not a daemon or containment guarantee. |
+| Owned interactive command | `ssh --owned -- COMMAND ARG...` | Native guest Neovim/resize/save/test, bounded invocation cleanup and failure gates passed on the recorded Linux pair; generic SSH disconnect semantics unchanged. |
 | Read-only diagnostics | `doctor [--json]` | Inventory/private-state safety checks passed; does not dynamically certify integrations. |
 
 Native Windows applications do not become Linux workloads by connecting to
@@ -66,6 +67,11 @@ recorded terminal-editor run disabled host identity keys, agents and forwarding;
 `code` uses OpenShell's managed SSH installation instead. It may modify host
 SSH configuration. Select `/sandbox/project` in
 the remote editor after `up`.
+
+For a single foreground guest editor/tool with explicit invocation cleanup, see
+[owned interactive SSH](configuration.md#owned-interactive-ssh). Native terminal
+Ctrl-C is application input/signal, not automatic Dungeon shutdown. This path
+does not retrofit VS Code/desktop clients or change generic `ssh-config` sessions.
 
 A desktop client must support the resulting SSH ProxyCommand connection and
 the remote Linux tools it launches. Configure Claude Code's SSH environment or

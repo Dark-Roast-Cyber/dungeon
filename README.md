@@ -157,6 +157,15 @@ process group; cleanup failure is an error, not success. Ordinary `exec`,
 `run`, and `forward` are unchanged. See [configuration](docs/configuration.md#owned-foreground-execution)
 for scope and failure limits.
 
+For one explicitly owned interactive command, use
+`dungeon --config "$CONFIG" ssh --owned -- nvim FILE`.
+This Linux-only mode requires a real foreground terminal, host OpenSSH, guest
+`/usr/bin/node` and Linux `/proc`, and an already Ready binding. Native SSH owns
+input and resize; Dungeon requests bounded cleanup of only that invocation's
+guest process group on exit, host HUP/INT/TERM or detected SSH/terminal failure.
+It does not change `ssh-config`, editor attachment or ordinary execution.
+See [owned interactive SSH](docs/configuration.md#owned-interactive-ssh).
+
 ## Harness interoperability
 
 Dungeon will expose a small stable machine interface so external tools can treat it as an isolated execution environment without learning OpenShell internals.

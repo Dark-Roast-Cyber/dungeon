@@ -120,6 +120,17 @@ INT/TERM and verifies cleanup separately from command output; ordinary exec,
 run, and forwarding remain native and unchanged. This is lifecycle assistance,
 not protection against group escape, same-UID sabotage or lost transport.
 
+`ssh --owned` is the distinct real-terminal path within that same ownership
+boundary. Native OpenSSH/OpenShell own PTY allocation, raw input and resize;
+Dungeon does not proxy terminal bytes. The host hands foreground access to its
+private unreaped SSH leader and restores its original group/termios afterward.
+The guest guardian remains the native session/foreground-group leader; a detached
+silent observer owns exclusive invocation controls and a strict nullable-status
+receipt. Only the live guardian signals its own group. The observer observes group
+absence and never signals a reaped leader. Handshakes are bounded, transport faults
+are sticky, and receipts cannot override primary transport or restoration errors.
+The responsibility seam is `owned_ssh` under `owned`, not a second backend.
+
 ## Runtime identity
 
 Initialization does not execute project code or contact a runtime. Creation snapshots the loaded policy, disables automatic provider creation, and labels the sandbox with a configuration fingerprint. Dungeon records sandbox ID and observed-policy digest in host-side `runtime.json`.

@@ -29,6 +29,18 @@ Forced group KILL can affect application durability but does not
 delete project/session state. Temporary guest control files are not a persistent
 PID registry or credential store. See [configuration](docs/configuration.md#owned-foreground-execution).
 
+`ssh --owned` adds opt-in interactive group ownership, not stronger containment.
+It accepts only the exact pinned OpenShell SSH configuration template before
+using a private host file; no host identities, agent, forwarding, multiplexing
+or local commands are enabled. OpenShell's proxy path uses native none-auth SSH
+behind mTLS and disables host-key checking; this is not ordinary SSH host-key
+validation. The foreground guest guardian retains the native terminal; a silent
+invocation-local observer records kernel group absence separately from output.
+Failed/stopped/continued SSH and guardian faults remain errors even after cleanup.
+Physical terminal loss triggers cleanup but prevents confirmed terminal restoration.
+Group escape, same-UID sabotage, host SIGKILL and unavailable cleanup transport
+retain the non-TTY ownership limits. Saved state is not unsaved-buffer recovery.
+
 Project selection is launch context, not security authority. The low-friction
 launcher canonicalizes the selected/current directory and derives a private
 Dungeon-owned config location from that path. It never loads policy, transfer

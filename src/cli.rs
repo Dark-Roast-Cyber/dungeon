@@ -86,6 +86,13 @@ enum Commands {
     Shell,
     Code,
     SshConfig,
+    /// Own one interactive foreground command over native SSH (Linux only).
+    Ssh {
+        #[arg(long, required = true)]
+        owned: bool,
+        #[arg(last = true, required = true, allow_hyphen_values = true)]
+        arguments: Vec<String>,
+    },
     /// Forward a guest-loopback service to host loopback (foreground; Ctrl-C to stop).
     Forward {
         #[arg(long, help = "service port inside the guest")]
@@ -441,6 +448,7 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         Commands::Shell => runtime.execute(&["/bin/bash".into(), "-l".into()], true, "/sandbox"),
         Commands::Code => runtime.connect_vscode(),
         Commands::SshConfig => runtime.ssh_config(),
+        Commands::Ssh { arguments, .. } => runtime.ssh_owned(&arguments),
         Commands::Forward { port, local_port } => runtime.forward_service(port, local_port),
         Commands::Start => runtime.start(),
         Commands::Init { .. }
@@ -649,6 +657,10 @@ mod tests {
 
     #[test]
     fn owned_execution_is_explicit_and_non_tty() {
+        assert!(Cli::try_parse_from(["dungeon", "ssh", "--owned", "--", "nvim", "a b"]).is_ok());
+        assert!(Cli::try_parse_from(["dungeon", "ssh", "--", "nvim"]).is_err());
+        assert!(Cli::try_parse_from(["dungeon", "ssh", "--owned"]).is_err());
+        assert!(Cli::try_parse_from(["dungeon", "ssh", "--owned", "nvim"]).is_err());
         assert!(Cli::try_parse_from(["dungeon", "exec", "--owned", "--", "node", "-v"]).is_ok());
         assert!(
             Cli::try_parse_from(["dungeon", "exec", "--owned", "--tty", "--", "true"]).is_err()

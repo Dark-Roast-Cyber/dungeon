@@ -67,8 +67,158 @@ process.on('message', value => {
 process.send('ready');
 `;
 
+function ttyReceipt(base) {
+  const fd = fs.openSync(`${base}/result`, C.O_RDONLY | flags);
+  try {
+    regular(fd);
+    if (fs.fstatSync(fd).size > 512) throw Error('oversized result');
+    // Host strict JSON parsing is authoritative, including duplicate-key refusal.
+    const text = fs.readFileSync(fd, 'utf8');
+    const value = JSON.parse(text);
+    if (value.token !== token || value.clean !== true) throw Error('invalid result');
+    return text;
+  } finally { fs.closeSync(fd); }
+}
+
+function ttyLaunch() {
+  if (!argv[0]) throw Error('missing command');
+  const stat = fs.readFileSync('/proc/self/stat', 'utf8');
+  const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+  if (+fields[2] !== process.pid || +fields[3] !== process.pid || +fields[4] === 0 ||
+      +fields[5] !== process.pid || !process.stdin.isTTY || !process.stdout.isTTY) throw Error('foreground terminal required');
+  process.chdir('/sandbox/project');
+  // The observer has no terminal descriptors and never signals a guest group.
+  const self = fs.readFileSync('/proc/self/cmdline', 'utf8').split('\0')[2];
+  let observer, command, finishing = false, requested = false, fault = false, status = null, revision = 0;
+  let timer;
+  function send(value) {
+    if (observer?.connected) observer.send(value, error => { if (error) kill(); });
+    else kill();
+  }
+  function kill() {
+    if (finishing) return;
+    finishing = true;
+    clearTimeout(timer);
+    process.kill(-process.pid, 'SIGTERM');
+    setTimeout(() => process.kill(-process.pid, 'SIGKILL'), 1000);
+  }
+  function finish(broken = false) {
+    const changed = broken && !fault;
+    fault ||= broken;
+    if (finishing || (requested && !changed)) return;
+    requested = true;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      fault = true;
+      revision++;
+      if (observer?.connected) observer.send({ finish: true, revision, fault, status }, () => kill());
+      setTimeout(kill, 100);
+    }, 2000);
+    revision++;
+    send({ finish: true, revision, fault, status });
+  }
+  // Catch, not ignore: exec resets caught dispositions in the application.
+  process.on('SIGINT', () => {});
+  process.on('SIGTERM', () => { if (!finishing) finish(true); });
+  process.on('SIGHUP', () => { if (!finishing) finish(true); });
+  observer = spawn(process.execPath, ['-e', self, '--', 'tty-observe', token, String(process.pid)], {
+    detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+  });
+  timer = setTimeout(() => finish(true), 2000);
+  observer.once('error', () => { fault = true; kill(); });
+  observer.on('disconnect', () => { fault = true; kill(); });
+  observer.on('message', value => {
+    if (value?.finish_ack === revision && requested) { kill(); return; }
+    if (value === 'stop') { finish(); return; }
+    if (value !== 'start' || requested || finishing || command) return;
+    clearTimeout(timer);
+    send('started');
+    command = spawn(argv[0], argv.slice(1), { detached: false, stdio: ['inherit', 'inherit', 'inherit'] });
+    command.once('error', () => { status = { code: null, signal: null, spawn_error: true }; finish(); });
+    command.once('exit', (code, signal) => { status = { code, signal, spawn_error: false }; finish(); });
+  });
+}
+
+function ttyObserve() {
+  const group = Number(argv[0]);
+  if (!Number.isSafeInteger(group) || group < 1) throw Error('invalid guardian');
+  fs.mkdirSync(directory, { mode: 0o700 });
+  const base = openDirectory();
+  const control = fs.openSync(`${base}/stop`, C.O_RDWR | C.O_CREAT | C.O_EXCL | flags, 0o600);
+  let stopped = false, fault = false, finish = false, status = null, disconnected = false;
+  function send(value) {
+    if (process.connected) process.send(value, error => { if (error) disconnect(); });
+  }
+  function disconnect() {
+    fault = true;
+    if (process.connected) process.disconnect();
+  }
+  function check() {
+    regular(control);
+    const size = fs.fstatSync(control).size;
+    if (size > 1) throw Error('invalid stop request');
+    if (size === 1) {
+      const byte = Buffer.alloc(1);
+      fs.readSync(control, byte, 0, 1, 0);
+      if (byte[0] !== 1) throw Error('invalid stop request');
+      if (!stopped) { stopped = true; send('stop'); }
+    }
+  }
+  const startup = setTimeout(disconnect, 2000);
+  const interval = setInterval(() => { try { check(); } catch { disconnect(); } }, 20);
+  process.on('message', value => {
+    if (value === 'started') clearTimeout(startup);
+    else if (value?.finish === true && Number.isSafeInteger(value.revision) && value.revision > 0) {
+      clearTimeout(startup);
+      finish = true;
+      fault ||= value.fault !== false;
+      status = value.status;
+      send({ finish_ack: value.revision });
+    }
+  });
+  process.on('disconnect', () => {
+    if (disconnected) return;
+    disconnected = true;
+    clearTimeout(startup);
+    clearInterval(interval);
+    fs.closeSync(control);
+    fault ||= !finish;
+    const deadline = Date.now() + 2000;
+    function confirm() {
+      try { process.kill(-group, 0); }
+      catch (error) {
+        if (error.code !== 'ESRCH') { process.exitCode = 125; return; }
+        const fd = fs.openSync(`${base}/result`, C.O_WRONLY | C.O_CREAT | C.O_EXCL | flags, 0o600);
+        fs.writeFileSync(fd, JSON.stringify({ token, clean: true, stopped, fault, status }));
+        fs.closeSync(fd);
+        return;
+      }
+      if (Date.now() >= deadline) process.exitCode = 125;
+      else setTimeout(confirm, 20);
+    }
+    confirm();
+  });
+  check();
+  if (!stopped) send('start');
+}
+
 try {
-  if (mode === 'launch') {
+  if (mode === 'tty-launch') ttyLaunch();
+  else if (mode === 'tty-observe') ttyObserve();
+  else if (mode === 'tty-ready') {
+    const base = openDirectory();
+    const fd = fs.openSync(`${base}/stop`, C.O_RDONLY | flags);
+    try { regular(fd); process.stdout.write(JSON.stringify({ token })); } finally { fs.closeSync(fd); }
+  } else if (mode === 'tty-result' || mode === 'tty-remove') {
+    const base = openDirectory();
+    const text = ttyReceipt(base);
+    if (mode === 'tty-result') process.stdout.write(text);
+    else {
+      fs.unlinkSync(`${base}/result`);
+      fs.unlinkSync(`${base}/stop`);
+      fs.rmdirSync(directory);
+    }
+  } else if (mode === 'launch') {
     if (!argv[0]) throw Error('missing command');
     // mkdir is exclusive: never adopt existing control state.
     fs.mkdirSync(directory, { mode: 0o700 });

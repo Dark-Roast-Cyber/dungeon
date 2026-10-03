@@ -101,6 +101,17 @@ pub(crate) struct Runtime<'a> {
 }
 
 impl<'a> Runtime<'a> {
+    pub(crate) fn ssh_owned(&self, arguments: &[String]) -> Result<i32> {
+        #[cfg(target_os = "linux")]
+        {
+            owned::ssh(self, arguments)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = arguments;
+            Err(Error::new("owned SSH requires a Linux host and guest"))
+        }
+    }
     pub(crate) fn execute_owned(&self, arguments: &[String]) -> Result<i32> {
         #[cfg(target_os = "linux")]
         {

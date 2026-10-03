@@ -162,6 +162,70 @@ registry is added. Ordinary `exec`/`run` retain native transport semantics;
 interrupting an independently launched `forward` stops its listener only and
 leaves the service running.
 
+## Owned interactive SSH
+
+```sh
+dungeon --config "$CONFIG" ssh --owned -- nvim /sandbox/project/file.txt
+```
+
+This explicit Linux-only command requires a real foreground host terminal on
+stdin/stdout/stderr, host OpenSSH outside the selected project, guest
+`/usr/bin/node` and Linux `/proc`, and an existing Ready binding. It does not
+create/start/upload, install tools, change policy, or offer arbitrary SSH options.
+The command starts in `/sandbox/project`. Arguments remain data, including quotes
+and newlines; only fixed guest code is executed. Do not use this mode for daemon
+launchers or job-control shells whose children leave the invocation group.
+
+Dungeon checks the exact OpenShell 0.0.116 SSH template before using a temporary
+private 0600 `-F` configuration. Unexpected directives/template drift refuse
+execution. Native none-auth SSH goes through the trusted OpenShell mTLS proxy;
+upstream host-key checking/storage remain disabled. Host identity files, agent,
+password/key authentication, forwarding, multiplexing, local commands and SSH
+escape sequences are disabled. No `~/.ssh` modification or credentials copying
+occurs. The narrowed Runtime environment supplies existing OpenShell registration
+paths; it does not copy host HOME/XDG contents into the guest.
+
+Native SSH owns terminal input, raw mode and resizing. Typed Ctrl-C retains the
+application's terminal semantics: it can cancel a Neovim command without shutting
+down the guardian. Explicit host HUP/INT/TERM requests STOP instead. Native SSH
+suspension is unsupported: observed STOP/CONT is a sticky transport error.
+
+A foreground guest guardian retains the native controlling terminal and launches
+the application in its own group, without control/IPC descriptors. A detached
+silent invocation observer exclusively creates the same ephemeral control files,
+acknowledges startup and observes final kernel group absence. Startup and status
+acknowledgements are bounded; failure enters guardian shutdown. A HUP/TERM fault
+during a pending normal acknowledgement sends a new sticky-fault revision; an
+older acknowledgement cannot authorize normal completion. Only the still-live
+guardian sends group TERM then KILL after one second. The observer never authorizes
+signalling based on a receipt/PID and never signals the guardian's former group.
+
+The strict receipt has exactly `token`, `clean`, `stopped`, `fault`, `status`.
+`status` is explicitly null or exactly `{code, signal, spawn_error}`: observed
+0–255 code, recognized Linux signal, or acknowledged spawn error, never a guessed
+application exit. Unknown/duplicate fields, inconsistent combinations and invalid
+types refuse confirmation. Normal exit returns the observed application status;
+spawn failure returns 127. Confirmed explicit host signals return 129/130/143 as
+host policy, even if application status is absent. Null status without a host
+interrupt is an error. Upstream SSH reports the guardian's final group KILL as
+exit 1; only that expected primary result plus a valid receipt permits success.
+Failed/signalled/stopped/continued transport, guardian faults and failed terminal
+restoration remain errors, regardless of a pending host signal or cleanup receipt.
+The host makes its final status/signal decision after private transport teardown
+and terminal restoration, while signal handlers remain active. A late interrupt
+without acknowledged STOP is an error, not a swallowed normal exit.
+
+Ready identity/policy checks precede launch and cleanup. Startup readiness and
+cleanup each have a ten-second budget. Lost cleanup transport or drift returns
+bounded unconfirmed error and can leave guest work/controls for inspection.
+Detected terminal hangup also requests cleanup; a physically vanished terminal
+cannot be restored and remains an error. Handlers stay active through host private
+group teardown/reap and terminal restoration. Host SIGKILL, total transport loss,
+group escape, same-UID sabotage and unreaped zombies retain the earlier ownership
+limits. Saved project/editor state is preserved, but forced KILL can lose unsaved
+buffers. No whole-sandbox stop is used for invocation cleanup. Ordinary
+`exec --owned`, `exec`, `run`, `forward`, `ssh-config` and `code` are unchanged.
+
 ## Native policy
 
 `policy.json` is the single editable OpenShell policy input. `dungeon init` generates one starter development policy. Additional named profiles are deferred until live validation establishes real scenario-specific semantics.

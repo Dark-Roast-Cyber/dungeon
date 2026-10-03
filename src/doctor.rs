@@ -263,7 +263,8 @@ mod linux {
         args: &[&str],
         timeout: Duration,
     ) -> Option<Reply> {
-        let child = Command::new(binary)
+        let mut command = Command::new(binary);
+        command
             .args(args)
             .current_dir("/")
             .env_clear()
@@ -271,10 +272,22 @@ mod linux {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .process_group(0)
-            .spawn()
-            .ok()?;
-        collect_query(child, timeout)
+            .process_group(0);
+        let start = Instant::now();
+        let child = loop {
+            match command.spawn() {
+                Ok(child) => break child,
+                // Concurrent fork can temporarily inherit a freshly closed writer
+                // until exec closes its CLOEXEC descriptors. Never retry other errors.
+                Err(error)
+                    if error.raw_os_error() == Some(libc::ETXTBSY) && start.elapsed() < timeout =>
+                {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(_) => return None,
+            }
+        };
+        collect_query(child, timeout.saturating_sub(start.elapsed()))
     }
 
     fn collect_query(mut child: std::process::Child, timeout: Duration) -> Option<Reply> {
@@ -961,6 +974,37 @@ mod linux {
                 private_json(&held, std::ffi::OsStr::new("policy.json")).unwrap(),
                 crate::policy::starter_policy()
             );
+        }
+
+        #[test]
+        fn fresh_fixture_queries_under_parallel_fork_activity() {
+            use std::os::unix::process::CommandExt;
+            let workers = (0..8)
+                .map(|_| {
+                    std::thread::spawn(|| {
+                        for _ in 0..20 {
+                            let root = tempfile::tempdir().unwrap();
+                            let path = root.path().join("query");
+                            script(&path, "#!/bin/sh\nprintf 'fixture\\n'\n");
+                            let reply = query(&path, &HashMap::new(), &[], Duration::from_secs(1));
+                            assert!(reply.is_some(), "fresh fixture query failed");
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+            for _ in 0..20 {
+                let mut command = Command::new("/bin/true");
+                unsafe {
+                    command.pre_exec(|| {
+                        libc::usleep(5000);
+                        Ok(())
+                    });
+                }
+                assert!(command.status().unwrap().success());
+            }
+            for worker in workers {
+                worker.join().unwrap();
+            }
         }
 
         #[test]

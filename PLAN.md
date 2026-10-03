@@ -134,6 +134,26 @@ environment identity, WNOWAIT query cleanup and empty-store initialization
 avoidance. Focused regressions and native scratch evidence are recorded;
 accepted rereview does not establish new runtime/editor containment claims.
 
+## Remaining execution sequence
+
+1. SSH cleanup first: `ssh --owned` implementation and disposable native PTY gates
+   are recorded below; independent review precedes Git delivery. Generic SSH
+   disconnect remains degraded and VS Code prerequisites remain unavailable.
+2. Preserve ancestry when integrating PR #26, then PR #27. Close only #28/#29 when
+   their recorded acceptance and delivery criteria are met; partial SSH evidence
+   does not close the broader #30 integration gate.
+3. #24: implement explicit safe setup capability separately from the reviewed
+   live-default decision. Keep generated/default transfer `copy` until that decision.
+4. #5: establish guest-enforced read-only snapshot ownership, not uploaded modes.
+5. #20/#21 follow separately; #16 minimal operation locking is an independent
+   correctness slice, not a new orchestration framework.
+
+Owned interactive SSH now has live implementation evidence for native editor
+input/resize/save/test, host signals, terminal/SSH loss, STOP/CONT, isolation and
+bounded gateway/drift/guardian faults. See
+[the recorded gate](docs/validation.md#owned-interactive-ssh-implementation).
+This does not promote live mode, install clients or authorize publication.
+
 ## Deferred
 
 Automate serve/forward/attach only after the relevant lifecycle/version gates

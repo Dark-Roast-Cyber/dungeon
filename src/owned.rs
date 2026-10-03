@@ -10,6 +10,9 @@ use std::time::{Duration, Instant};
 
 const SHIM: &str = include_str!("owned.cjs");
 const LIMIT: Duration = Duration::from_secs(10);
+#[path = "owned_ssh.rs"]
+mod interactive;
+pub(super) use interactive::run as ssh;
 static SIGNAL: AtomicI32 = AtomicI32::new(0);
 static SIGNAL_LOCK: Mutex<()> = Mutex::new(());
 
@@ -18,41 +21,60 @@ extern "C" fn signal(number: libc::c_int) {
 }
 
 struct Signals {
-    old: [(i32, libc::sigaction); 2],
+    old: Vec<(i32, libc::sigaction)>,
 }
 
 impl Signals {
     fn install() -> Result<Self> {
+        Self::install_for(&[libc::SIGINT, libc::SIGTERM])
+    }
+
+    fn install_for(numbers: &[i32]) -> Result<Self> {
         SIGNAL.store(0, Ordering::SeqCst);
         // Handlers perform only a lock-free atomic write, never allocation or IO.
         unsafe {
             let mut action: libc::sigaction = std::mem::zeroed();
             action.sa_sigaction = signal as *const () as usize;
             libc::sigemptyset(&mut action.sa_mask);
-            let mut old = [
-                (libc::SIGINT, std::mem::zeroed()),
-                (libc::SIGTERM, std::mem::zeroed()),
-            ];
+            let mut old: Vec<_> = numbers
+                .iter()
+                .map(|number| (*number, std::mem::zeroed()))
+                .collect();
             for index in 0..old.len() {
                 if libc::sigaction(old[index].0, &action, &mut old[index].1) != 0 {
+                    let error = std::io::Error::last_os_error();
+                    let mut failed = false;
                     for (number, previous) in &old[..index] {
-                        libc::sigaction(*number, previous, std::ptr::null_mut());
+                        failed |= libc::sigaction(*number, previous, std::ptr::null_mut()) != 0;
                     }
-                    return Err(std::io::Error::last_os_error().into());
+                    return Err(if failed {
+                        Error::new("owned partial signal installation restoration failed")
+                    } else {
+                        error.into()
+                    });
                 }
             }
             Ok(Self { old })
+        }
+    }
+
+    fn restore(&mut self) -> Result<()> {
+        let mut failed = false;
+        for (number, previous) in &self.old {
+            failed |= unsafe { libc::sigaction(*number, previous, std::ptr::null_mut()) } != 0;
+        }
+        if failed {
+            Err(Error::new("owned signal restoration failed"))
+        } else {
+            self.old.clear();
+            Ok(())
         }
     }
 }
 
 impl Drop for Signals {
     fn drop(&mut self) {
-        unsafe {
-            for (number, previous) in &self.old {
-                libc::sigaction(*number, previous, std::ptr::null_mut());
-            }
-        }
+        let _ = self.restore();
     }
 }
 

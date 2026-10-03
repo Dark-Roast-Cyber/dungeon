@@ -553,6 +553,102 @@ editor/session databases are retained.
 VS Code, host editor UI, vendor remote/desktop clients, other platforms and full
 Issue #30 acceptance remain unproven.
 
+### Owned interactive SSH implementation
+
+The opt-in `ssh --owned -- COMMAND ARG...` candidate was exercised against
+`df349cfac7f46544d6e853e646eb73a8d24caad2` plus the recorded implementation diff,
+on Fedora 44/kernel 7.2.5-200.fc44.x86_64, SELinux Enforcing, OpenShell CLI/gateway
+0.0.116, rootless Podman 5.8.4, host OpenSSH 10.2p1 and guest Neovim 0.12.5.
+The unchanged agent/gateway image digests were respectively
+`sha256:5a5353c130370361934d4826ee792e2f8038de40763f2713025dbb4ba83e0ce5` and
+`sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645`.
+Dedicated synthetic gateway/project/HOME/XDG resources used the reviewed keep-id
+and identity-mounted driver-data layout. No credentials or real host editor state
+were imported; no images/tools/policy/defaults were changed.
+
+| Gate | Result |
+| --- | --- |
+| Native Neovim render/input/Ctrl-C and guest context | PASS; Ctrl-C canceled editor input without forcing guardian shutdown; `/sandbox/project`, HOME `/sandbox`, TTY confirmed |
+| Native raw host terminal/foreground group and resize | PASS; child SSH was foreground, ICANON/ECHO disabled, 100x40 reached Neovim; original group/termios restored on intact-terminal exits |
+| Edit/save/guest and approved host test | PASS; arithmetic-only fix; unchanged test SHA-256 `702e699d68d016175147d366080cdff34768f1564505b4eb0f306a06622216ba`; host UID/GID/modes preserved |
+| Saved file/private state and clean relaunch | PASS; editor saved file/state retained, normal exit 0; no unsaved recovery claim |
+| Normal exit 23 with TERM-resistant descendant | PASS; exact application status, kernel group absence and control removal before sandbox deletion |
+| Repeated HUP/INT/TERM and startup INT/TERM | PASS; confirmed host policy returns 129/130/143, intact terminal restored |
+| SSH PID SIGKILL and STOP/CONT | PASS; confirmed invocation cleanup remains a transport error, not overridden by receipt |
+| Physical host PTY master closure | PASS bounded error; cleanup controls absent; terminal restoration impossible and reported as error |
+| Concurrent invocations/unrelated service | PASS; stopping one preserves the other and existing non-TTY owned sentinel |
+| Argument transport and missing executable | PASS; empty/quoted/newline/flag args remain data; acknowledged spawn failure returns 127 |
+| Non-TTY and changed binding | PASS refusal; binding drift leaves controls/work for exact invocation recovery after restoring prerequisites |
+| Live narrowed-policy drift | PASS refusal; original policy restored before exact invocation STOP/receipt removal; no policy widening |
+| Paused gateway | PASS bounded unconfirmed error; known fixture STOP/receipt removal succeeded after gateway recovery |
+| Guardian/observer death | PASS nonzero refusal, never normal success; known synthetic application identity checked before manual recovery; group absence confirmed separately |
+
+The initial physical-PTY test exposed missing native hangup observation; the host
+now polls only terminal error/hangup state, without reading input/proxying bytes.
+The corrected main matrix passed. An initial death fixture could exit on native
+SIGHUP and become a zombie before manual evidence collection; corrected fixtures
+catch HUP/TERM and recovery checks distinguish zombies. The affected death gates
+passed separately. Sanitized matrices, tested-source/binary hashes and exact
+revision boundaries are retained at
+`/tmp/opencode/dungeon-owned-ssh-live-D9CMMw/evidence`. The earlier scratch proof
+is mechanism evidence, not substituted for these implementation runs.
+
+A maturity regression with a deliberately withheld status acknowledgement exposed
+that timeout shutdown must also mark the observer receipt as a fault. That
+correction and its bounded synthetic test passed; the final main/fault/policy
+matrices ran with identical runtime inputs and debug binary SHA-256
+`9458a53f89db64ee5717ef97fb0df0b8118c3ab8a841cfec4c5bee08284ace8a`.
+One earlier final-input normal-exit attempt returned nonzero before the receipt
+was captured; its cause was not established. The next main run and three focused
+normal/resistant-group confirmations passed. Conservative group/zombie refusal
+remains a documented limit, not a reason to reinterpret that failed attempt as a
+pass. The default parallel Rust run also encountered an unrelated diagnostics
+fixture result (`unknown` instead of `incompatible`); its isolated rerun and the
+full serial suite passed without changes to diagnostics at that checkpoint.
+
+Independent review then required acknowledgement ordering, final tail-signal
+handling and portable host Node fixtures. The corrected guardian now versions
+acknowledgements: late HUP/TERM faults supersede a pending normal completion.
+The host decides status after transport teardown/terminal restoration, with
+handlers still active; unacknowledged late signals error. Host tests resolve Node
+from sanitized project-excluded PATH; the production guest path stays `/usr/bin/node`.
+Delayed-ack HUP/TERM and injected teardown-tail signal regressions passed.
+
+On the same recorded runtime combination, the corrected-tree focused live run
+passed late guardian HUP/TERM after normal finish with observer acknowledgement
+delayed. Receipts retained code 23 **and** fault=true; Dungeon returned error 1,
+restored the terminal and removed controls. Three normal23/resistant-group runs
+also passed with sanitized fixed stderr categories, receipt-presence/status flags,
+live/zombie group counts and host SSH states sampled during cleanup. The original
+unclassified normal failure did not recur; its cause remains unknown, not inferred
+from these successful observations. Evidence is at
+`/tmp/opencode/dungeon-owned-ssh-review-Qt9vpY/evidence`; tested debug SHA-256 is
+`4c78a398607a7ff6488fb242c037826766ba03d86596879a4ab736654d7c44f2`.
+The broader matrix above remains evidence for its earlier exact revision, not
+a claimed full rerun after these corrections. Tail-signal injection is a unit
+regression, not a live timing claim.
+
+The default parallel suite reproduced a diagnostics `unknown` result in another
+fixture. A bounded fresh-script/parallel-fork reproduction captured spawn errno
+26 (`ETXTBSY`): inherited writable descriptors can temporarily keep the script
+text busy until exec closes CLOEXEC descriptors. Diagnostics now retries only
+that spawn error within the original query budget, subtracting startup time from
+collection; no other error is retried. The targeted regression and default
+parallel `cargo test --locked --quiet` passed (75 unit + 2 integration tests).
+Formatting, Clippy, release build, all seven owned Node tests, three npm launcher
+tests and the npm staging test passed. No test skip, serialized CI or widened
+deadline was introduced. Exact historical assertion failures lack errno capture
+and are not individually retroactively classified.
+
+All disposable sandboxes/gateways/networks/private registrations/certificates/
+databases/HOME/project/configuration were removed; preexisting container
+ID/name/state inventories matched and dedicated port 18696 was absent. Invocation
+controls/group absence were checked before final sandbox deletion for successful
+gates; whole-sandbox deletion is not invocation confirmation. Other platforms,
+group escapes/job-control shells, same-UID sabotage, host SIGKILL, VS Code and
+vendor desktop clients remain unsupported/unproven. Generic SSH's earlier
+disconnect degradation is unchanged.
+
 ### Remaining gates
 
 | Gate | Evidence |
