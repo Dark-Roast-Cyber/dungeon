@@ -83,17 +83,39 @@ Dungeon may automate safe, explicit, non-privileged setup steps where justified,
 
 OpenShell remains visible as the isolation/enforcement engine.
 
-### 4. Stable machine interface for external harnesses, Issue #20
+### 4. Low-friction network policy, Issue #31
+
+Make networking easy to configure without hiding OpenShell's enforcement model or inventing a second policy language.
+
+The current starter policy is an explicit outbound allowlist. Evaluate a small typed model such as open, restricted, and offline, including whether normal local development should eventually use permissive outbound networking by default. Do not change that default until the pinned OpenShell behavior and exfiltration implications are validated.
+
+Provide simple operator-owned domain allow/block workflows where upstream semantics support them, deterministic effective-policy diffs, formatting/validation, and clear separation between outbound sandbox policy and inbound gateway-mediated attachment.
+
+A later optional assistant may translate natural-language intent such as "allow traffic only to these domains" into a proposed, validated configuration. AI assistance may propose and format policy but must not authorize its own capability request or silently widen access.
+
+### 5. Stable machine interface for external harnesses, Issue #20
 
 Expose the smallest versioned machine-readable surface required for external harnesses to use Dungeon as an isolated environment provider.
 
 Prefer the native CLI with stable JSON/JSONL before adding a daemon, SDK, or plugin ABI.
 
-The interface should cover lifecycle, status, command execution, streaming, PTY behavior, approved transfer, safe return of changes, identity, and capability/degraded-state reporting.
+The interface should cover lifecycle, status, command execution, streaming, PTY behavior, approved transfer, safe return of changes, identity, selected execution location, and capability/degraded-state reporting.
+
+Direct agent entrypoints such as `dungeon run opencode|claude|codex` should keep using the same environment selection and automatically target the configured local or remote execution location. External harnesses should consume the same machine interface rather than learning OpenShell or remote-host details.
 
 It should not contain prompts, model selection, issue queues, iteration loops, parallel-agent scheduling, branch strategy, or review orchestration.
 
-### 5. Sandcastle integration, Issue #21
+### 6. Remote host execution, Issue #32
+
+Allow a user to select a remote Linux host, VM, or server by hostname/IP and use it as the execution location through an authenticated SSH bootstrap/management path.
+
+The remote path should preserve the same Dungeon/OpenShell architecture rather than becoming a second backend. Dungeon may verify prerequisites and automate safe unprivileged setup, but must not silently accept host keys, persist raw passwords/private keys, invoke hidden sudo, overwrite unrelated runtime state, or turn into a generic remote administration tool.
+
+Issue #24 live workspace mounts are local-host semantics. The first remote path should therefore use the explicit project copy/transfer and reviewed return-of-changes contract rather than implying SSHFS, network filesystems, or a new synchronization engine.
+
+After CLI-over-SSH is validated, evaluate a small installable remote service only if it materially improves repeated remote lifecycle, streaming, PTY, or connection reliability. Any service must remain authenticated, non-public by default, removable, and subordinate to the same authoritative configuration and policy path.
+
+### 7. Sandcastle integration, Issue #21
 
 Use Sandcastle as the first concrete harness consumer.
 
@@ -156,7 +178,9 @@ Dungeon must remain useful without Telltale, and Telltale must not become an iso
 Later work may include:
 
 - organization policy ceilings;
-- mature remote/desktop workflows;
+- mature remote/desktop workflows beyond the bounded SSH-provisioned path;
+- an installable remote Dungeon service only if CLI-over-SSH proves insufficient;
+- richer remote workspace/synchronization semantics only after the copy/transfer path is validated;
 - published reviewed images with provenance;
 - npm registry publication after scope/provenance setup;
 - another isolation backend only after a concrete validated need exists.
