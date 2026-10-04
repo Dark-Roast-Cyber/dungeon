@@ -345,6 +345,43 @@ special entries are refused. It applies regular contents, directories, and the
 Unix executable bit only. On failed apply, affected host files have private
 adjacent backups for manual recovery.
 
+Copy upload/export hold nonwaiting native locks across the whole transfer,
+review/approval, apply and baseline update. A busy operation refuses promptly;
+retry explicitly. One `transfer.lock` lives beside the authoritative config;
+the exact canonical project key also selects a lock under
+`${XDG_CONFIG_HOME:-$HOME/.config}/dungeon/transfer-locks/`, not a project binding.
+The latter serializes different explicit config paths for the same project
+under the same HOME/XDG authority without creating an incomplete binding.
+These paths stay outside the project; enclosing private directories must be
+user-owned 0700 and lock/config/policy files user-owned regular 0600 files with
+one link. Unsafe existing state refuses without adoption or permission repair.
+Configuration and policy are reread through held private directories after
+locking; changed authority requires an explicit retry. Initial `up` acquires
+the transfer guard only through its existing upload call. Import stage/create
+locks remain separate; this is not general lifecycle coordination.
+
+Prepared `dungeon-recovery-*` material is kept before the first host mutation,
+including on unwind or INT/TERM. Both upload and export refuse matching
+unfinished recovery. `RECOVER.txt` starts with a strict ASCII JSON project
+identity, followed by escaped change names and manual instructions. Unknown,
+legacy, missing or unsafe markers conservatively block other projects sharing
+the parent too. Inspect the host, `old/`, remaining `new/` files and baseline;
+restore deliberately and remove the reviewed recovery directory before retry.
+Scanning permits at most 4096 parent entries and bounded 1 MiB private markers;
+symlinks, hardlinks and special markers are never followed/read as authority.
+
+The baseline stays old during host apply, but its replacement starts after all
+host changes finish and can precede the success message. A failed parent sync
+reports persistence unconfirmed, not an unchanged baseline. Recovery is removed
+only after apply and baseline persistence succeed; cleanup failure explicitly
+reports committed host/baseline state with manual cleanup required. There is no
+atomic transaction, automatic rollback or power-loss guarantee. Locks do not
+cover nested overlapping projects, different HOME/XDG authorities, project
+moves, external host editors, guest writers or separate native OpenShell
+transfers (including a transport surviving an interrupted uploader). Copy transfer
+requires Unix private-file protections; native Windows refuses it. Linux process/filesystem
+tests do not establish macOS durability or other-platform runtime support.
+
 `live` is an explicit pre-validation candidate. First `up` derives one
 Podman bind request from the canonical configured project to
 `/sandbox/project`, read-write, with the OpenShell 0.0.116

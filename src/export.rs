@@ -8,6 +8,195 @@ use std::fs::{self, File};
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
+pub(crate) struct TransferGuard {
+    locks: Vec<File>,
+    _directories: Vec<File>,
+}
+
+impl Drop for TransferGuard {
+    fn drop(&mut self) {
+        // fork may retain the open file description even with CLOEXEC.
+        for file in &self.locks {
+            let _ = file.unlock();
+        }
+    }
+}
+
+impl TransferGuard {
+    pub(crate) fn acquire(config: &Config) -> Result<Self> {
+        let path = crate::binding::transfer_lock_path(&config.values.project)?;
+        #[cfg(test)]
+        let path = config
+            .values
+            .project
+            .parent()
+            .unwrap()
+            .join("transfer-locks")
+            .join(path.file_name().unwrap());
+        Self::acquire_at(config, &path)
+    }
+
+    #[cfg(not(unix))]
+    fn acquire_at(_: &Config, _: &Path) -> Result<Self> {
+        Err(Error::new(
+            "private copy-transfer locking requires a Unix host",
+        ))
+    }
+
+    #[cfg(unix)]
+    fn acquire_at(config: &Config, project_lock: &Path) -> Result<Self> {
+        use private::*;
+        let parent = directory(config.path.parent().expect("config parent"), false)?;
+        let mut guard = Self {
+            locks: vec![],
+            _directories: vec![parent],
+        };
+        guard
+            .locks
+            .push(lock(&guard._directories[0], "transfer.lock")?);
+        if project_lock.starts_with(&config.values.project) {
+            return Err(Error::new("transfer locks must stay outside the project"));
+        }
+        let authority = directory(project_lock.parent().unwrap().parent().unwrap(), true)?;
+        let root = directory(project_lock.parent().expect("lock parent"), true)?;
+        guard
+            .locks
+            .push(lock(&root, project_lock.file_name().unwrap())?);
+        guard._directories.push(root);
+        guard._directories.push(authority);
+        let current = directory(config.path.parent().unwrap(), false)?;
+        use std::os::unix::fs::MetadataExt;
+        let a = current.metadata()?;
+        let b = guard._directories[0].metadata()?;
+        if a.dev() != b.dev() || a.ino() != b.ino() {
+            return Err(Error::new(
+                "configuration directory changed during transfer",
+            ));
+        }
+        let current = directory(project_lock.parent().unwrap(), false)?;
+        let a = current.metadata()?;
+        let b = guard._directories[1].metadata()?;
+        if a.dev() != b.dev() || a.ino() != b.ino() {
+            return Err(Error::new("project lock directory changed during transfer"));
+        }
+        let dir = &guard._directories[0];
+        let mut values: crate::config::ConfigDoc =
+            serde_json::from_value(json_file(dir, config.path.file_name().unwrap())?)
+                .map_err(|_| Error::new("invalid private transfer configuration"))?;
+        values.project = crate::config::canonical_project(&values.project)?;
+        let policy = json_file(dir, "policy.json")?;
+        if serde_json::to_value(values)? != serde_json::to_value(&config.values)?
+            || policy != config.policy
+        {
+            return Err(Error::new(
+                "policy/configuration changed before transfer; retry explicitly",
+            ));
+        }
+        check_recovery(&config.values.project)?;
+        Ok(guard)
+    }
+}
+
+#[cfg(unix)]
+mod private {
+    use super::*;
+    use std::ffi::{CString, OsStr};
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
+
+    fn invalid() -> Error {
+        Error::new("unsafe private transfer state; inspect manually")
+    }
+
+    pub(super) fn open(dir: &File, name: impl AsRef<OsStr>, flags: i32, mode: u32) -> Result<File> {
+        let name = CString::new(name.as_ref().as_bytes()).map_err(|_| invalid())?;
+        let fd = unsafe {
+            libc::openat(
+                dir.as_raw_fd(),
+                name.as_ptr(),
+                flags | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+                mode,
+            )
+        };
+        if fd < 0 {
+            return Err(invalid());
+        }
+        Ok(unsafe { File::from_raw_fd(fd) })
+    }
+
+    pub(super) fn metadata(file: &File, dir: bool) -> Result<()> {
+        let m = file.metadata()?;
+        if m.uid() != unsafe { libc::geteuid() }
+            || m.mode() & 0o7777 != if dir { 0o700 } else { 0o600 }
+            || if dir {
+                !m.is_dir()
+            } else {
+                !m.is_file() || m.nlink() != 1
+            }
+        {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+
+    pub(super) fn directory(path: &Path, create: bool) -> Result<File> {
+        if !path.is_absolute() {
+            return Err(invalid());
+        }
+        let mut dir = File::open("/")?;
+        for part in path.components() {
+            let Component::Normal(part) = part else {
+                if part == Component::RootDir {
+                    continue;
+                }
+                return Err(invalid());
+            };
+            if create {
+                let name = CString::new(part.as_bytes()).map_err(|_| invalid())?;
+                if unsafe { libc::mkdirat(dir.as_raw_fd(), name.as_ptr(), 0o700) } != 0
+                    && io::Error::last_os_error().kind() != io::ErrorKind::AlreadyExists
+                {
+                    return Err(invalid());
+                }
+            }
+            dir = open(&dir, part, libc::O_RDONLY | libc::O_DIRECTORY, 0)?;
+            let m = dir.metadata()?;
+            if (m.uid() != 0 && m.uid() != unsafe { libc::geteuid() })
+                || (m.mode() & 0o022 != 0 && !(m.uid() == 0 && m.mode() & 0o1000 != 0))
+            {
+                return Err(invalid());
+            }
+        }
+        metadata(&dir, true)?;
+        Ok(dir)
+    }
+
+    pub(super) fn lock(dir: &File, name: impl AsRef<OsStr>) -> Result<File> {
+        let file = open(dir, name, libc::O_RDWR | libc::O_CREAT, 0o600)?;
+        metadata(&file, false)?;
+        file.try_lock().map_err(|_| {
+            Error::new("another upload/export owns the transfer lock; retry explicitly")
+        })?;
+        Ok(file)
+    }
+
+    pub(super) fn bytes(dir: &File, name: impl AsRef<OsStr>, limit: u64) -> Result<Vec<u8>> {
+        let file = open(dir, name, libc::O_RDONLY, 0)?;
+        metadata(&file, false)?;
+        let mut bytes = vec![];
+        file.take(limit + 1).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > limit {
+            return Err(invalid());
+        }
+        Ok(bytes)
+    }
+
+    pub(super) fn json_file(dir: &File, name: impl AsRef<OsStr>) -> Result<serde_json::Value> {
+        let bytes = bytes(dir, name, 1024 * 1024)?;
+        read_json_text(std::str::from_utf8(&bytes).map_err(|_| invalid())?).map_err(|_| invalid())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub(crate) enum Entry {
@@ -167,6 +356,14 @@ pub(crate) fn load_baseline(config: &Config) -> Result<Tree> {
 }
 
 pub(crate) fn save_baseline(config: &Config, tree: &Tree) -> Result<()> {
+    save_baseline_with_sync(config, tree, |parent| Ok(File::open(parent)?.sync_all()?))
+}
+
+fn save_baseline_with_sync(
+    config: &Config,
+    tree: &Tree,
+    sync_parent: impl FnOnce(&Path) -> Result<()>,
+) -> Result<()> {
     verify_tree(tree)?;
     let state: crate::config::RuntimeState =
         serde_json::from_value(read_json(&config.state_path())?)?;
@@ -188,7 +385,7 @@ pub(crate) fn save_baseline(config: &Config, tree: &Tree) -> Result<()> {
     temp.write_all(b"\n")?;
     temp.as_file().sync_all()?;
     temp.persist(&path).map_err(|e| Error::new(e.to_string()))?;
-    File::open(parent)?.sync_all()?;
+    sync_parent(parent).map_err(|_| Error::new("baseline replaced but persistence unconfirmed; inspect baseline and recovery before retry"))?;
     Ok(())
 }
 
@@ -277,27 +474,65 @@ fn ordinary_parents(root: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn check_recovery(root: &Path) -> Result<()> {
-    for entry in fs::read_dir(root.parent().expect("project parent"))? {
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecoveryIdentity {
+    schema: u64,
+    project: PathBuf,
+}
+
+fn recovery_refusal() -> Error {
+    Error::new(
+        "unfinished export recovery or unrecognized candidate beside project; inspect and restore manually before retrying, then remove the reviewed recovery directory",
+    )
+}
+
+pub(crate) fn check_recovery(root: &Path) -> Result<()> {
+    for (count, entry) in fs::read_dir(root.parent().expect("project parent"))?.enumerate() {
+        if count >= 4096 {
+            return Err(Error::new(
+                "project parent exceeds recovery scan limit; inspect manually",
+            ));
+        }
         let entry = entry?;
         if !entry
             .file_name()
             .to_string_lossy()
             .starts_with("dungeon-recovery-")
-            || !entry.file_type()?.is_dir()
         {
             continue;
         }
-        let marker = entry.path().join("RECOVER.txt");
-        if marker.is_file()
-            && fs::read_to_string(&marker)?.lines().next()
-                == Some(format!("Dungeon export recovery for {}", root.display()).as_str())
+        #[cfg(unix)]
         {
-            return Err(Error::new(format!(
-                "unfinished export recovery at {}; inspect and restore before retrying, then remove the recovery directory",
-                entry.path().display()
-            )));
+            let dir = private::directory(&entry.path(), false).map_err(|_| recovery_refusal())?;
+            let bytes =
+                private::bytes(&dir, "RECOVER.txt", 1024 * 1024).map_err(|_| recovery_refusal())?;
+            let first = bytes
+                .split(|b| *b == b'\n')
+                .next()
+                .ok_or_else(recovery_refusal)?;
+            if !first.is_ascii() {
+                return Err(recovery_refusal());
+            }
+            let value = read_json_text(std::str::from_utf8(first).map_err(|_| recovery_refusal())?)
+                .map_err(|_| recovery_refusal())?;
+            let identity: RecoveryIdentity =
+                serde_json::from_value(value).map_err(|_| recovery_refusal())?;
+            if identity.schema != 1
+                || !identity.project.is_absolute()
+                || identity
+                    .project
+                    .components()
+                    .any(|c| matches!(c, Component::CurDir | Component::ParentDir))
+            {
+                return Err(recovery_refusal());
+            }
+            if identity.project == root {
+                return Err(recovery_refusal());
+            }
         }
+        #[cfg(not(unix))]
+        return Err(recovery_refusal());
     }
     Ok(())
 }
@@ -394,9 +629,14 @@ fn review_and_apply_with_hooks(
     after_review()?;
     same_host(host_root, &host)?;
     // Recovery lives beside the project (same filesystem); all replacements are prepared before mutation.
-    let recovery = tempfile::Builder::new()
-        .prefix("dungeon-recovery-")
-        .tempdir_in(host_root.parent().expect("project parent"))?;
+    let mut builder = tempfile::Builder::new();
+    builder.prefix("dungeon-recovery-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(fs::Permissions::from_mode(0o700));
+    }
+    let recovery = builder.tempdir_in(host_root.parent().expect("project parent"))?;
     let old = recovery.path().join("old");
     let new = recovery.path().join("new");
     fs::create_dir(&old)?;
@@ -470,29 +710,51 @@ fn review_and_apply_with_hooks(
         return Err(Error::new("staged files changed; host unchanged"));
     }
     same_host(host_root, &host)?;
-    let mut instructions = File::create(recovery.path().join("RECOVER.txt"))?;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut instructions = options.open(recovery.path().join("RECOVER.txt"))?;
+    let identity = crate::config::review_json(&serde_json::to_value(RecoveryIdentity {
+        schema: 1,
+        project: host_root.clone(),
+    })?)?;
+    // The first line is an ASCII JSON identity; the rest is operator guidance.
     writeln!(
         instructions,
-        "Dungeon export recovery for {}",
-        host_root.display()
+        "{}",
+        identity.lines().map(str::trim).collect::<String>()
     )?;
     writeln!(
         instructions,
-        "If export was interrupted, compare the host against old/ (original changed files) and new/ (not-yet-installed guest files). Restore deliberately before retrying; the upload baseline has not advanced until export reports success."
+        "If export was interrupted, compare the host against old/ (original changed files) and new/ (not-yet-installed guest files). Restore deliberately before retrying. Baseline replacement starts only after all host changes finish; interruption or persistence failure in that phase may leave the new baseline. Inspect it too. No automatic rollback or power-loss atomicity is promised."
     )?;
     for (name, change) in &changes {
         writeln!(instructions, "{change:?} {}", name.escape_debug())?;
     }
     instructions.sync_all()?;
     for dir in [&old, &new] {
-        for (name, entry) in snapshot(dir)? {
+        let tree = snapshot(dir)?;
+        for (name, entry) in &tree {
             if matches!(entry, Entry::File { .. }) {
-                File::open(dir.join(relative(&name)?))?.sync_all()?;
+                File::open(dir.join(relative(name)?))?.sync_all()?;
             }
         }
+        for (name, entry) in tree.iter().rev() {
+            if matches!(entry, Entry::Dir) {
+                File::open(dir.join(relative(name)?))?.sync_all()?;
+            }
+        }
+        File::open(dir)?.sync_all()?;
     }
     File::open(recovery.path())?.sync_all()?;
+    File::open(host_root.parent().expect("project parent"))?.sync_all()?;
     same_host(host_root, &host)?;
+    // From this point even unwinding must not discard manual recovery evidence.
+    let recovery = recovery.keep();
     // Files go before directory removal; additions go after parent directory creation.
     files.sort_by(
         |(a, ca), (b, cb)| match (ca == &&Change::Delete, cb == &&Change::Delete) {
@@ -526,20 +788,19 @@ fn review_and_apply_with_hooks(
         Ok(())
     })();
     if let Err(err) = result {
-        let path = recovery.keep();
         return Err(Error::new(format!(
             "apply incomplete: {err}; baseline unchanged; recovery copies at {} (old/ and new/); inspect and restore manually before retry",
-            path.display()
+            recovery.display().to_string().escape_debug()
         )));
     }
     if let Err(err) = save_baseline(config, &guest) {
-        let path = recovery.keep();
         return Err(Error::new(format!(
-            "host applied but baseline not updated: {err}; recovery at {}; inspect before retry",
-            path.display()
+            "host applied; baseline commit/persistence unconfirmed: {err}; recovery at {}; inspect host and baseline before retry",
+            recovery.display().to_string().escape_debug()
         )));
     }
     // Changes are complete and the baseline is durable; no recovery copy is needed.
+    fs::remove_dir_all(&recovery).map_err(|_| Error::new("host applied and baseline committed, but recovery cleanup failed; inspect remaining recovery directory manually"))?;
     println!("Export applied; upload baseline refreshed.");
     Ok(())
 }
@@ -680,12 +941,23 @@ mod tests {
 
     fn fixture() -> (tempfile::TempDir, Config, PathBuf) {
         let root = tempfile::tempdir().unwrap();
-        let project = root.path().join("project");
-        let guest = root.path().join("guest");
-        let config_dir = root.path().join("private");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let canonical = root.path().canonicalize().unwrap();
+        let project = canonical.join("project");
+        let guest = canonical.join("guest");
+        let config_dir = canonical.join("private");
         fs::create_dir(&project).unwrap();
         fs::create_dir(&guest).unwrap();
         fs::create_dir(&config_dir).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o700)).unwrap();
+        }
         let config = Config {
             path: config_dir.join("dungeon.json"),
             policy_path: config_dir.join("policy.json"),
@@ -714,6 +986,8 @@ mod tests {
             },
         )
         .unwrap();
+        write_new(&config.path, &config.values).unwrap();
+        write_new(&config.policy_path, &config.policy).unwrap();
         (root, config, guest)
     }
 
@@ -871,5 +1145,355 @@ mod tests {
         assert!(load_baseline(&config).is_ok());
         fs::write(config.state_path(), "{}").unwrap();
         assert!(load_baseline(&config).is_err());
+    }
+
+    #[test]
+    fn baseline_sync_failure_reports_replacement_not_unchanged() {
+        let (_root, config, _) = fixture();
+        let error = save_baseline_with_sync(&config, &Tree::new(), |_| {
+            Err(Error::new("injected sync failure"))
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("persistence unconfirmed"));
+        assert_eq!(load_baseline(&config).unwrap(), Tree::new());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recovery_identity_encodes_control_and_unicode_project_names() {
+        let (_root, mut config, guest) = fixture();
+        let renamed = config.values.project.with_file_name("project\n\u{1b}☃");
+        fs::rename(&config.values.project, &renamed).unwrap();
+        config.values.project = renamed;
+        fs::write(config.values.project.join("one"), "old").unwrap();
+        fs::write(guest.join("one"), "new").unwrap();
+        fs::write(guest.join("two"), "addition").unwrap();
+        let base = snapshot(&config.values.project).unwrap();
+        save_baseline(&config, &base).unwrap();
+        let error = review_and_apply_with_hooks(
+            &config,
+            &base,
+            &guest,
+            true,
+            || Ok(()),
+            || Err(Error::new("injected")),
+        )
+        .unwrap_err();
+        assert!(!error.to_string().contains('\u{1b}'));
+        assert_retained_recovery(&config);
+        let recovery = fs::read_dir(config.values.project.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("dungeon-recovery-")
+            })
+            .unwrap();
+        let text = fs::read_to_string(recovery.join("RECOVER.txt")).unwrap();
+        let first = text.lines().next().unwrap();
+        assert!(first.is_ascii());
+        let identity: RecoveryIdentity =
+            serde_json::from_value(read_json_text(first).unwrap()).unwrap();
+        assert_eq!(identity.project, config.values.project);
+    }
+
+    #[test]
+    fn panic_after_mutation_retains_recovery_and_old_baseline() {
+        let (_root, config, guest) = fixture();
+        fs::write(config.values.project.join("one"), "old").unwrap();
+        fs::write(guest.join("one"), "new").unwrap();
+        fs::write(guest.join("two"), "addition").unwrap();
+        let base = snapshot(&config.values.project).unwrap();
+        save_baseline(&config, &base).unwrap();
+        let result = std::panic::catch_unwind(|| {
+            review_and_apply_with_hooks(
+                &config,
+                &base,
+                &guest,
+                true,
+                || Ok(()),
+                || panic!("injected unwind"),
+            )
+        });
+        assert!(result.is_err());
+        assert_eq!(load_baseline(&config).unwrap(), base);
+        assert_retained_recovery(&config);
+    }
+
+    fn assert_retained_recovery(config: &Config) {
+        let recovery = fs::read_dir(config.values.project.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("dungeon-recovery-")
+            })
+            .unwrap();
+        assert_eq!(fs::read(recovery.join("old/one")).unwrap(), b"old");
+        assert_eq!(fs::read(recovery.join("new/two")).unwrap(), b"addition");
+        assert!(recovery.join("RECOVER.txt").is_file());
+        assert!(check_recovery(&config.values.project).is_err());
+    }
+
+    #[cfg(unix)]
+    fn second_config(config: &Config) -> Config {
+        let mut second = config.clone();
+        let dir = config
+            .path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("second-private");
+        crate::config::create_private_dir(&dir).unwrap();
+        second.path = dir.join("dungeon.json");
+        second.policy_path = dir.join("policy.json");
+        write_new(&second.path, &second.values).unwrap();
+        write_new(&second.policy_path, &second.policy).unwrap();
+        second
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn locks_refuse_same_environment_and_cross_config_project_then_release() {
+        let (root, config, _) = fixture();
+        let second = second_config(&config);
+        let guard = TransferGuard::acquire(&config).unwrap();
+        assert!(TransferGuard::acquire(&config).is_err());
+        assert!(TransferGuard::acquire(&second).is_err());
+        let mut child = process_child(&second, "busy");
+        assert!(child.wait().unwrap().success());
+        drop(guard);
+        TransferGuard::acquire(&second).unwrap();
+        assert!(!root.path().join("projects").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn authority_drift_and_unsafe_lock_files_refuse() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let (_root, config, _) = fixture();
+        let lock = config.path.parent().unwrap().join("transfer.lock");
+        let target = config.path.parent().unwrap().join("target");
+        fs::write(&target, b"synthetic secret").unwrap();
+        symlink(&target, &lock).unwrap();
+        assert!(TransferGuard::acquire(&config).is_err());
+        fs::remove_file(&lock).unwrap();
+        fs::hard_link(&target, &lock).unwrap();
+        assert!(TransferGuard::acquire(&config).is_err());
+        fs::remove_file(&lock).unwrap();
+        fs::write(&lock, "").unwrap();
+        fs::set_permissions(&lock, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(TransferGuard::acquire(&config).is_err());
+        fs::remove_file(&lock).unwrap();
+        let fifo = std::ffi::CString::new(lock.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        assert!(TransferGuard::acquire(&config).is_err());
+        fs::remove_file(&lock).unwrap();
+        fs::write(&config.policy_path, "{\"secret\":\"do not print\"}").unwrap();
+        fs::set_permissions(&config.policy_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let err = TransferGuard::acquire(&config).err().unwrap();
+        assert!(err.to_string().contains("changed"));
+        assert!(!err.to_string().contains("do not print"));
+        assert_eq!(fs::read(target).unwrap(), b"synthetic secret");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hostile_and_unknown_recovery_candidates_are_bounded_and_refused() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let (root, config, _) = fixture();
+        let recovery = root.path().join("dungeon-recovery-fixture");
+        crate::config::create_private_dir(&recovery).unwrap();
+        let marker = recovery.join("RECOVER.txt");
+        for contents in [
+            "legacy recovery",
+            "\u{1b}[31m",
+            "{\"schema\":1,\"schema\":1,\"project\":\"/other\"}",
+            "{\"schema\":99,\"project\":\"/other\"}",
+        ] {
+            fs::write(&marker, contents).unwrap();
+            fs::set_permissions(&marker, fs::Permissions::from_mode(0o600)).unwrap();
+            let error = check_recovery(&config.values.project)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("inspect"));
+            assert!(!error.contains('\u{1b}'));
+        }
+        fs::write(&marker, vec![b'x'; 1024 * 1024 + 1]).unwrap();
+        assert!(check_recovery(&config.values.project).is_err());
+        fs::remove_file(&marker).unwrap();
+        let fifo = std::ffi::CString::new(marker.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        assert!(check_recovery(&config.values.project).is_err());
+        fs::remove_file(&marker).unwrap();
+        let secret = root.path().join("synthetic-secret");
+        fs::write(&secret, "never follow").unwrap();
+        symlink(&secret, &marker).unwrap();
+        assert!(check_recovery(&config.values.project).is_err());
+        fs::remove_file(&marker).unwrap();
+        fs::hard_link(&secret, &marker).unwrap();
+        assert!(check_recovery(&config.values.project).is_err());
+        fs::remove_file(&marker).unwrap();
+        write_new(
+            &marker,
+            &RecoveryIdentity {
+                schema: 1,
+                project: PathBuf::from("/different-project"),
+            },
+        )
+        .unwrap();
+        // Identity is strictly on the first line, unlike pretty JSON.
+        fs::write(
+            &marker,
+            "{\"schema\":1,\"project\":\"/different-project\"}\n",
+        )
+        .unwrap();
+        assert!(check_recovery(&config.values.project).is_ok());
+        fs::set_permissions(&recovery, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(check_recovery(&config.values.project).is_err());
+        fs::remove_dir_all(&recovery).unwrap();
+        symlink(root.path().join("guest"), &recovery).unwrap();
+        assert!(check_recovery(&config.values.project).is_err());
+        fs::remove_file(&recovery).unwrap();
+        for i in 0..4096 {
+            File::create(root.path().join(format!("entry-{i}"))).unwrap();
+        }
+        assert!(
+            check_recovery(&config.values.project)
+                .unwrap_err()
+                .to_string()
+                .contains("scan limit")
+        );
+    }
+
+    #[cfg(unix)]
+    fn process_child(config: &Config, action: &str) -> std::process::Child {
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "export::tests::transfer_process_child",
+                "--nocapture",
+            ])
+            .env("DUNGEON_TRANSFER_TEST_CONFIG", &config.path)
+            .env("DUNGEON_TRANSFER_TEST_ACTION", action)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn transfer_process_child() {
+        let Some(path) = std::env::var_os("DUNGEON_TRANSFER_TEST_CONFIG") else {
+            return;
+        };
+        let mut config = crate::config::load_config(Path::new(&path)).unwrap();
+        config.fingerprint = "fingerprint".into();
+        if std::env::var("DUNGEON_TRANSFER_TEST_ACTION").unwrap() == "busy" {
+            assert!(
+                TransferGuard::acquire(&config)
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("transfer lock")
+            );
+            return;
+        }
+        let _guard = TransferGuard::acquire(&config).unwrap();
+        let base = load_baseline(&config).unwrap();
+        review_and_apply_with_hooks(
+            &config,
+            &base,
+            &config.values.project.parent().unwrap().join("guest"),
+            true,
+            || Ok(()),
+            || {
+                println!("TRANSFER_READY");
+                io::stdout().flush().unwrap();
+                let mut byte = [0];
+                io::stdin().read_exact(&mut byte).unwrap();
+                Ok(())
+            },
+        )
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_int_and_term_after_first_mutation_preserve_manual_recovery() {
+        use std::io::BufRead;
+        use std::os::unix::process::ExitStatusExt;
+        for signal in [libc::SIGINT, libc::SIGTERM] {
+            let (_root, config, guest) = fixture();
+            fs::write(config.values.project.join("one"), "old").unwrap();
+            fs::write(guest.join("one"), "new").unwrap();
+            fs::write(guest.join("two"), "addition").unwrap();
+            let base = snapshot(&config.values.project).unwrap();
+            save_baseline(&config, &base).unwrap();
+            let mut child = process_child(&config, "interrupt");
+            let stdout = child.stdout.take().unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let reader = std::thread::spawn(move || {
+                for line in io::BufReader::new(stdout).lines() {
+                    if line.unwrap() == "TRANSFER_READY" {
+                        let _ = tx.send(());
+                        break;
+                    }
+                }
+            });
+            let ready = rx.recv_timeout(std::time::Duration::from_secs(10));
+            if ready.is_err() {
+                let _ = child.kill();
+            } else {
+                assert_eq!(unsafe { libc::kill(child.id() as i32, signal) }, 0);
+            }
+            let status = child.wait().unwrap();
+            reader.join().unwrap();
+            ready.unwrap();
+            assert_eq!(status.signal(), Some(signal));
+            assert_eq!(fs::read(config.values.project.join("one")).unwrap(), b"new");
+            assert_eq!(load_baseline(&config).unwrap(), base);
+            assert_retained_recovery(&config);
+            assert!(TransferGuard::acquire(&config).is_err());
+            assert!(review_and_apply(&config, &base, &guest, true).is_err());
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn explicit_unlock_releases_transfer_locks_with_fork_inheritance() {
+        let (_root, config, _) = fixture();
+        let guard = TransferGuard::acquire(&config).unwrap();
+        let mut pipe = [0; 2];
+        assert_eq!(
+            unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC) },
+            0
+        );
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0);
+        if pid == 0 {
+            unsafe {
+                libc::close(pipe[1]);
+                let mut byte = 0u8;
+                libc::read(pipe[0], (&mut byte as *mut u8).cast(), 1);
+                libc::_exit(0);
+            }
+        }
+        unsafe {
+            libc::close(pipe[0]);
+        }
+        drop(guard);
+        let reacquired = TransferGuard::acquire(&config);
+        unsafe {
+            libc::close(pipe[1]);
+            libc::waitpid(pid, std::ptr::null_mut(), 0);
+        }
+        assert!(reacquired.is_ok());
     }
 }

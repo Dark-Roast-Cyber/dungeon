@@ -21,7 +21,7 @@ The earlier host 2.0.22/guest 2.0.14 evidence remains historical. A separate
 private extracted host 2.0.14/guest 2.0.14 pair now passed the Issue #29 native
 AI/session/lifecycle gate; the installed host client was unchanged.
 Native TUI attachment passed previously, but interactive TUI message submission remains unverified.
-Neovim imports have an explicit staged snapshot candidate with a contents-only read-only bind contract; native copy/live implementation gates passed on the recorded disposable VM. Independent rereview remains required. Telltale is not integrated.
+Neovim imports have a delivered staged snapshot implementation with a contents-only read-only bind contract (PR #34, Issue #5 closed); native copy/live gates passed on the recorded disposable VM. Telltale is not integrated.
 
 ## Tracking
 
@@ -136,11 +136,11 @@ accepted rereview does not establish new runtime/editor containment claims.
 
 ## Remaining execution sequence
 
-1. SSH cleanup first: `ssh --owned` implementation and disposable native PTY gates
-   are recorded below; independent review precedes Git delivery. Generic SSH
+1. SSH cleanup: `ssh --owned` implementation, accepted review and disposable native PTY gates
+   are delivered on main. Generic SSH
    disconnect remains degraded and VS Code prerequisites remain unavailable.
-2. Preserve ancestry when integrating PR #26, then PR #27. Close only #28/#29 when
-   their recorded acceptance and delivery criteria are met; partial SSH evidence
+2. PR #26 and PR #27 are merged with ancestry preserved; #28/#29 are closed after
+   their recorded acceptance and delivery gates. Partial SSH evidence
    does not close the broader #30 integration gate.
 3. #24: experimental fresh `setup --enable-live` and read-only `--dry-run`
    are implemented with exact copy/live verification and no downgrade. Copy-to-live
@@ -152,11 +152,24 @@ accepted rereview does not establish new runtime/editor containment claims.
    checks. Evidence: `/tmp/opencode/dungeon-setup24-vm-Mtue76/evidence`;
    [exact gate](docs/validation.md#issue-24-experimental-fresh-setup).
    Native JSON failures now return fixed context, with duplicate secret-key/ANSI
-   leakage regression coverage. Independent rereview and delivery remain separate. Retain
+   leakage regression coverage. Accepted rereview is delivered in merged PR #33. Retain
    generated/default transfer `copy`; no promotion decision or full #24 closure.
-4. #5: staged Neovim snapshots use read-only binds, not uploaded modes. Actual stage/create in copy/live modes passed native content protection, drift/resume, private state, exact mounts and artifact-independent owned cleanup. Ancestor rename/replacement is an observed limitation; accepted scope is immutable mounted contents, not guest pathname or subsequent execution identity. See the [record](docs/validation.md#issue-5-staged-contents-only-snapshots-2026-10-04-utc). Final lock-release correction has deterministic fork/default-parallel coverage; the native matrix predates only that correction. Independent rereview/delivery remain separate.
+4. #5: staged Neovim snapshots use read-only binds, not uploaded modes. Actual stage/create in copy/live modes passed native content protection, drift/resume, private state, exact mounts and artifact-independent owned cleanup. Ancestor rename/replacement is an observed limitation; accepted scope is immutable mounted contents, not guest pathname or subsequent execution identity. See the [record](docs/validation.md#issue-5-staged-contents-only-snapshots-2026-10-04-utc). Final lock-release correction has deterministic fork/default-parallel coverage; the native matrix predates only that correction. Accepted rereview is delivered in merged PR #34; #5 is closed.
 5. #20/#21 follow separately; #16 minimal operation locking is an independent
    correctness slice, not a new orchestration framework.
+
+### Issue #16 copy-transfer correctness candidate
+
+Environment and canonical-project native locks cover upload/export end to end,
+including different config paths under one HOME/XDG authority. Project locks
+have separate private storage, never synthetic project bindings. Prepared
+export recovery survives panic/signals; unfinished recovery blocks upload as
+well as export. Unknown/legacy candidates require conservative manual inspection.
+Baseline replacement/persistence failure is explicitly uncertain after host
+apply, never described as an unchanged baseline. This is not general lifecycle
+locking, an atomic transaction or power-loss recovery. Nested overlapping
+projects, different authorities, project moves and external writers remain
+excluded. Independent review/delivery remain pending for this candidate.
 
 Owned interactive SSH now has live implementation evidence for native editor
 input/resize/save/test, host signals, terminal/SSH loss, STOP/CONT, isolation and
@@ -168,7 +181,7 @@ This does not promote live mode, install clients or authorize publication.
 
 Automate serve/forward/attach only after the relevant lifecycle/version gates
 pass. Keep the native foreground transport; no new proxy or compatibility layer.
-Live-mode promotion/defaults, reviewed imports, and Telltale are separate decisions.
+Live-mode promotion/defaults, active-import refresh, and Telltale are separate decisions.
 Release/tagging and npm/image publication require separate explicit
 authorization. Existing implementation/delivery authorization does not promote
 live mode to the default or resolve these validation gates.
