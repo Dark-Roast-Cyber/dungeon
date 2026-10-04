@@ -89,6 +89,65 @@ Dungeon keeps one private directory per environment and never discovers configur
 
 `dungeon setup` needs no project configuration. On Linux it uses gateway `dungeon-local`, workspace `default`, port 17670, and rootless Podman. The gateway container's config, generated mTLS/JWT keys, database, and private OpenShell driver data live in `${XDG_STATE_HOME:-$HOME/.local/state}/dungeon/local-setup` (private host state). The `driver-data` directory is mounted at the identical absolute path inside the trusted gateway and supplied as `XDG_DATA_HOME`; OpenShell 0.0.116 may later give a supervisor binary from that directory back to host Podman as a bind source when sandbox user namespaces require extraction. This path is gateway-only and is never mounted into the sandbox as Dungeon project authority. OpenShell owns its gateway registration and mTLS client material in `${XDG_CONFIG_HOME:-$HOME/.config}/openshell/gateways/dungeon-local`; Podman owns the `dungeon-local` network and `openshell-gateway-dungeon-local` container. Neither stores Dungeon project policy. A conflicting or partial installation requires explicit operator inspection; setup does not overwrite it. The initial `dungeon init` prompt defaults to `dungeon-local`, but use `--image localhost/dungeon-agent:0.0.3-dev` only after building the reviewed local image; the community base remains the CLI image default until a separate publication decision.
 
+### Local setup modes
+
+| State | `setup` | `setup --enable-live` |
+| --- | --- | --- |
+| Fresh, prerequisites established | Create copy-capable gateway | Create experimental live-capable gateway |
+| Exact running copy gateway | Verify unchanged | Refuse; safe migration is blocked |
+| Exact running live gateway | Verify unchanged, no downgrade | Verify unchanged |
+| Stopped, unknown, foreign, partial or legacy layout | Refuse, no start/repair/adoption | Refuse, no start/repair/adoption |
+
+Add `--dry-run` for bounded read-only preflight and the capability diff. Missing
+prerequisites block; no directories, certificates, registrations, network,
+container or setup lock are created. Native inventory can use existing engine
+locks/caches. Missing/empty/custom default storage is not queried or initialized.
+Setup never pulls images or enables the API service.
+
+Live adds these **Podman driver** settings, using the pinned upstream key
+`userns`, not `userns_mode`:
+
+```toml
+enable_bind_mounts = true
+userns = "keep-id:uid=998,gid=998"
+```
+
+Gateway/certificate generation retains plain `keep-id`; sandbox mapping is a
+separate setting. This enables a trusted driver ceiling only. A project still
+needs explicit `project_transfer: live` in private configuration. Setup creates
+no project mount, changes no policy and converts no binding. Generated/default
+transfer remains copy.
+
+Setup recognizes only its exact generated copy/live configuration and pinned
+image, effective environment (including image defaults), gateway user/mappings,
+command, security settings, network/loopback bindings and complete mount set
+(source, destination and read mode). Extra/duplicate assignments or mounts,
+partial bind/mapping settings and legacy non-identity driver-data are refused.
+Local paths must be normalized, symlink-free and outside projects. Private
+directory descriptors and bounded nonblocking regular-file reads refuse FIFO,
+symlink, hardlink and unsafe-permission configuration. Native public certificates
+may be 0644 inside private directories; keys and copied client material remain
+private. Existing state is never recursively chmodded/chowned. Raw query output,
+environment values and stderr are not printed.
+
+Fresh creators serialize with a private `dungeon/setup.lock` under the state
+root, recheck resource absence and create files exclusively. Native mutations
+have bounded deadlines and are not blindly retried. Failure or interrupt may
+leave partial new state requiring inspection; no automatic destructive rollback
+or partial-state adoption is provided.
+
+Copy-to-live migration needs separately proven maintenance/concurrency and
+interruption recovery preserving registration, TLS, database, driver data,
+sandbox IDs and volumes. A Dungeon lock cannot exclude other OpenShell clients.
+This slice does not enumerate/drain workloads or stop/restart/remove an existing
+gateway. Do not remove existing state merely to make `--enable-live` succeed.
+
+The fresh plain/flagged CLI and verification paths have synthetic coverage and
+one separate disposable Fedora CoreOS 44/Podman 5.8.4 native record, including
+gateway health, native certificate/database access and UID 998 workspace writes.
+See [the exact setup gate](validation.md#issue-24-experimental-fresh-setup).
+This is not migration, live-default promotion or broader platform attestation.
+
 `dungeon.json` schema 2:
 
 ```json

@@ -6,6 +6,28 @@ Use synthetic project content and dedicated test credentials. Do not commit raw 
 
 ## 1. Freeze the test inputs
 
+### Experimental setup CLI gate
+
+The `setup --enable-live` path has one [recorded disposable VM gate](validation.md#issue-24-experimental-fresh-setup). For a new validation record, test the exact built
+CLI on a disposable Linux VM/runner with its own normal user, rootless Podman
+store/API socket, HOME/XDG and loopback namespace. Do not alter an existing
+host `dungeon-local`, registration, network or API service to make room. Private
+storage alone is insufficient: setup fixes the gateway name, port and
+`/run/user/<uid>/podman/podman.sock`. Modified binaries, socket-rewriting wrappers
+and manually provisioned gateways are not proof of this CLI contract.
+
+With explicitly prepared prerequisites/pinned image: verify dry-run creates no
+state; fresh copy setup and repetition; fresh flagged live setup, flagged/plain
+repetition without downgrade; native health, certificate/database/identity-mounted
+driver-data access; guest UID/GID 998 writes with unchanged host ownership/modes,
+bidirectional visibility and SELinux enforcement; bounded denials and copy
+regression. Gateway/certificate generation must retain plain `keep-id`; only
+the Podman driver gets `userns = "keep-id:uid=998,gid=998"`. In the copy case,
+flagged setup must refuse migration without resource changes. No actual migration
+test is authorized by this fresh/verification slice. Record missing isolated
+runtime prerequisites as NOT TESTABLE, not a pass or permission to mutate host
+resources. Generated/default transfer remains copy.
+
 Record before creating an environment:
 
 ```text

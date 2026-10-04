@@ -28,7 +28,7 @@ mod local_setup;
 pub(crate) use local_setup::run as setup;
 
 #[cfg(not(target_os = "linux"))]
-pub(crate) fn setup() -> Result<i32> {
+pub(crate) fn setup(_enable_live: bool, _dry_run: bool) -> Result<i32> {
     Err(Error::new(
         "dungeon setup supports Linux only (rootless Podman); no MicroVM fallback",
     ))

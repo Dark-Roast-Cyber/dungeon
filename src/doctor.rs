@@ -140,14 +140,9 @@ mod linux {
     use std::fs;
     use std::io::Read;
     use std::os::fd::AsRawFd;
-    use std::os::unix::fs::FileTypeExt;
-    use std::os::unix::fs::MetadataExt;
-    use std::os::unix::process::CommandExt;
     use std::path::{Path, PathBuf};
-    use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
-    const LIMIT: usize = 262_144;
     const TIMEOUT: Duration = Duration::from_secs(5);
 
     pub(super) fn select(explicit: Option<PathBuf>) -> Result<Option<Config>> {
@@ -251,105 +246,7 @@ mod linux {
     // Deliberately excludes environment, certificates and credentials.
     const INSPECT: &str = r#"{"label":{{json (index .Config.Labels "agentarchaeology.ai/dungeon-gateway")}},"running":{{json .State.Running}},"started_ns":{{.State.StartedAt.UnixNano}},"image":{{json .Image}},"networks":{{json .NetworkSettings.Networks}},"ports":{{json .HostConfig.PortBindings}},"mounts":{{json .Mounts}},"config_path":{{range .Config.Env}}{{if eq . "OPENSHELL_GATEWAY_CONFIG=/etc/openshell/gateway.toml"}}true{{end}}{{end}},"podman_driver":{{range .Config.Env}}{{if eq . "OPENSHELL_DRIVERS=podman"}}true{{end}}{{end}},"driver_data":[{{$comma := ""}}{{range .Config.Env}}{{if and (ge (len .) 14) (eq (slice . 0 14) "XDG_DATA_HOME=")}}{{$comma}}{{eq . DUNGEON_DRIVER_DATA_ASSIGNMENT}}{{$comma = ","}}{{end}}{{end}}]}"#;
 
-    #[derive(Debug)]
-    struct Reply {
-        code: i32,
-        text: String,
-    }
-
-    fn query(
-        binary: &Path,
-        env: &HashMap<OsString, OsString>,
-        args: &[&str],
-        timeout: Duration,
-    ) -> Option<Reply> {
-        let mut command = Command::new(binary);
-        command
-            .args(args)
-            .current_dir("/")
-            .env_clear()
-            .envs(env)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .process_group(0);
-        let start = Instant::now();
-        let child = loop {
-            match command.spawn() {
-                Ok(child) => break child,
-                // Concurrent fork can temporarily inherit a freshly closed writer
-                // until exec closes its CLOEXEC descriptors. Never retry other errors.
-                Err(error)
-                    if error.raw_os_error() == Some(libc::ETXTBSY) && start.elapsed() < timeout =>
-                {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Err(_) => return None,
-            }
-        };
-        collect_query(child, timeout.saturating_sub(start.elapsed()))
-    }
-
-    fn collect_query(mut child: std::process::Child, timeout: Duration) -> Option<Reply> {
-        let mut pipe = child.stdout.take()?;
-        let fd = pipe.as_raw_fd();
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-        let nonblocking =
-            flags >= 0 && unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } >= 0;
-        let start = Instant::now();
-        let mut bytes = Vec::new();
-        let mut exited = false;
-        let mut eof = false;
-        let mut failed = !nonblocking;
-        while !failed && !(eof && exited) {
-            let mut buffer = [0u8; 8192];
-            match pipe.read(&mut buffer) {
-                Ok(0) => eof = true,
-                Ok(n) => {
-                    bytes.extend_from_slice(&buffer[..n]);
-                    failed = bytes.len() > LIMIT;
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(_) => failed = true,
-            }
-            if !exited {
-                let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-                let result = unsafe {
-                    libc::waitid(
-                        libc::P_PID,
-                        child.id(),
-                        &mut info,
-                        libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
-                    )
-                };
-                if result == 0 {
-                    exited = unsafe { info.si_pid() } != 0;
-                } else if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted
-                {
-                    failed = true;
-                }
-            }
-            if start.elapsed() >= timeout {
-                failed = true;
-            }
-            if !failed && !(eof && exited) {
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        }
-        // WNOWAIT reserves the leader identity until its entire query group is
-        // shut down, including descendants retaining stdout after leader exit.
-        unsafe {
-            libc::kill(-(child.id() as i32), libc::SIGKILL);
-        }
-        let status = child.wait().ok()?;
-        if failed {
-            return None;
-        }
-        Some(Reply {
-            code: status.code()?,
-            text: String::from_utf8(bytes).ok()?,
-        })
-    }
+    use setup::{BindConfig, Reply, parse_bind_config, query};
 
     struct Queries {
         binary: PathBuf,
@@ -500,7 +397,7 @@ mod linux {
         if let Some(ref podman) = podman {
             let version_ok = podman
                 .get(&["--version"])
-                .is_some_and(|r| r.code == 0 && valid_podman_version(&r.text));
+                .is_some_and(|r| r.code == 0 && setup::valid_podman_version(&r.text));
             report.add(
                 "podman_version",
                 if version_ok { "healthy" } else { "unknown" },
@@ -509,36 +406,12 @@ mod linux {
                 "Check podman --version explicitly; runtime validation is combination-specific.",
             );
         }
-        let storage = env
-            .get(&OsString::from("XDG_DATA_HOME"))
-            .map(PathBuf::from)
-            .or_else(|| {
-                env.get(&OsString::from("HOME"))
-                    .map(|h| PathBuf::from(h).join(".local/share"))
-            })
-            .map(|p| p.join("containers/storage"));
-        let custom_storage = env
-            .get(&OsString::from("XDG_CONFIG_HOME"))
-            .map(PathBuf::from)
-            .or_else(|| {
-                env.get(&OsString::from("HOME"))
-                    .map(|h| PathBuf::from(h).join(".config"))
-            })
-            .map(|p| p.join("containers/storage.conf"));
-        let storage_ready = custom_storage.as_ref().is_some_and(|p| {
-            fs::symlink_metadata(p).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
-        }) && storage.as_ref().is_some_and(|p| {
-            p.is_dir()
-                && safe_root(p, excluded)
-                && fs::symlink_metadata(p.join("db.sql")).is_ok_and(|m| {
-                    m.is_file() && m.uid() == unsafe { libc::geteuid() } && m.len() > 0
-                })
-        });
+        let storage_ready = setup::storage_ready(env, excluded);
         report.add("podman_storage", if storage_ready { "healthy" } else { "unknown" }, !storage_ready, "Only established default rootless storage with a user-owned regular db.sql marker and no custom user storage.conf is queried.", "Missing, empty, custom or unfamiliar storage is unknown and never initialized/adopted; inspect rootless Podman explicitly. Doctor never reads engine database contents.");
         let podman = podman.filter(|_| storage_ready);
         let uid = unsafe { libc::geteuid() };
         let socket = format!("/run/user/{uid}/podman/podman.sock");
-        let socket_found = fs::symlink_metadata(&socket).is_ok_and(|m| m.file_type().is_socket());
+        let socket_found = setup::socket_ready(Path::new(&socket));
         let api = podman.as_ref().filter(|_| socket_found).and_then(|p| {
             p.get(&[
                 "--url",
@@ -751,17 +624,6 @@ mod linux {
         report.add("live_bind", bind_state(live, compatible, bind.is_some_and(|b| !b.enabled), healthy), live && !compatible, "Recognized local gateway configuration observation only; no bind, writeability or containment test is performed.", "Copy remains the generated default. Live needs explicit reviewed gateway capability and mapping; remote settings are unknown, not inferred. No automatic migration.");
     }
 
-    fn valid_podman_version(text: &str) -> bool {
-        text.trim()
-            .strip_prefix("podman version ")
-            .is_some_and(|s| {
-                !s.is_empty()
-                    && s.len() <= 64
-                    && s.bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b".+-".contains(&b))
-            })
-    }
-
     fn safe_root(path: &Path, excluded: &[&Path]) -> bool {
         use std::path::Component;
         if !path.is_absolute()
@@ -791,12 +653,6 @@ mod linux {
         } else {
             "unknown-incompatible"
         }
-    }
-
-    #[derive(Clone, Copy)]
-    struct BindConfig {
-        enabled: bool,
-        mapping: bool,
     }
 
     fn local_bind(
@@ -868,36 +724,14 @@ mod linux {
         Some(observed)
     }
 
-    fn parse_bind_config(text: &str) -> Option<BindConfig> {
-        for enabled in [false, true] {
-            let base = setup::CONFIG.replace(
-                "enable_bind_mounts = false",
-                if enabled {
-                    "enable_bind_mounts = true"
-                } else {
-                    "enable_bind_mounts = false"
-                },
-            );
-            if text == base {
-                return Some(BindConfig {
-                    enabled,
-                    mapping: false,
-                });
-            }
-            if text == format!("{base}userns = \"keep-id:uid=998,gid=998\"\n") {
-                return Some(BindConfig {
-                    enabled,
-                    mapping: true,
-                });
-            }
-        }
-        None
-    }
-
     #[cfg(test)]
     mod tests {
         use super::*;
+        use setup::{collect_query, valid_podman_version};
         use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::CommandExt;
+        use std::process::{Command, Stdio};
+        use std::time::Instant;
 
         fn script(path: &Path, text: &str) {
             fs::write(path, text).unwrap();

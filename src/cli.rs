@@ -48,7 +48,14 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    Setup,
+    Setup {
+        /// Enable experimental local driver bind capability; does not authorize a project mount.
+        #[arg(long)]
+        enable_live: bool,
+        /// Inspect prerequisites and print the capability diff without creating state.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Read-only prerequisite and capability diagnostics; never initializes an environment.
     Doctor {
         #[arg(long)]
@@ -152,13 +159,16 @@ fn dispatch(cli: Cli) -> Result<i32> {
             }
             crate::openshell::doctor(config, json)
         }
-        Some(Commands::Setup) => {
+        Some(Commands::Setup {
+            enable_live,
+            dry_run,
+        }) => {
             if project.is_some() {
                 return Err(Error::new(
                     "PROJECT is only accepted for direct launch; setup has no project binding",
                 ));
             }
-            crate::openshell::setup()
+            crate::openshell::setup(enable_live, dry_run)
         }
         Some(Commands::Init {
             directory,
@@ -452,7 +462,7 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         Commands::Forward { port, local_port } => runtime.forward_service(port, local_port),
         Commands::Start => runtime.start(),
         Commands::Init { .. }
-        | Commands::Setup
+        | Commands::Setup { .. }
         | Commands::Doctor { .. }
         | Commands::Plan
         | Commands::Upload { yes: false } => unreachable!(),

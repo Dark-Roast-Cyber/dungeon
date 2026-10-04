@@ -142,8 +142,18 @@ accepted rereview does not establish new runtime/editor containment claims.
 2. Preserve ancestry when integrating PR #26, then PR #27. Close only #28/#29 when
    their recorded acceptance and delivery criteria are met; partial SSH evidence
    does not close the broader #30 integration gate.
-3. #24: implement explicit safe setup capability separately from the reviewed
-   live-default decision. Keep generated/default transfer `copy` until that decision.
+3. #24: experimental fresh `setup --enable-live` and read-only `--dry-run`
+   are implemented with exact copy/live verification and no downgrade. Copy-to-live
+   migration refuses pending maintenance/concurrency and recovery validation.
+   Static gates and native empty-HOME refusal passed. A separate disposable
+   Fedora CoreOS 44/Podman 5.8.4/OpenShell 0.0.116 VM then passed actual fresh
+   copy/live CLI setup, repeats/no downgrade, blocked migration preservation,
+   doctor capability separation and copy/live synthetic lifecycle/ownership
+   checks. Evidence: `/tmp/opencode/dungeon-setup24-vm-Mtue76/evidence`;
+   [exact gate](docs/validation.md#issue-24-experimental-fresh-setup).
+   Native JSON failures now return fixed context, with duplicate secret-key/ANSI
+   leakage regression coverage. Independent rereview and delivery remain separate. Retain
+   generated/default transfer `copy`; no promotion decision or full #24 closure.
 4. #5: establish guest-enforced read-only snapshot ownership, not uploaded modes.
 5. #20/#21 follow separately; #16 minimal operation locking is an independent
    correctness slice, not a new orchestration framework.

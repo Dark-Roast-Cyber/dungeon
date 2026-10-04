@@ -63,7 +63,7 @@ A feature that belongs primarily to those orchestration concerns should live in 
 - `config`: config/state parsing, validation, strict JSON, and fingerprints.
 - `policy`: the starter policy and policy safety validation.
 - `openshell`: the single OpenShell subprocess boundary and lifecycle operations.
-- `openshell::local_setup`: local gateway bootstrap within the same OpenShell boundary and sanitized executable resolution; OpenShell remains the registration/health authority, Podman the container/network authority.
+- `openshell::local_setup`: local gateway bootstrap, authoritative generated copy/live capability modes, shared bounded native queries and sanitized executable resolution within the same OpenShell boundary; OpenShell remains the registration/health authority, Podman the container/network authority.
 - `openshell::diagnostics`: read-only prerequisite/capability reporting with bounded native queries, sharing setup predicates without invoking setup.
 
 There is no backend hierarchy, daemon, plugin ABI, embedded JS runtime, second policy language, or framework layer.
@@ -90,6 +90,16 @@ For supported combinations, Dungeon may:
 Dungeon must not silently install privileged dependencies, overwrite incompatible OpenShell/runtime state, or fall back to weaker containment.
 
 Setup health is not containment attestation.
+
+Fresh `setup --enable-live` is an experimental explicit gateway-capability opt-in,
+not project mount authority or default promotion. Plain setup creates copy or
+verifies an exact existing copy/live mode without changing it. Migration is
+blocked; setup never restarts an existing gateway. Fresh creators serialize with
+a private setup file lock, not a runtime daemon or cross-client maintenance lease.
+Dry-run creates neither state nor lock and queries only established default
+rootless storage. Failed/interrupted creation can leave partial state requiring
+inspection. Native validation of this CLI has a separate disposable Fedora CoreOS
+record; it is not inferred from the manually provisioned live gateway.
 
 `doctor` is a read-only diagnostic responsibility within the same OpenShell
 subprocess owner, not another runtime implementation. It shares setup's pinned

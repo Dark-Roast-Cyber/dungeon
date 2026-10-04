@@ -47,6 +47,20 @@ Dungeon-owned config location from that path. It never loads policy, transfer
 mode, raw mount data, or credentials from repository files. Renamed/moved
 projects are not silently rebound.
 
+## Local setup
+
+Experimental `setup --enable-live` explicitly grants trusted local gateway driver
+bind capability on fresh setup only. It grants no project mount authority,
+changes no policy and converts no private project configuration. The driver maps
+the developer to sandbox UID/GID 998; gateway/certificate generation retains
+plain `keep-id`. Exact copy gateways refuse migration; exact live gateways are
+verified without downgrade. Unknown/partial/legacy state is refused, not repaired.
+The fresh CLI path has one disposable Fedora CoreOS/Podman native record, not
+general platform attestation. Failed/interrupted setup may
+leave partial new resources; no destructive rollback, blind retry or automatic
+adoption is promised. Dry-run uses bounded inventory only and refuses missing,
+empty or custom engine storage instead of initializing it.
+
 ## Credentials
 
 OpenShell providers can grant authority even when raw secrets are brokered. `dungeon auth` starts vendor-owned login inside the guest. Resulting OAuth credentials live in guest-controlled state. Dungeon does not inspect, copy, refresh, escrow, or synchronize them.
