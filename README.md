@@ -4,7 +4,7 @@ Low-friction, policy-managed environments for coding agents. Dungeon helps indiv
 
 Dungeon is an environment manager and adoption layer, not an agent orchestrator. Agent CLIs, editors, desktop clients, CI systems, and external harnesses should be able to use Dungeon-backed environments while Dungeon mostly disappears into the background.
 
-**0.0.2 is the current development preview; v0.0.1 remains the latest published release. Neither is an audited isolation product.**
+**Main is the source-only Rust 0.0.2 development preview; the latest published release, v0.0.1, is the older Python implementation and does not match this manual. Neither is an audited isolation product.**
 
 ## Product boundary
 
@@ -23,7 +23,7 @@ Dungeon must not weaken isolation for convenience. Project content may request c
 
 ## Current implementation
 
-- One Rust CLI. Python, Node, and Bun are not runtime dependencies.
+- One Rust CLI with no host interpreter dependency. Owned execution modes require guest Node and Linux `/proc`, as documented below.
 - Direct OpenCode, Claude Code, Codex, shell, and arbitrary command execution.
 - Vendor-native guest authentication for Codex device login and Claude Code browser login.
 - Optional VS Code and SSH attachment.
@@ -37,14 +37,19 @@ Dungeon targets **OpenShell 0.0.116**. The OpenShell version is intentionally pi
 
 ## Build
 
-The repository pins **Rust 1.98.1** in `rust-toolchain.toml`:
+For the supported Linux path, install Git, a Rust toolchain manager providing
+`cargo`, OpenShell **0.0.116**, and rootless Podman separately. The repository pins
+**Rust 1.98.1** in `rust-toolchain.toml`. Build the current preview from source:
 
 ```sh
+git clone https://github.com/Dark-Roast-Cyber/dungeon.git
+cd dungeon
 cargo build --release
-./target/release/dungeon --help
+export PATH="$PWD/target/release:$PATH"
+dungeon --help
 ```
 
-For the supported Linux path, install OpenShell **0.0.116** and rootless Podman separately. Start the user Podman API socket (`systemctl --user enable --now podman.socket`) and explicitly pull the immutable OpenShell gateway image before setup:
+The PATH export applies to this shell. Start the user Podman API socket (`systemctl --user enable --now podman.socket`) and explicitly pull the immutable OpenShell gateway image before setup:
 
 ```sh
 podman pull ghcr.io/nvidia/openshell/gateway@sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645
@@ -197,7 +202,9 @@ The long-term goal is optional composition: teams may use Dungeon alone, Dungeon
 
 ## Distribution
 
-GitHub release binaries are the native distribution contract. The intended npm convenience surface is:
+Native archives are built in CI but have not been released for Rust 0.0.2;
+use the source build above. GitHub release binaries are the intended native
+distribution contract. The following npm commands are planned, **not currently usable**:
 
 ```sh
 npx @agent-archaeology/dungeon

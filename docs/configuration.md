@@ -391,7 +391,8 @@ transfers (including a transport surviving an interrupted uploader). Copy transf
 requires Unix private-file protections; native Windows refuses it. Linux process/filesystem
 tests do not establish macOS durability or other-platform runtime support.
 
-`live` is an explicit pre-validation candidate. First `up` derives one
+`live` is an explicit experimental candidate, validated only on the recorded
+Linux/OpenShell/Podman combinations. First `up` derives one
 Podman bind request from the canonical configured project to
 `/sandbox/project`, read-write, with the OpenShell 0.0.116
 `selinux_label = "private"` candidate, and performs no upload. Resume/start
