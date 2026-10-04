@@ -121,8 +121,9 @@ issue #30: **Validate native remote clients against Dungeon-backed environments*
 ## Read-only diagnostics (Issue #22)
 
 Issue #22 adds `doctor`/`doctor --json` read-only diagnostics; independent review
-and safety rereview are accepted at `3965d7d34e6e0ee28483fc0e68ebc708ef880c48`,
-with all seven jobs in CI run 37113253413 passing. Scope is Linux/OpenShell 0.0.116,
+and safety rereview were accepted at `3965d7d34e6e0ee28483fc0e68ebc708ef880c48`
+and delivered in merged PR #27. Fresh setup improvements followed in PR #33;
+the broader adoption issue remains open. Scope is Linux/OpenShell 0.0.116,
 existing rootless Podman and selected existing private config only. Independent
 checks, bounded sanitized native queries, explicit blocking exit semantics and
 configuration-only live capability/mapping observations do not install/migrate,
@@ -134,7 +135,7 @@ environment identity, WNOWAIT query cleanup and empty-store initialization
 avoidance. Focused regressions and native scratch evidence are recorded;
 accepted rereview does not establish new runtime/editor containment claims.
 
-## Remaining execution sequence
+## Delivery and remaining work
 
 1. SSH cleanup: `ssh --owned` implementation, accepted review and disposable native PTY gates
    are delivered on main. Generic SSH
@@ -152,13 +153,21 @@ accepted rereview does not establish new runtime/editor containment claims.
    checks. Evidence: `/tmp/opencode/dungeon-setup24-vm-Mtue76/evidence`;
    [exact gate](docs/validation.md#issue-24-experimental-fresh-setup).
    Native JSON failures now return fixed context, with duplicate secret-key/ANSI
-   leakage regression coverage. Accepted rereview is delivered in merged PR #33. Retain
-   generated/default transfer `copy`; no promotion decision or full #24 closure.
+   leakage regression coverage. Accepted rereview is delivered in merged PR #33.
+   The safety decision is to retain generated/default transfer `copy`; automatic
+   live promotion is deferred until safe recognized migration/exclusion/recovery
+   and adoption gates are met. This records a default decision, not user
+   authorization to promote live mode or full #24 acceptance.
 4. #5: staged Neovim snapshots use read-only binds, not uploaded modes. Actual stage/create in copy/live modes passed native content protection, drift/resume, private state, exact mounts and artifact-independent owned cleanup. Ancestor rename/replacement is an observed limitation; accepted scope is immutable mounted contents, not guest pathname or subsequent execution identity. See the [record](docs/validation.md#issue-5-staged-contents-only-snapshots-2026-10-04-utc). Final lock-release correction has deterministic fork/default-parallel coverage; the native matrix predates only that correction. Accepted rereview is delivered in merged PR #34; #5 is closed.
-5. #20/#21 follow separately; #16 minimal operation locking is an independent
-   correctness slice, not a new orchestration framework.
+5. #16 minimal operation locking/copy-transfer correctness is delivered in
+   merged PR #35; #16 is closed. All seven jobs in
+   [CI run 37173607186](https://github.com/Dark-Roast-Cyber/dungeon/actions/runs/37173607186)
+   passed on main `cdffe9d42e3747efe7a018fa46289f2b68a4b7dd`.
+   Native macOS builds do not establish macOS transfer durability.
+6. #20 and #21 remain later, separate work; #16 delivery does not mean either
+   the machine interface or adapter has started.
 
-### Issue #16 copy-transfer correctness candidate
+### Issue #16 copy-transfer correctness (delivered)
 
 Environment and canonical-project native locks cover upload/export end to end,
 including different config paths under one HOME/XDG authority. Project locks
@@ -169,7 +178,7 @@ Baseline replacement/persistence failure is explicitly uncertain after host
 apply, never described as an unchanged baseline. This is not general lifecycle
 locking, an atomic transaction or power-loss recovery. Nested overlapping
 projects, different authorities, project moves and external writers remain
-excluded. Independent review/delivery remain pending for this candidate.
+excluded. Independent review and delivery are accepted in merged PR #35.
 
 Owned interactive SSH now has live implementation evidence for native editor
 input/resize/save/test, host signals, terminal/SSH loss, STOP/CONT, isolation and
