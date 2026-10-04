@@ -55,9 +55,26 @@ AI/owned-lifecycle matrix was repeated.
 
 ## Existing runtime and transfer evidence
 
-### Issue #20 machine namespace candidate (2026-10-04 UTC)
+### Issue #20 machine namespace delivered (2026-10-04 UTC)
 
-#### Corrected review candidate
+Delivered in merged [PR #37](https://github.com/Dark-Roast-Cyber/dungeon/pull/37);
+#20 is closed. All seven jobs passed on feature
+`8f5844efb6452ef1b148b484fdea0981c30c881b`
+([CI 37197184382](https://github.com/Dark-Roast-Cyber/dungeon/actions/runs/37197184382))
+and main `1ce88a7a82795c62183355f4cbb9a95c41d457f9`
+([CI 37197297984](https://github.com/Dark-Roast-Cyber/dungeon/actions/runs/37197297984)).
+Hosted Node 24 Rust tests (**115 unit + 15 integration**), npm/package gates and
+all four native platform builds passed. Builds do not establish platform runtime
+containment. The full production VM matrix below tested release `d33ab145…`;
+the delivered runtime's later diagnostic/preflight corrections produced release
+`ff7d867f…`, with test-only fixture corrections afterward. Those reviewed changes
+do not imply a new VM run. #21's external adapter/arbitrary-path synchronization
+remains unimplemented; no unchanged compatibility is claimed.
+
+#### Corrected review history (revision-qualified)
+
+The pending review/CI statements below describe their recorded revisions, not
+the delivered status above.
 
 CI run `37196051837` on `f2d8ff0026f647b5a57967ebbddabda82711afb9`
 passed all four native builds and Node 24/npm/package gates, but three synthetic
@@ -79,7 +96,7 @@ and removed by fixture cleanup, including private controls. A new regression
 checks workload cwd/private controls and early-drop group cleanup. Focused machine
 tests and default-parallel **115 unit + 15 integration tests**, formatting,
 all-target Clippy and warnings-denied release build passed on local Node 22.22.2.
-Node 24 is unavailable locally; hosted CI must verify the corrected fixture there.
+At this revision Node 24 was unavailable locally; hosted verification was pending.
 The same nine machine tests also passed with a trusted prerequisite relay under
 an external provisioned-bin PATH prefix, confirming actual transport calls use
 the provisioned Node rather than the fixed guest path (not a Node 24 claim).
@@ -107,8 +124,8 @@ Focused tests, formatting, all-target Clippy, **115 unit + 14 integration tests*
 and warnings-denied locked Linux release compilation passed locally. Release
 SHA-256: `ff7d867f55e2b8f71679cc3447f9516fb1643d4a915dc35f2260e2ef7436381f`.
 Evidence/manifests are in `/tmp/opencode/dungeon-machine20-native/evidence/ci-fix`.
-Only Linux target std is installed; hosted macOS/Windows checks must rerun before
-merge. The preceding CI Node 24/npm/Linux successes and native VM matrix are
+At this revision only Linux target std was installed; hosted macOS/Windows checks
+were pending. The preceding CI Node 24/npm/Linux successes and native VM matrix are
 revision-qualified evidence, not tests of this final binary. No VM rerun was
 needed for the early refusal/compile-only correction.
 
@@ -126,7 +143,7 @@ all 19 candidate paths, including untracked files and `src/owned_ssh.rs`, are in
 `final-effects-manifest.sha256` under the evidence root below. The full native
 matrix and unchanged Node tests below belong to the preceding corrected revision;
 only diagnostic effects classification changed, and no VM rerun or byte-identical
-final binary is claimed. Parent rereview/CI remain separate gates.
+final binary is claimed. At this revision parent rereview/CI were pending.
 
 Five review findings were corrected without a new Runtime or cleanup owner:
 machine cancellation remains sticky through final delivery (human 130/143 unchanged);
@@ -142,8 +159,8 @@ descriptor failure uses the same STOP/receipt path and preserves a sentinel.
 Final corrected formatting, all-target Clippy, default-parallel locked Rust
 tests (**114 unit + 12 integration**), release build and all 11 Node tests passed
 on the same Linux/Rust 1.98.1/Node 22.22.2 host. Pure platform-state tests cover
-Linux/macOS/Windows, not cross-platform compilation. Node 24 and all four hosted
-platform builds remain parent CI gates.
+Linux/macOS/Windows, not cross-platform compilation. At this revision Node 24 and
+all four hosted platform builds were pending CI gates.
 
 The actual corrected CLI passed the full disposable native matrix on the pinned
 FCOS/OpenShell/Podman/image combination below. This includes the existing
@@ -184,8 +201,8 @@ The corrected binary's small exact-stream fixture had 524 frames. VM disks,
 keys/certificates and raw runtime logs are removed; QEMU reaped and final loopback
 port 33723 absent. Corrected host inventory/metadata comparisons match the original
 baseline. No required job remains running, no existing host gateway changed.
-Remaining limits are broader platform/transport/containment coverage and parent
-review/CI, not the formerly missing production fault and RSS gates. #21/#32,
+Remaining limits are broader platform/transport/containment coverage; parent
+review/CI were pending at this revision, not the production fault and RSS gates. #21/#32,
 publication, live stdin and general persistence remain separate.
 
 #### Initial candidate record (superseded by corrections above)
