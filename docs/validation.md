@@ -59,6 +59,30 @@ AI/owned-lifecycle matrix was repeated.
 
 #### Corrected review candidate
 
+PR #37 CI run `37195595296` on feature
+`7017b8b5f63165893343ff9d83ec78e4b50af013` exposed a frontend ordering regression:
+human upload/export had lost their pre-Runtime import check. Without OpenShell
+installed, the version/prerequisite lookup error masked unapproved-import refusal.
+The original test was preserved and extended to export, not weakened. Human work
+preflight is restored; machine work dispatch now uses the same import verifier
+before Runtime construction, while shared Runtime transfer checks remain necessary
+operation-boundary rechecks. A synthetic actual CLI test with an instrumented
+OpenShell version stub proves human/machine upload/export never probe it for an
+unapproved import. Status/stop/close remain artifact-independent.
+
+The fixed error vocabulary stays identical across platforms. Only unused enum
+variants have targeted conditional dead-code allowances (`Busy` on non-Unix,
+`CleanupUnconfirmed` on non-Linux); the Linux-only `classified` helper is compiled
+only on Linux. Warnings remain denied; no module-wide suppression was added.
+Focused tests, formatting, all-target Clippy, **115 unit + 14 integration tests**
+and warnings-denied locked Linux release compilation passed locally. Release
+SHA-256: `ff7d867f55e2b8f71679cc3447f9516fb1643d4a915dc35f2260e2ef7436381f`.
+Evidence/manifests are in `/tmp/opencode/dungeon-machine20-native/evidence/ci-fix`.
+Only Linux target std is installed; hosted macOS/Windows checks must rerun before
+merge. The preceding CI Node 24/npm/Linux successes and native VM matrix are
+revision-qualified evidence, not tests of this final binary. No VM rerun was
+needed for the early refusal/compile-only correction.
+
 Final effects-only refinement marks potential execution effects immediately before
 owned/unowned primary spawn and interactive foreground spawn, after preflight.
 JSONL failure serialization now applies the existing Runtime effects mapper;

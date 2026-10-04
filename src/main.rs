@@ -19,10 +19,13 @@ pub(crate) enum ErrorCode {
     ApprovalRequired,
     Unbound,
     Unsupported,
+    // Keep the machine error vocabulary fixed where the producing capability is unsupported.
+    #[cfg_attr(not(unix), allow(dead_code))]
     Busy,
     Conflict,
     IdentityMismatch,
     PolicyDrift,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     CleanupUnconfirmed,
     OperationFailed,
 }
@@ -51,6 +54,7 @@ impl Error {
         }
     }
 
+    #[cfg(target_os = "linux")]
     pub(crate) fn classified(code: ErrorCode, message: impl Into<String>) -> Self {
         Self {
             message: message.into(),

@@ -145,6 +145,9 @@ Copy upload/export verify selected import snapshots in the shared Runtime before
 transfer locks, baseline changes or native transfer. Missing/unapproved/tampered
 artifacts refuse both human and machine transfers; status, stop and existing
 owned cleanup remain artifact-independent.
+Human and machine work dispatch also verify imports before constructing Runtime
+(including its OpenShell version probe). The Runtime checks remain a recheck at
+the operation boundary, not a cached preflight result.
 
 `--stdin` is unowned only: at most **65,536 bytes**, read completely before workload
 launch, then supplied through native buffered OpenShell stdin. More bytes refuse.

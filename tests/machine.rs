@@ -410,3 +410,51 @@ fn unowned_exec_postlaunch_drift_is_a_fixed_unknown_effects_completion() {
     assert_eq!(final_event["error"]["effects"], "unknown");
     assert!(!final_event.to_string().contains("changed-after-launch"));
 }
+
+#[test]
+fn unapproved_import_transfer_refuses_before_any_version_probe() {
+    let f = Fixture::new();
+    let source = f.root.path().join("nvim-source");
+    fs::create_dir(&source).unwrap();
+    fs::write(source.join("init.lua"), "return {}").unwrap();
+    let mut doc: Value = serde_json::from_slice(&fs::read(&f.config).unwrap()).unwrap();
+    doc["imports"] = json!([{"source":source,"destination":"/sandbox/.config/nvim"}]);
+    fs::write(&f.config, doc.to_string()).unwrap();
+    let marker = f.root.path().join("version-probed");
+    let stub = f.root.path().join("bin/openshell");
+    let content = fs::read_to_string(&stub).unwrap();
+    fs::write(
+        &stub,
+        content.replace(
+            "if [ \"$1\" = --version ]; then",
+            &format!(
+                "if [ \"$1\" = --version ]; then touch '{}';",
+                marker.display()
+            ),
+        ),
+    )
+    .unwrap();
+    for operation in ["upload", "export"] {
+        let out = f
+            .command()
+            .arg("--config")
+            .arg(&f.config)
+            .args([operation, "--yes"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        assert!(
+            String::from_utf8(out.stderr)
+                .unwrap()
+                .contains("not approved")
+        );
+        assert!(!marker.exists());
+        let out = f.machine().args([operation, "--yes"]).output().unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        assert!(out.stderr.is_empty());
+        let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(value["ok"], false);
+        assert_eq!(value["error"]["code"], "operation_failed");
+        assert!(!marker.exists());
+    }
+}

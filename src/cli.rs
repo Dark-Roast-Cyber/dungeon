@@ -379,14 +379,7 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
     {
         return crate::imports::stage(config, yes);
     }
-    if !matches!(
-        &command,
-        Commands::Down
-            | Commands::Stop
-            | Commands::Status
-            | Commands::Upload { .. }
-            | Commands::Export { .. }
-    ) {
+    if !matches!(&command, Commands::Down | Commands::Stop | Commands::Status) {
         crate::imports::verify(config)?;
     }
     if config.values.project_transfer == ProjectTransfer::Live {
@@ -921,9 +914,9 @@ mod tests {
         } else {
             "snapshot imports require Linux"
         };
-        for action in ["create", "up", "run", "upload", "forward"] {
+        for action in ["create", "up", "run", "upload", "export", "forward"] {
             let mut args = vec!["dungeon", "--config", path.to_str().unwrap(), action];
-            if action == "upload" {
+            if matches!(action, "upload" | "export") {
                 args.push("--yes");
             }
             if action == "forward" {

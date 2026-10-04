@@ -401,6 +401,12 @@ fn dispatch(explicit: Option<PathBuf>, operation: Operation) -> Response {
             ));
         }
         platform_check(&operation, std::env::consts::OS)?;
+        if !matches!(
+            operation,
+            Operation::Status | Operation::Stop | Operation::Close { .. }
+        ) {
+            crate::imports::verify(&config)?;
+        }
         let runtime = Runtime::new(&config)?.machine();
         (|| {
             let code = match operation {
