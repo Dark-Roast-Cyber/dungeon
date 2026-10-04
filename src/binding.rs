@@ -33,6 +33,19 @@ fn project_key(project: &Path) -> Result<String> {
     digest(&json!({"project": project.to_string_lossy()}))
 }
 
+pub(crate) fn transfer_lock_path(project: &Path) -> Result<PathBuf> {
+    let projects = private_config_root()?;
+    let path = projects
+        .parent()
+        .expect("Dungeon root")
+        .join("transfer-locks")
+        .join(project_key(project)?);
+    if path.starts_with(project) {
+        return Err(Error::new("transfer locks must stay outside the project"));
+    }
+    Ok(path)
+}
+
 fn config_path_in(project: &Path, root: &Path) -> Result<PathBuf> {
     let directory = root.join(project_key(project)?);
     if directory.starts_with(project) {

@@ -368,6 +368,7 @@ impl<'a> Runtime<'a> {
         if !self.config.values.project.is_dir() {
             return Err(Error::new("the host project must exist for upload"));
         }
+        let _transfer = export::TransferGuard::acquire(self.config)?;
         self.checked(true, true)?;
         preflight_upload(&self.config.values.project, &self.config.values.project)?;
         let before = export::snapshot(&self.config.values.project)?;
@@ -402,6 +403,7 @@ impl<'a> Runtime<'a> {
                 "export is unavailable in live project-transfer mode; live project changes are written directly to the host project",
             ));
         }
+        let _transfer = export::TransferGuard::acquire(self.config)?;
         self.checked(true, true)?;
         let baseline = export::load_baseline(self.config)?;
         let stage = self.download_project()?;
@@ -774,12 +776,14 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let root = tempfile::tempdir().unwrap();
-            let project = root.path().join("project");
+            fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700)).unwrap();
+            let canonical = root.path().canonicalize().unwrap();
+            let project = canonical.join("project");
             fs::create_dir(&project).unwrap();
             fs::write(project.join("file"), "host").unwrap();
             let config = Config {
-                path: root.path().join("dungeon.json"),
-                policy_path: root.path().join("policy.json"),
+                path: canonical.join("dungeon.json"),
+                policy_path: canonical.join("policy.json"),
                 values: ConfigDoc {
                     schema: 2,
                     name: "demo".into(),
@@ -796,6 +800,8 @@ mod tests {
                 fingerprint: "fingerprint".into(),
             };
             let binary = root.path().join("openshell");
+            crate::config::write_new(&config.path, &config.values).unwrap();
+            crate::config::write_new(&config.policy_path, &config.policy).unwrap();
             let policy = serde_json::to_string(&config.policy).unwrap();
             fs::write(&binary, format!(r#"#!/bin/sh
 root='{}'
@@ -1238,6 +1244,60 @@ esac
                 .to_string()
                 .contains("not Ready")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn transfer_contention_and_recovery_refuse_before_runtime_or_baseline_mutation() {
+        let fixture = Fixture::new();
+        let runtime = fixture.runtime();
+        runtime.up().unwrap();
+        let baseline = fs::read(fixture.config.baseline_path()).unwrap();
+        let host = export::snapshot(&fixture.config.values.project).unwrap();
+        let get_calls = fixture.calls("get");
+        let uploads = fixture.calls("upload");
+        let downloads = fixture.calls("download");
+        let guard = export::TransferGuard::acquire(&fixture.config).unwrap();
+        assert!(
+            runtime
+                .upload()
+                .unwrap_err()
+                .to_string()
+                .contains("transfer lock")
+        );
+        assert!(
+            runtime
+                .export(true)
+                .unwrap_err()
+                .to_string()
+                .contains("transfer lock")
+        );
+        drop(guard);
+        let recovery = fixture.root.path().join("dungeon-recovery-unknown");
+        crate::config::create_private_dir(&recovery).unwrap();
+        // A partial/legacy directory must not be silently dismissed.
+        assert!(
+            runtime
+                .upload()
+                .unwrap_err()
+                .to_string()
+                .contains("recovery")
+        );
+        assert!(
+            runtime
+                .export(true)
+                .unwrap_err()
+                .to_string()
+                .contains("recovery")
+        );
+        assert_eq!(fs::read(fixture.config.baseline_path()).unwrap(), baseline);
+        assert_eq!(
+            export::snapshot(&fixture.config.values.project).unwrap(),
+            host
+        );
+        assert_eq!(fixture.calls("get"), get_calls);
+        assert_eq!(fixture.calls("upload"), uploads);
+        assert_eq!(fixture.calls("download"), downloads);
     }
 
     #[test]

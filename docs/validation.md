@@ -55,6 +55,55 @@ AI/owned-lifecycle matrix was repeated.
 
 ## Existing runtime and transfer evidence
 
+### Issue #16 copy-transfer serialization and manual recovery
+
+The candidate on main `b4e581b` plus the recorded change passed on Fedora 44,
+Linux 7.2.5-200.fc44.x86_64, Rust 1.98.1 and host Node 22.22.2:
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, default-parallel
+`cargo test --locked --quiet` (104 unit + 6 integration tests),
+`cargo build --release --locked`, and all 11 owned/launcher/staging Node tests.
+The supported Node 24 release-runtime gate was not exercised.
+
+Focused synthetic tests exercise actual native file locks, cross-config
+same-project contention in separate processes, release despite a fork-held
+descriptor, unchanged baseline/host and no runtime transfer calls when busy,
+authority drift, unsafe lock files and bounded hostile recovery markers.
+A CLI integration fixture uses isolated HOME/XDG with the production project
+key/path: both config paths refuse the held shared lock without creating a
+project binding. Live mode refuses without OpenShell installed or an environment
+transfer lock. Native OpenShell is replaced only in this synthetic CLI fixture;
+it is not a new runtime-transfer or containment validation record.
+
+Deterministic real child-process SIGINT/SIGTERM after the first host mutation
+retain original and not-yet-installed copies plus instructions, leave the old
+baseline, and refuse retry. Panic unwinding has the same recovery check.
+Runtime fixtures verify recovery blocks upload/export before baseline or remote
+mutation. A forced baseline parent-sync failure confirms that replacement may
+already have occurred and reports persistence unconfirmed. These are native
+host filesystem/process checks with synthetic trees, not crash/power-loss,
+macOS/Windows durability, or a repeated OpenShell/VM matrix. The prior exact
+OpenShell copy-transfer evidence remains limited to its recorded revision.
+
+Sanitized command logs, source and binary hashes are retained at
+`/tmp/opencode/dungeon-transfer16-256q2P`. Release binary SHA-256:
+`25f23d12dcd28df8df1ea9dfd2c43061a97bf4670e8b95c5545386f92ec7f313`.
+The three runtime-source diffs followed by `tests/transfer.rs` hash to
+`b6cb4533c25855279de061a85a30a645b7def8bab521ef7daf112282b9391f09`.
+Synthetic children are reaped and temporary fixture trees removed. No native
+gateway, image, credentials, policy, service or installation was changed.
+Independent review and delivery remain separate gates.
+
+The subsequent portability correction replaces the sticky-bit constant in the
+new Unix directory check with the inferred-u32 `0o1000` mask: Darwin libc exposes
+`S_ISVTX` with a different integer type. Formatting, all-target Clippy, 20 focused
+export tests and the CLI transfer integration test passed on Linux. Corrected
+runtime-change SHA-256 is
+`d8144e376d8573164669639314ee58b035c806db5e85725d735cff1ca70045ed`.
+The full-suite/release binary evidence above belongs to the preceding revision.
+Only Linux target std is installed locally; macOS compilation was not run or
+substituted by source inspection. All four hosted native build gates must pass
+before merge; no target/tool installation or VM validation was performed.
+
 ### Issue #24 experimental fresh setup
 
 `setup --enable-live` now selects the exact live-capable driver configuration on
@@ -820,4 +869,4 @@ disconnect degradation is unchanged.
 
 ## Release
 
-Creating the reviewed version tag is the explicit native-release authorization step. npm publication remains a separate future gate. Runtime support claims remain limited to the exact validated combinations. Issue #5's read-only configuration imports remain a separate implementation and validation gate after the Issue #17 image-owned tool prerequisites. The Issue #24 live mount has the recorded Fedora/OpenShell/Podman evidence above; generated/default transfer remains copy until an explicit promotion decision.
+Creating the reviewed version tag is the explicit native-release authorization step. npm publication remains a separate future gate. Runtime support claims remain limited to the exact validated combinations. Issue #5's reviewed read-only snapshots are delivered in PR #34 with the contents-only limitations recorded above; active-environment refresh is not implemented. The Issue #24 live mount has the recorded Fedora/OpenShell/Podman evidence above; generated/default transfer remains copy until an explicit promotion decision.
