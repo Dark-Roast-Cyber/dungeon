@@ -2,10 +2,51 @@
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
+use std::ops::{Deref, DerefMut};
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Output, Stdio};
+
+struct TestChild(Option<Child>);
+impl Deref for TestChild {
+    type Target = Child;
+    fn deref(&self) -> &Child {
+        self.0.as_ref().unwrap()
+    }
+}
+impl DerefMut for TestChild {
+    fn deref_mut(&mut self) -> &mut Child {
+        self.0.as_mut().unwrap()
+    }
+}
+impl TestChild {
+    fn wait_with_output(mut self) -> io::Result<Output> {
+        self.0.take().unwrap().wait_with_output()
+    }
+}
+impl Drop for TestChild {
+    fn drop(&mut self) {
+        if let Some(child) = self.0.as_mut() {
+            if child.try_wait().ok().flatten().is_none() {
+                unsafe {
+                    libc::kill(child.id() as i32, libc::SIGTERM);
+                }
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+                while child.try_wait().ok().flatten().is_none()
+                    && std::time::Instant::now() < deadline
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                if child.try_wait().ok().flatten().is_none() {
+                    let _ = child.kill();
+                }
+            }
+            let _ = child.wait();
+        }
+    }
+}
 
 struct Fixture {
     root: tempfile::TempDir,
@@ -14,7 +55,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
-        for name in ["home", "project", "bin"] {
+        for name in ["home", "project", "bin", "guest-project", "guest-controls"] {
             fs::create_dir(root.path().join(name)).unwrap();
         }
         let config = root.path().join("private/dungeon.json");
@@ -58,6 +99,43 @@ impl Fixture {
         fs::write(f.config.parent().unwrap().join("runtime.json"),json!({"schema":1,"id":"opaque-id","config":fingerprint["fingerprint"],"observed_policy":digest}).to_string()).unwrap();
         let remote = json!({"id":"opaque-id","name":"fixture","workspace":"default","phase":"Ready","labels":{"agentarchaeology.ai/dungeon-config":fingerprint["fingerprint"]},"policy":policy});
         fs::write(f.root.path().join("remote.json"), remote.to_string()).unwrap();
+        // Host tooling is resolved before the synthetic guest's narrowed PATH.
+        let node = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+            .filter(|p| p.is_absolute())
+            .map(|p| p.join("node"))
+            .find(|p| p.is_file())
+            .expect("machine fixtures require provisioned host Node on PATH")
+            .canonicalize()
+            .unwrap();
+        assert!(!node.starts_with(f.root.path()));
+        assert!(
+            Command::new(&node)
+                .arg("--version")
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        let adapter = f.root.path().join("guest-adapter.cjs");
+        fs::write(&adapter,format!(r#"'use strict';
+const fs=require('node:fs'),assert=require('node:assert/strict');
+const [flag,shim,separator,mode,token,...argv]=process.argv.slice(2);
+assert.equal(flag,'-e');assert.equal(separator,'--');assert.equal(shim,{shim});
+const controls={controls},project={project},registry={registry};
+process.chdir(project);
+const fields=p=>fs.readFileSync('/proc/'+p+'/stat','utf8').split(') ')[1].split(' ');
+const record=p=>{{const f=fields(p);fs.appendFileSync(registry,JSON.stringify({{pid:p,group:+f[2],start:f[19]}})+'\n')}};
+record(process.pid);record(process.ppid);
+if(argv[0]==='/usr/bin/node')argv[0]=process.execPath;
+process.argv=[process.execPath,mode,token,...argv];
+let translated=shim.replace('const directory = `/tmp/dungeon-owned-${{token}}`;', 'const directory = '+JSON.stringify(controls) +' + "/dungeon-owned-" + token;');
+assert.notEqual(translated,shim);
+translated=translated.replace("process.chdir('/sandbox/project');",'process.chdir('+JSON.stringify(project)+');');
+translated=translated.replace("process.send('ready');",'const fixtureFields=fs.readFileSync("/proc/self/stat","utf8").split(") ")[1].split(" ");fs.appendFileSync('+JSON.stringify(registry)+',JSON.stringify({{pid:process.pid,group:+fixtureFields[2],start:fixtureFields[19]}})+"\\n");process.send("ready");');
+if(mode==='machine-launch' && fs.existsSync({malformed}))process.stdout.write('{{"v":1,"seq":0,"seq":0,"event":"output","stream":"stdout","data":"QQ=="}}\n');
+eval(translated);
+"#,
+            shim=serde_json::to_string(include_str!("../src/owned.cjs")).unwrap(),controls=serde_json::to_string(&f.root.path().join("guest-controls")).unwrap(),project=serde_json::to_string(&f.root.path().join("guest-project")).unwrap(),registry=serde_json::to_string(&f.root.path().join("guest-processes.jsonl")).unwrap(),malformed=serde_json::to_string(&f.root.path().join("malformed-primary")).unwrap())).unwrap();
         let stub = f.root.path().join("bin/openshell");
         fs::write(
             &stub,
@@ -69,12 +147,17 @@ if [ "$2" = get ]; then cat '{}'; exit 0; fi
 if [ "$2" = exec ]; then
   while [ "$1" != -- ]; do shift; done
   shift
+  test "$1" = /usr/bin/node || exit 98
+  shift
+  set -- '{}' '{}' "$@"
   exec "$@"
 fi
 echo 'SYNTHETIC_SECRET_NATIVE_ERROR' >&2
 exit 9
 "#,
-                f.root.path().join("remote.json").display()
+                f.root.path().join("remote.json").display(),
+                node.display(),
+                adapter.display()
             ),
         )
         .unwrap();
@@ -90,6 +173,7 @@ exit 9
                 format!("{}:/usr/bin:/bin", self.root.path().join("bin").display()),
             )
             .current_dir(self.root.path().join("project"));
+        c.process_group(0);
         c
     }
     fn machine(&self) -> Command {
@@ -99,6 +183,89 @@ exit 9
             .args(["machine", "--schema", "1"]);
         c
     }
+    fn spawn(&self, command: &mut Command) -> TestChild {
+        TestChild(Some(command.spawn().unwrap()))
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        if let Ok(records) = fs::read_to_string(self.root.path().join("guest-processes.jsonl")) {
+            for line in records.lines().rev() {
+                let Ok(value) = serde_json::from_str::<Value>(line) else {
+                    continue;
+                };
+                let Some(pid) = value["pid"].as_u64() else {
+                    continue;
+                };
+                let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                    continue;
+                };
+                let Some((_, fields)) = stat.rsplit_once(") ") else {
+                    continue;
+                };
+                let fields = fields.split_whitespace().collect::<Vec<_>>();
+                if fields.len() > 19
+                    && Some(fields[19]) == value["start"].as_str()
+                    && fields[2].parse::<u64>().ok() == Some(pid)
+                    && value["group"].as_u64() == Some(pid)
+                {
+                    unsafe {
+                        libc::kill(-(pid as i32), libc::SIGKILL);
+                    }
+                }
+            }
+        }
+        // Temporary guest controls belong solely to this fixture's private tree.
+    }
+}
+
+#[test]
+fn synthetic_guest_paths_and_cleanup_are_fixture_private() {
+    let f = Fixture::new();
+    let root = f.root.path().to_owned();
+    let marker = root.join("private-workload");
+    let app = format!(
+        "const fs=require('fs');fs.writeFileSync({},JSON.stringify({{cwd:process.cwd(),pid:process.pid,group:+fs.readFileSync('/proc/self/stat','utf8').split(') ')[1].split(' ')[2]}}));console.log('ready');setInterval(()=>{{}},1000)",
+        serde_json::to_string(&marker).unwrap()
+    );
+    let mut child = f.spawn(
+        f.machine()
+            .args(["exec", "--owned", "--", "/usr/bin/node", "-e", &app])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
+    let mut reader = BufReader::new(child.stdout.take().unwrap());
+    loop {
+        let mut line = String::new();
+        assert!(reader.read_line(&mut line).unwrap() > 0);
+        let event: Value = serde_json::from_str(&line).unwrap();
+        if event["event"] == "output" {
+            break;
+        }
+        assert_ne!(event["event"], "finished");
+    }
+    let metadata: Value = serde_json::from_slice(&fs::read(marker).unwrap()).unwrap();
+    assert_eq!(
+        metadata["cwd"],
+        root.join("guest-project").to_str().unwrap()
+    );
+    let group = metadata["group"].as_i64().unwrap() as i32;
+    let controls = fs::read_dir(root.join("guest-controls"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(controls.len(), 1);
+    assert!(
+        !PathBuf::from("/tmp")
+            .join(controls[0].file_name().unwrap())
+            .exists()
+    );
+    // These guards also run during assertion unwinding, without a global guest directory.
+    drop(child);
+    drop(f);
+    assert_eq!(unsafe { libc::kill(-group, 0) }, -1);
+    assert!(!root.exists());
 }
 
 #[test]
@@ -162,13 +329,12 @@ fn streamed_unowned_exec_is_incremental_binary_exact_and_stdin_is_finite() {
         "const fs=require('fs');process.stdout.write(Buffer.from([0,255,226]));process.stderr.write('first\\n');const t=setInterval(()=>{{if(fs.existsSync({})){{clearInterval(t);process.stdout.write(Buffer.from([130,172]));process.stderr.write('tail');process.exit(23)}}}},10)",
         serde_json::to_string(&release).unwrap()
     );
-    let mut child = f
-        .machine()
-        .args(["exec", "--", "/usr/bin/node", "-e", &app])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut child = f.spawn(
+        f.machine()
+            .args(["exec", "--", "/usr/bin/node", "-e", &app])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
     let reader = BufReader::new(child.stdout.take().unwrap());
     let mut stdout = vec![];
     let mut stderr = vec![];
@@ -200,7 +366,7 @@ fn streamed_unowned_exec_is_incremental_binary_exact_and_stdin_is_finite() {
     assert_eq!(stdout, [0, 255, 226, 130, 172]);
     assert_eq!(stderr, b"first\ntail");
     assert_eq!(final_event.unwrap()["exit_code"], 23);
-    let mut child=f.machine().args(["exec","--stdin","--","/usr/bin/node","-e","process.stdin.on('data',b=>process.stdout.write(b));process.stdin.on('end',()=>process.exit(23))"]).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+    let mut child=f.spawn(f.machine().args(["exec","--stdin","--","/usr/bin/node","-e","process.stdin.on('data',b=>process.stdout.write(b));process.stdin.on('end',()=>process.exit(23))"]).stdin(Stdio::piped()).stdout(Stdio::piped()));
     child
         .stdin
         .take()
@@ -240,13 +406,12 @@ fn stalled_owned_sink_cleans_guest_group_without_requiring_output_eof() {
         "const fs=require('fs');fs.writeFileSync({},fs.readFileSync('/proc/self/stat','utf8').split(') ')[1].split(' ')[2]);console.log('ready');function f(){{if(process.stdout.write(Buffer.alloc(4096)))setImmediate(f);else process.stdout.once('drain',f)}}f();setInterval(()=>{{}},1000)",
         serde_json::to_string(&marker).unwrap()
     );
-    let mut child = f
-        .machine()
-        .args(["exec", "--owned", "--", "/usr/bin/node", "-e", &app])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut child = f.spawn(
+        f.machine()
+            .args(["exec", "--owned", "--", "/usr/bin/node", "-e", &app])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
     let mut reader = BufReader::new(child.stdout.take().unwrap());
     loop {
         let mut line = String::new();
@@ -270,14 +435,18 @@ fn stalled_owned_sink_cleans_guest_group_without_requiring_output_eof() {
     assert!(!status.success());
     let group = fs::read_to_string(marker).unwrap().parse::<i32>().unwrap();
     assert_eq!(unsafe { libc::kill(-group, 0) }, -1);
+    assert_eq!(
+        fs::read_dir(f.root.path().join("guest-controls"))
+            .unwrap()
+            .count(),
+        0
+    );
 }
 
 #[test]
 fn malformed_primary_stream_cannot_be_overridden_by_a_clean_receipt() {
     let f = Fixture::new();
-    let stub = f.root.path().join("bin/openshell");
-    let source = fs::read_to_string(&stub).unwrap();
-    fs::write(&stub,source.replace("  exec \"$@\"", "  case \"$*\" in *machine-launch*) printf '%s\\n' '{\"v\":1,\"seq\":0,\"seq\":0,\"event\":\"output\",\"stream\":\"stdout\",\"data\":\"QQ==\"}';; esac\n  exec \"$@\"" )).unwrap();
+    fs::write(f.root.path().join("malformed-primary"), b"1").unwrap();
     let out = f
         .machine()
         .args([
@@ -301,6 +470,12 @@ fn malformed_primary_stream_cannot_be_overridden_by_a_clean_receipt() {
     assert_eq!(final_event["event"], "finished");
     assert_eq!(final_event["ok"], false);
     assert!(final_event["exit_code"].is_null());
+    assert_eq!(
+        fs::read_dir(f.root.path().join("guest-controls"))
+            .unwrap()
+            .count(),
+        0
+    );
 }
 
 #[test]
@@ -388,7 +563,13 @@ fn unowned_exec_postlaunch_drift_is_a_fixed_unknown_effects_completion() {
     // Work has finished; remove only the fixture's independently recorded private controls.
     let token = fs::read_to_string(token_file).unwrap();
     assert!(token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit()));
-    fs::remove_dir_all(format!("/tmp/dungeon-owned-{token}")).unwrap();
+    fs::remove_dir_all(
+        f.root
+            .path()
+            .join("guest-controls")
+            .join(format!("dungeon-owned-{token}")),
+    )
+    .unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(out.stderr.is_empty());
     let events = String::from_utf8(out.stdout)

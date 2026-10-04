@@ -59,6 +59,35 @@ AI/owned-lifecycle matrix was repeated.
 
 #### Corrected review candidate
 
+CI run `37196051837` on `f2d8ff0026f647b5a57967ebbddabda82711afb9`
+passed all four native builds and Node 24/npm/package gates, but three synthetic
+machine tests failed before workload output. Their OpenShell stub forwarded guest
+`/usr/bin/node` directly to the host after clearing setup-node's PATH; the runner
+provisioned Node 24.21.0 under `/opt/hostedtoolcache/node/24.21.0/x64`. Thus these
+fixtures depended on an unrelated host executable rather than the provisioned
+test prerequisite. The logs do not inventory `/usr/bin/node`; they establish the
+wrong path binding and pre-output failures, not its exact host filesystem state.
+The non-TTY shim does not chdir to `/sandbox/project`, ruling out the suspected
+missing project cwd as the cause of these three failures.
+
+`tests/machine.rs` now resolves trusted host Node before clearing PATH. A fixed
+test-only adapter validates the exact embedded guest shim and translates guest
+Node, cwd and control locations to private fixture resources. Production shim,
+guest prerequisites and stream assertions are unchanged. Pending children are
+reaped on assertion unwinding; invocation groups are recorded with start identity
+and removed by fixture cleanup, including private controls. A new regression
+checks workload cwd/private controls and early-drop group cleanup. Focused machine
+tests and default-parallel **115 unit + 15 integration tests**, formatting,
+all-target Clippy and warnings-denied release build passed on local Node 22.22.2.
+Node 24 is unavailable locally; hosted CI must verify the corrected fixture there.
+The same nine machine tests also passed with a trusted prerequisite relay under
+an external provisioned-bin PATH prefix, confirming actual transport calls use
+the provisioned Node rather than the fixed guest path (not a Node 24 claim).
+Evidence: `/tmp/opencode/dungeon-machine20-native/evidence/fixture-fix`.
+Release SHA-256 remains `ff7d867f55e2b8f71679cc3447f9516fb1643d4a915dc35f2260e2ef7436381f`:
+runtime source and production binary did not change, so no native VM rerun was
+needed. Prior native evidence retains its recorded revision qualification.
+
 PR #37 CI run `37195595296` on feature
 `7017b8b5f63165893343ff9d83ec78e4b50af013` exposed a frontend ordering regression:
 human upload/export had lost their pre-Runtime import check. Without OpenShell
