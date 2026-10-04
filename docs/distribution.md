@@ -2,6 +2,14 @@
 
 The Rust `dungeon` binary is the only implementation. Every distribution path must execute that binary and must not reimplement policy, authentication, configuration, or runtime behavior.
 
+## Current availability
+
+Rust 0.0.2 on main is source-only; follow the [source build](../README.md#build).
+CI builds native archives and npm tarballs, but no Rust 0.0.2 release or npm
+package is published. The latest published release, v0.0.1, contains the older
+Python wheel/source archive and does not implement this Rust manual. The
+[reviewed agent image](../images/agent/README.md) also requires a local build.
+
 ## Native releases
 
 CI packages the same native targets that it compiles:
@@ -21,7 +29,7 @@ The release workflow intentionally rebuilds rather than promoting an earlier CI 
 
 ## npm / npx
 
-Intended convenience surface:
+Planned commands, not currently usable (the package is unpublished):
 
 ```sh
 npx @agent-archaeology/dungeon

@@ -4,13 +4,37 @@ Development-preview contract for external harnesses. One Rust Runtime and the
 existing policy, identity, transfer and owned-process checks remain authoritative.
 This is not an SDK, daemon, remote execution protocol or orchestrator.
 
+After [building the CLI and setting up the gateway](../README.md#build), build
+the [local agent image](../images/agent/README.md) before selecting it below.
+Run these examples from a project directory, not your home or filesystem root.
+The `--yes` flags are explicit demonstration approvals: first `up` uploads the
+project and `export --yes` applies reviewed guest changes to the host.
+
 ```sh
+PRIVATE="$HOME/.config/dungeon/demo"
 dungeon machine --schema 1 resolve --project "$PWD"
 dungeon machine --schema 1 init --yes --directory "$PRIVATE" --project "$PWD" \
   --name demo --gateway dungeon-local --image localhost/dungeon-agent:0.0.3-dev
 dungeon --config "$PRIVATE/dungeon.json" machine --schema 1 up --yes
 dungeon --config "$PRIVATE/dungeon.json" machine --schema 1 status
-dungeon --config "$PRIVATE/dungeon.json" machine --schema 1 exec --owned -- node app.js
+```
+
+Machine exec requires a pipe, not terminal stdout. This Bash example drains raw
+base64 JSONL for manual inspection; `cat` is not a production protocol consumer.
+`pipefail` preserves a nonzero Dungeon exit instead of hiding it behind `cat`:
+
+```bash
+set -o pipefail
+dungeon --config "$PRIVATE/dungeon.json" machine --schema 1 exec --owned -- \
+  node -e 'process.stdout.write("hello\n")' | cat
+```
+
+A harness must drain incrementally, validate the complete JSONL and compare the
+`finished` event with the CLI exit status (including workload exit 23); see
+[completion rules](#execution-bytes-and-completion). Export and close remain
+separate deliberate operations:
+
+```sh
 dungeon --config "$PRIVATE/dungeon.json" machine --schema 1 export --yes
 dungeon --config "$PRIVATE/dungeon.json" machine --schema 1 close --preserve
 ```

@@ -1,5 +1,11 @@
 # Contributing
 
+Start with the [source build](README.md#build) and
+[development checks](README.md#development). For ordinary bugs or feedback,
+use the [issue tracker](https://github.com/Dark-Roast-Cyber/dungeon/issues) with
+versions, reproduction steps and sanitized results. Do not post credentials,
+personal session stores or sensitive security details in public issues.
+
 Dungeon is a Rust binary. Validate changes with:
 
 Install Node 24 on a trusted host PATH for the owned-execution Rust fixture
