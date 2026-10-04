@@ -532,7 +532,7 @@ fn initialize(
     Ok(0)
 }
 
-fn write_environment(directory: PathBuf, values: ConfigDoc) -> Result<Config> {
+pub(crate) fn write_environment(directory: PathBuf, values: ConfigDoc) -> Result<Config> {
     sandbox_name(&values.name)?;
     for (field, value) in [
         ("gateway", values.gateway.as_str()),
@@ -914,9 +914,9 @@ mod tests {
         } else {
             "snapshot imports require Linux"
         };
-        for action in ["create", "up", "run", "upload", "forward"] {
+        for action in ["create", "up", "run", "upload", "export", "forward"] {
             let mut args = vec!["dungeon", "--config", path.to_str().unwrap(), action];
-            if action == "upload" {
+            if matches!(action, "upload" | "export") {
                 args.push("--yes");
             }
             if action == "forward" {

@@ -38,7 +38,8 @@ impl TransferGuard {
 
     #[cfg(not(unix))]
     fn acquire_at(_: &Config, _: &Path) -> Result<Self> {
-        Err(Error::new(
+        Err(Error::refusal(
+            crate::ErrorCode::Unsupported,
             "private copy-transfer locking requires a Unix host",
         ))
     }
@@ -175,7 +176,10 @@ mod private {
         let file = open(dir, name, libc::O_RDWR | libc::O_CREAT, 0o600)?;
         metadata(&file, false)?;
         file.try_lock().map_err(|_| {
-            Error::new("another upload/export owns the transfer lock; retry explicitly")
+            Error::refusal(
+                crate::ErrorCode::Busy,
+                "another upload/export owns the transfer lock; retry explicitly",
+            )
         })?;
         Ok(file)
     }
@@ -542,6 +546,7 @@ fn review_and_apply(config: &Config, base: &Tree, guest_root: &Path, yes: bool) 
     review_and_apply_checked(config, base, guest_root, yes, || Ok(()))
 }
 
+#[cfg(test)]
 pub(crate) fn review_and_apply_checked(
     config: &Config,
     base: &Tree,
@@ -552,11 +557,46 @@ pub(crate) fn review_and_apply_checked(
     review_and_apply_with_hooks(config, base, guest_root, yes, before_apply, || Ok(()))
 }
 
+pub(crate) fn review_and_apply_output(
+    config: &Config,
+    base: &Tree,
+    guest_root: &Path,
+    yes: bool,
+    output: &crate::output::Output,
+    before_apply: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    apply_with_output(config, base, guest_root, yes, output, before_apply, || {
+        Ok(())
+    })
+}
+
+#[cfg(test)]
 fn review_and_apply_with_hooks(
     config: &Config,
     base: &Tree,
     guest_root: &Path,
     yes: bool,
+    after_review: impl FnOnce() -> Result<()>,
+    after_step: impl FnMut() -> Result<()>,
+) -> Result<()> {
+    apply_with_output(
+        config,
+        base,
+        guest_root,
+        yes,
+        &crate::output::Output::default(),
+        after_review,
+        after_step,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_with_output(
+    config: &Config,
+    base: &Tree,
+    guest_root: &Path,
+    yes: bool,
+    output: &crate::output::Output,
     after_review: impl FnOnce() -> Result<()>,
     mut after_step: impl FnMut() -> Result<()>,
 ) -> Result<()> {
@@ -570,20 +610,26 @@ fn review_and_apply_with_hooks(
             // Independently identical edits have converged; record that agreement.
             save_baseline(config, &guest)?;
         }
-        println!("No export changes; host unchanged.");
+        output.review(&[])?;
+        output.message(format_args!("No export changes; host unchanged."))?;
         return Ok(());
     }
-    for (path, change) in &changes {
-        let label = match change {
-            Change::Add => "ADD",
-            Change::Modify => "MODIFY",
-            Change::Delete => "DELETE",
-            Change::Conflict => "CONFLICT",
-        };
-        println!("{label:<9}{}", path.escape_debug());
-    }
+    let review = changes
+        .iter()
+        .map(|(path, change)| {
+            let label = match change {
+                Change::Add => "ADD",
+                Change::Modify => "MODIFY",
+                Change::Delete => "DELETE",
+                Change::Conflict => "CONFLICT",
+            };
+            (path.clone(), label)
+        })
+        .collect::<Vec<_>>();
+    output.review(&review)?;
     if changes.values().any(|change| *change == Change::Conflict) {
-        return Err(Error::new(
+        return Err(Error::refusal(
+            crate::ErrorCode::Conflict,
             "export conflicts; host unchanged; resolve explicitly (no automatic merge)",
         ));
     }
@@ -612,8 +658,9 @@ fn review_and_apply_with_hooks(
         }
     }
     if !yes {
-        if !io::stdin().is_terminal() {
-            return Err(Error::new(
+        if output.machine || !io::stdin().is_terminal() {
+            return Err(Error::refusal(
+                crate::ErrorCode::ApprovalRequired,
                 "review required; rerun export --yes to approve these changes",
             ));
         }
@@ -801,7 +848,7 @@ fn review_and_apply_with_hooks(
     }
     // Changes are complete and the baseline is durable; no recovery copy is needed.
     fs::remove_dir_all(&recovery).map_err(|_| Error::new("host applied and baseline committed, but recovery cleanup failed; inspect remaining recovery directory manually"))?;
-    println!("Export applied; upload baseline refreshed.");
+    output.message(format_args!("Export applied; upload baseline refreshed."))?;
     Ok(())
 }
 

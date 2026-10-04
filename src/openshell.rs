@@ -105,6 +105,7 @@ pub(crate) struct Runtime<'a> {
     config: &'a Config,
     env: HashMap<OsString, OsString>,
     binary: PathBuf,
+    pub(crate) output: crate::output::Output,
 }
 
 impl<'a> Runtime<'a> {
@@ -117,7 +118,10 @@ impl<'a> Runtime<'a> {
         #[cfg(not(target_os = "linux"))]
         {
             let _ = arguments;
-            Err(Error::new("owned SSH requires a Linux host and guest"))
+            Err(Error::refusal(
+                crate::ErrorCode::Unsupported,
+                "owned SSH requires a Linux host and guest",
+            ))
         }
     }
     pub(crate) fn execute_owned(&self, arguments: &[String]) -> Result<i32> {
@@ -158,27 +162,30 @@ impl<'a> Runtime<'a> {
                             "environment created, but initial project upload failed (exit {code}); sandbox preserved; retry with upload --yes"
                         )));
                     }
-                    println!("Environment Ready; initial project uploaded.");
+                    self.output
+                        .message(format_args!("Environment Ready; initial project uploaded."))?;
                 }
                 ProjectTransfer::Live => {
-                    println!(
+                    self.output.message(format_args!(
                         "Environment Ready; live project mount requested at {GUEST_PROJECT}; no upload performed."
-                    );
+                    ))?;
                 }
             }
         } else {
             match Self::phase(&self.checked(false, true)?)? {
                 Phase::Ready => match self.config.values.project_transfer {
-                    ProjectTransfer::Copy => {
-                        println!("Environment already up; guest project unchanged.")
-                    }
-                    ProjectTransfer::Live => {
-                        println!("Environment already up; live project mount unchanged.")
-                    }
+                    ProjectTransfer::Copy => self.output.message(format_args!(
+                        "Environment already up; guest project unchanged."
+                    ))?,
+                    ProjectTransfer::Live => self.output.message(format_args!(
+                        "Environment already up; live project mount unchanged."
+                    ))?,
                 },
                 Phase::Stopped => {
                     self.start()?;
-                    println!("Environment Ready; existing environment resumed (no upload).");
+                    self.output.message(format_args!(
+                        "Environment Ready; existing environment resumed (no upload)."
+                    ))?;
                 }
             }
         }
@@ -213,7 +220,9 @@ impl<'a> Runtime<'a> {
 
     pub(crate) fn down(&self) -> Result<i32> {
         match Self::phase(&self.checked(false, false)?)? {
-            Phase::Stopped => println!("Environment already stopped; guest state preserved."),
+            Phase::Stopped => self.output.message(format_args!(
+                "Environment already stopped; guest state preserved."
+            ))?,
             Phase::Ready => {
                 let code = self.lifecycle_command("stop")?;
                 if code != 0 {
@@ -224,7 +233,9 @@ impl<'a> Runtime<'a> {
                         "sandbox stop returned success but sandbox is not Stopped",
                     ));
                 }
-                println!("Environment stopped; guest project, sessions and auth preserved.");
+                self.output.message(format_args!(
+                    "Environment stopped; guest project, sessions and auth preserved."
+                ))?;
             }
         }
         Ok(0)
@@ -245,6 +256,7 @@ impl<'a> Runtime<'a> {
             config,
             env,
             binary,
+            output: crate::output::Output::default(),
         };
         let version = runtime.capture(&["--version".into()], false)?;
         let version = version.trim();
@@ -280,11 +292,12 @@ impl<'a> Runtime<'a> {
         let _lock = crate::imports::creation_lock(self.config)?;
         if !self.config.values.imports.is_empty() {
             #[cfg(target_os = "linux")]
-            local_setup::verify_import_gateway(self.config)?;
+            local_setup::verify_import_gateway(self.config, &self.output)?;
         }
         if self.config.state_path().exists() {
             self.checked(false, true)?;
-            println!("Environment already exists; no changes made.");
+            self.output
+                .message(format_args!("Environment already exists; no changes made."))?;
             return Ok(0);
         }
 
@@ -294,6 +307,7 @@ impl<'a> Runtime<'a> {
         let policy_path = directory.path().join("policy.json");
         write_new(&policy_path, &self.config.policy)?;
 
+        self.output.mutating();
         self.capture(&create_arguments(self.config, &policy_path), true)?;
 
         let remote = self.get()?;
@@ -321,14 +335,14 @@ impl<'a> Runtime<'a> {
         )?;
 
         match self.config.values.project_transfer {
-            ProjectTransfer::Copy => println!(
+            ProjectTransfer::Copy => self.output.message(format_args!(
                 "Created {}. Project upload is a separate action.",
                 self.config.values.name
-            ),
-            ProjectTransfer::Live => println!(
+            ))?,
+            ProjectTransfer::Live => self.output.message(format_args!(
                 "Created {} with the configured live project mount request. Live transfer has recorded Fedora/OpenShell 0.0.116/rootless-Podman validation only; default-mode promotion remains explicit.",
                 self.config.values.name
-            ),
+            ))?,
         }
         Ok(0)
     }
@@ -368,6 +382,7 @@ impl<'a> Runtime<'a> {
         if !self.config.values.project.is_dir() {
             return Err(Error::new("the host project must exist for upload"));
         }
+        crate::imports::verify(self.config)?;
         let _transfer = export::TransferGuard::acquire(self.config)?;
         self.checked(true, true)?;
         preflight_upload(&self.config.values.project, &self.config.values.project)?;
@@ -375,6 +390,7 @@ impl<'a> Runtime<'a> {
         // Even a failed transfer may have overwritten part of the guest. The old baseline
         // can no longer justify an export once upload starts.
         let baseline_path = self.config.baseline_path();
+        self.output.mutating();
         if baseline_path.exists() {
             if !fs::symlink_metadata(&baseline_path)?.file_type().is_file() {
                 return Err(Error::new("invalid baseline destination"));
@@ -382,7 +398,9 @@ impl<'a> Runtime<'a> {
             fs::remove_file(baseline_path)?;
         }
         // OpenShell nests named directories; uploading "." places their contents at the fixed guest path.
-        let code = self.upload_command().status()?.code().unwrap_or(128);
+        let mut command = self.upload_command();
+        self.operation_stdio(&mut command);
+        let code = command.status()?.code().unwrap_or(128);
         if code == 0 {
             if before != export::snapshot(&self.config.values.project)? {
                 return Err(Error::new(
@@ -403,13 +421,23 @@ impl<'a> Runtime<'a> {
                 "export is unavailable in live project-transfer mode; live project changes are written directly to the host project",
             ));
         }
+        crate::imports::verify(self.config)?;
         let _transfer = export::TransferGuard::acquire(self.config)?;
         self.checked(true, true)?;
         let baseline = export::load_baseline(self.config)?;
         let stage = self.download_project()?;
-        export::review_and_apply_checked(self.config, &baseline, stage.path(), yes, || {
-            self.checked(true, true).map(|_| ())
-        })?;
+        export::review_and_apply_output(
+            self.config,
+            &baseline,
+            stage.path(),
+            yes,
+            &self.output,
+            || {
+                self.checked(true, true)?;
+                self.output.mutating();
+                Ok(())
+            },
+        )?;
         Ok(0)
     }
 
@@ -523,7 +551,46 @@ impl<'a> Runtime<'a> {
     }
 
     fn status(&self, args: &[String]) -> Result<i32> {
-        Ok(self.command(args, true).status()?.code().unwrap_or(128))
+        let mut command = self.command(args, true);
+        self.operation_stdio(&mut command);
+        self.output.mutating();
+        Ok(command.status()?.code().unwrap_or(128))
+    }
+
+    fn operation_stdio(&self, command: &mut Command) {
+        if self.output.machine {
+            command
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+        }
+    }
+
+    pub(crate) fn machine(mut self) -> Self {
+        self.output = crate::output::Output::machine();
+        self
+    }
+
+    pub(crate) fn machine_execute(
+        &self,
+        argv: &[String],
+        cwd: &str,
+        owned: bool,
+        stdin: Option<Vec<u8>>,
+    ) -> Result<i32> {
+        crate::imports::verify(self.config)?;
+        #[cfg(target_os = "linux")]
+        {
+            owned::stream(self, argv, cwd, owned, stdin)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (argv, cwd, owned, stdin);
+            Err(Error::refusal(
+                crate::ErrorCode::Unsupported,
+                "Machine execution requires Linux.",
+            ))
+        }
     }
 
     fn remote_str<'b>(remote: &'b Value, key: &str) -> Result<&'b str> {
@@ -545,7 +612,8 @@ impl<'a> Runtime<'a> {
             || Self::remote_str(remote, "id")?.is_empty()
             || label != Some(self.config.fingerprint.as_str())
         {
-            return Err(Error::new(
+            return Err(Error::refusal(
+                crate::ErrorCode::IdentityMismatch,
                 "sandbox identity or configuration label does not match; refusing reuse",
             ));
         }
@@ -572,7 +640,8 @@ impl<'a> Runtime<'a> {
             .map_err(|error| Error::new(format!("invalid runtime.json: {error}")))?;
 
         if state.schema != 1 || state.config != self.config.fingerprint {
-            return Err(Error::new(
+            return Err(Error::refusal(
+                crate::ErrorCode::IdentityMismatch,
                 "launch configuration changed; restore it or initialize a new environment",
             ));
         }
@@ -584,7 +653,8 @@ impl<'a> Runtime<'a> {
         self.check_identity(&remote)?;
 
         if Self::remote_str(&remote, "id")? != state.id {
-            return Err(Error::new(
+            return Err(Error::refusal(
+                crate::ErrorCode::IdentityMismatch,
                 "sandbox was replaced; refusing to attach to a different instance",
             ));
         }
@@ -596,7 +666,8 @@ impl<'a> Runtime<'a> {
                     .ok_or_else(|| Error::new("sandbox response is missing policy"))?,
             )? != state.observed_policy
         {
-            return Err(Error::new(
+            return Err(Error::refusal(
+                crate::ErrorCode::PolicyDrift,
                 "effective backend policy changed; inspect it before further execution",
             ));
         }
@@ -766,15 +837,15 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[cfg(unix)]
-    struct Fixture {
-        root: tempfile::TempDir,
-        config: Config,
+    pub(super) struct Fixture {
+        pub(super) root: tempfile::TempDir,
+        pub(super) config: Config,
         binary: PathBuf,
     }
 
     #[cfg(unix)]
     impl Fixture {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             let root = tempfile::tempdir().unwrap();
             fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700)).unwrap();
             let canonical = root.path().canonicalize().unwrap();
@@ -842,24 +913,95 @@ esac
             }
         }
 
-        fn runtime(&self) -> Runtime<'_> {
+        pub(super) fn runtime(&self) -> Runtime<'_> {
             Runtime {
                 config: &self.config,
                 env: HashMap::new(),
                 binary: self.binary.clone(),
+                output: crate::output::Output::default(),
             }
         }
 
-        fn flag(&self, name: &str) {
+        pub(super) fn flag(&self, name: &str) {
             fs::write(self.root.path().join(name), "").unwrap();
         }
-        fn calls(&self, action: &str) -> usize {
+        pub(super) fn calls(&self, action: &str) -> usize {
             fs::read_to_string(self.root.path().join("calls"))
                 .unwrap_or_default()
                 .lines()
                 .filter(|line| line.contains(&format!("sandbox {action} ")))
                 .count()
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn machine_effects_remain_unknown_after_create_or_stop_mutates() {
+        let fixture = Fixture::new();
+        fixture.flag("mismatch");
+        let runtime = fixture.runtime().machine();
+        let error = runtime.output.error(runtime.create().unwrap_err());
+        assert_eq!(
+            serde_json::to_value(error.code).unwrap(),
+            "identity_mismatch"
+        );
+        assert_eq!(error.effects, "unknown");
+        assert_eq!(fixture.calls("create"), 1);
+
+        let fixture = Fixture::new();
+        fixture.runtime().create().unwrap();
+        let source = fs::read_to_string(&fixture.binary).unwrap();
+        fs::write(
+            &fixture.binary,
+            source.replace(
+                "echo Stopped > \"$root/phase\"",
+                "echo Stopped > \"$root/phase\"; touch \"$root/mismatch\"",
+            ),
+        )
+        .unwrap();
+        let runtime = fixture.runtime().machine();
+        let error = runtime.output.error(runtime.down().unwrap_err());
+        assert_eq!(
+            serde_json::to_value(error.code).unwrap(),
+            "identity_mismatch"
+        );
+        assert_eq!(error.effects, "unknown");
+        assert_eq!(fixture.calls("stop"), 1);
+        let readonly = fixture.runtime().machine();
+        let error = readonly.output.error(readonly.inspect_bound().unwrap_err());
+        assert_eq!(error.effects, "none");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn transfer_snapshot_guards_precede_locks_baseline_and_native_mutation() {
+        let mut fixture = Fixture::new();
+        fixture.runtime().create().unwrap();
+        fixture.config.values.imports = vec![crate::config::Import {
+            source: fixture.root.path().join("nvim-source"),
+            destination: "/sandbox/.config/nvim".into(),
+            snapshot: None,
+        }];
+        let baseline = fixture.config.baseline_path();
+        fs::write(&baseline, "preserve-baseline").unwrap();
+        for snapshot in [None, Some("a".repeat(64))] {
+            fixture.config.values.imports[0].snapshot = snapshot;
+            for machine in [false, true] {
+                let runtime = if machine {
+                    fixture.runtime().machine()
+                } else {
+                    fixture.runtime()
+                };
+                assert!(runtime.upload().is_err());
+                assert!(runtime.export(true).is_err());
+            }
+        }
+        assert_eq!(fs::read_to_string(baseline).unwrap(), "preserve-baseline");
+        assert_eq!(fixture.calls("upload"), 0);
+        assert_eq!(fixture.calls("download"), 0);
+        assert!(!fixture.root.path().join("transfer.lock").exists());
+        fixture.runtime().inspect_bound().unwrap();
+        fixture.runtime().down().unwrap();
     }
 
     #[cfg(unix)]
@@ -1333,6 +1475,7 @@ esac
             config: &config,
             env: HashMap::new(),
             binary: PathBuf::from("/usr/bin/openshell"),
+            output: crate::output::Output::default(),
         };
         let upload = runtime.upload_command();
         assert_eq!(

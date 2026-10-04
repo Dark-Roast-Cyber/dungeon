@@ -1,5 +1,14 @@
 # Configuration
 
+## Machine callers
+
+Use the [machine schema-1 contract](machine.md) for deterministic lifecycle,
+workload byte streaming and explicitly approved whole-project transfer. It shares
+this configuration and Runtime; it never prompts or initializes a missing binding
+implicitly. `--config` and `resolve --project` cannot be combined. `init --yes`
+writes the explicitly selected private directory; arbitrary directories require
+later `--config`. Generated transfer remains copy. Remote execution is unsupported.
+
 ## Read-only diagnostics
 
 ```sh

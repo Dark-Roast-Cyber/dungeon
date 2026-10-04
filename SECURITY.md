@@ -63,6 +63,14 @@ empty or custom engine storage instead of initializing it.
 
 ## Credentials
 
+Machine schema 1 emits fixed diagnostics, not native stderr, policy/provider JSON
+or parser error text. Requested workload bytes are intentionally lossless and
+unredacted, including secrets and terminal control sequences; consumers must treat
+them as untrusted. Lexically checked guest cwd is not symlink confinement. FIFO
+backpressure/cancellation and independent owned receipts assist lifecycle only;
+they do not add containment or guarantee final event delivery. See the
+[machine contract](docs/machine.md).
+
 OpenShell providers can grant authority even when raw secrets are brokered. `dungeon auth` starts vendor-owned login inside the guest. Resulting OAuth credentials live in guest-controlled state. Dungeon does not inspect, copy, refresh, escrow, or synchronize them.
 
 ## Remaining risks

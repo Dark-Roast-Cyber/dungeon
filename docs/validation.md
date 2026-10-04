@@ -55,6 +55,201 @@ AI/owned-lifecycle matrix was repeated.
 
 ## Existing runtime and transfer evidence
 
+### Issue #20 machine namespace candidate (2026-10-04 UTC)
+
+#### Corrected review candidate
+
+CI run `37196051837` on `f2d8ff0026f647b5a57967ebbddabda82711afb9`
+passed all four native builds and Node 24/npm/package gates, but three synthetic
+machine tests failed before workload output. Their OpenShell stub forwarded guest
+`/usr/bin/node` directly to the host after clearing setup-node's PATH; the runner
+provisioned Node 24.21.0 under `/opt/hostedtoolcache/node/24.21.0/x64`. Thus these
+fixtures depended on an unrelated host executable rather than the provisioned
+test prerequisite. The logs do not inventory `/usr/bin/node`; they establish the
+wrong path binding and pre-output failures, not its exact host filesystem state.
+The non-TTY shim does not chdir to `/sandbox/project`, ruling out the suspected
+missing project cwd as the cause of these three failures.
+
+`tests/machine.rs` now resolves trusted host Node before clearing PATH. A fixed
+test-only adapter validates the exact embedded guest shim and translates guest
+Node, cwd and control locations to private fixture resources. Production shim,
+guest prerequisites and stream assertions are unchanged. Pending children are
+reaped on assertion unwinding; invocation groups are recorded with start identity
+and removed by fixture cleanup, including private controls. A new regression
+checks workload cwd/private controls and early-drop group cleanup. Focused machine
+tests and default-parallel **115 unit + 15 integration tests**, formatting,
+all-target Clippy and warnings-denied release build passed on local Node 22.22.2.
+Node 24 is unavailable locally; hosted CI must verify the corrected fixture there.
+The same nine machine tests also passed with a trusted prerequisite relay under
+an external provisioned-bin PATH prefix, confirming actual transport calls use
+the provisioned Node rather than the fixed guest path (not a Node 24 claim).
+Evidence: `/tmp/opencode/dungeon-machine20-native/evidence/fixture-fix`.
+Release SHA-256 remains `ff7d867f55e2b8f71679cc3447f9516fb1643d4a915dc35f2260e2ef7436381f`:
+runtime source and production binary did not change, so no native VM rerun was
+needed. Prior native evidence retains its recorded revision qualification.
+
+PR #37 CI run `37195595296` on feature
+`7017b8b5f63165893343ff9d83ec78e4b50af013` exposed a frontend ordering regression:
+human upload/export had lost their pre-Runtime import check. Without OpenShell
+installed, the version/prerequisite lookup error masked unapproved-import refusal.
+The original test was preserved and extended to export, not weakened. Human work
+preflight is restored; machine work dispatch now uses the same import verifier
+before Runtime construction, while shared Runtime transfer checks remain necessary
+operation-boundary rechecks. A synthetic actual CLI test with an instrumented
+OpenShell version stub proves human/machine upload/export never probe it for an
+unapproved import. Status/stop/close remain artifact-independent.
+
+The fixed error vocabulary stays identical across platforms. Only unused enum
+variants have targeted conditional dead-code allowances (`Busy` on non-Unix,
+`CleanupUnconfirmed` on non-Linux); the Linux-only `classified` helper is compiled
+only on Linux. Warnings remain denied; no module-wide suppression was added.
+Focused tests, formatting, all-target Clippy, **115 unit + 14 integration tests**
+and warnings-denied locked Linux release compilation passed locally. Release
+SHA-256: `ff7d867f55e2b8f71679cc3447f9516fb1643d4a915dc35f2260e2ef7436381f`.
+Evidence/manifests are in `/tmp/opencode/dungeon-machine20-native/evidence/ci-fix`.
+Only Linux target std is installed; hosted macOS/Windows checks must rerun before
+merge. The preceding CI Node 24/npm/Linux successes and native VM matrix are
+revision-qualified evidence, not tests of this final binary. No VM rerun was
+needed for the early refusal/compile-only correction.
+
+Final effects-only refinement marks potential execution effects immediately before
+owned/unowned primary spawn and interactive foreground spawn, after preflight.
+JSONL failure serialization now applies the existing Runtime effects mapper;
+interactive errors already use it through machine dispatch. Postlaunch identity/
+policy refusals retain their category with `effects: unknown`; read-only preflight
+refusals remain `none`. New synthetic coverage exercises an actual unowned CLI
+workload changing the inspected binding before completion, and the interactive
+postlaunch classifier seam (not a repeated PTY run). Formatting, Clippy,
+**115 unit + 13 integration tests**, and the release build passed. Final release
+SHA-256 is `5df51b280c9c73ed2d74eafb87384476a639210a07836529b49341892e8bdadf`;
+all 19 candidate paths, including untracked files and `src/owned_ssh.rs`, are in
+`final-effects-manifest.sha256` under the evidence root below. The full native
+matrix and unchanged Node tests below belong to the preceding corrected revision;
+only diagnostic effects classification changed, and no VM rerun or byte-identical
+final binary is claimed. Parent rereview/CI remain separate gates.
+
+Five review findings were corrected without a new Runtime or cleanup owner:
+machine cancellation remains sticky through final delivery (human 130/143 unchanged);
+started-event size is checked before launch and postspawn initialization failure
+enters owned cleanup; effects become unknown after a potential mutation without
+changing the error category; shared Runtime upload/export verifies selected
+snapshots before transfer; known unsupported platform states now match refusals.
+Test-only phase hooks raise actual INT/TERM at prelaunch, teardown-tail and
+blocked final-drain, with no production environment switches. Synthetic actual CLI tests
+cover oversized opaque IDs and post-create/post-stop serialized effects. Private
+descriptor failure uses the same STOP/receipt path and preserves a sentinel.
+
+Final corrected formatting, all-target Clippy, default-parallel locked Rust
+tests (**114 unit + 12 integration**), release build and all 11 Node tests passed
+on the same Linux/Rust 1.98.1/Node 22.22.2 host. Pure platform-state tests cover
+Linux/macOS/Windows, not cross-platform compilation. Node 24 and all four hosted
+platform builds remain parent CI gates.
+
+The actual corrected CLI passed the full disposable native matrix on the pinned
+FCOS/OpenShell/Podman/image combination below. This includes the existing
+lifecycle, exact binary/warning/exit23, FIFO INT/TERM/broken-reader, transfer/
+recovery, identity, PTY and corrupt-snapshot gates again. Machine cancellations
+returned 1 with failure completion, not 130/143 success; corrupted snapshots
+also refused human and machine upload/export with baseline unchanged.
+
+New production-native fault gates use a **fixed trusted Bash adapter outside the
+project** in the VM's own tool directory. It delegates version, identity and
+control calls to the official OpenShell binary, corrupting only the authenticated
+primary framed stdout after a real workload produces output. Malformed duplicate
+keys, a 12 KiB oversized line, truncated EOF and primary-client death all passed:
+fixed error/null application exit, group absence, control removal and unrelated
+sentinel survival. No production backdoor or fixture-config option exists. The
+first fixture attempt assumed Python on FCOS and never reached a primary launch;
+the replacement uses existing Bash and installs no VM/host tool. Only completed
+assertions count. These gates exercise the actual production parser/cleanup
+owner, not the prior scratch prototype.
+
+Sustained production streaming delivered **96 MiB + 5 stdout bytes** and exact
+184-byte stderr (including the independently PID-derived legitimate Node warning),
+exit 23 and cleanup. Over **57 samples / 43.81 seconds**, host machine RSS range
+was **36 KiB**; guest RSS ranges were **14,460 KiB outer framer**, **1,764 KiB
+guardian**, and **32,608 KiB workload**. Consumer line-buffer peak was 21,953
+bytes. These are bounded observed ranges with startup/GC variation, not flat
+system-memory or allocator-capacity claims. Incremental hashing avoids consumer
+aggregate output. The host parser services at most 16 bounded reads per signal
+tick, retaining the same queue/frame limits without per-frame tick throttling.
+
+Corrected tested release SHA-256:
+`d33ab1459b2e28ec2892eb1136bedd42f8655ac647efc797d222a93019ea1e3d`.
+Authoritative corrected files under `/tmp/opencode/dungeon-machine20-native/evidence`:
+`corrected-final-source.sha256`, `corrected-rust-tests.txt`,
+`corrected-node-tests.txt`, `production-faults.json`, `production-memory.json`,
+`production-binary.json`, `gates.txt`, `fault-proxy.sha256`, and `closure.txt`.
+The corrected binary's small exact-stream fixture had 524 frames. VM disks,
+keys/certificates and raw runtime logs are removed; QEMU reaped and final loopback
+port 33723 absent. Corrected host inventory/metadata comparisons match the original
+baseline. No required job remains running, no existing host gateway changed.
+Remaining limits are broader platform/transport/containment coverage and parent
+review/CI, not the formerly missing production fault and RSS gates. #21/#32,
+publication, live stdin and general persistence remain separate.
+
+#### Initial candidate record (superseded by corrections above)
+
+Schema 1 is implemented on the existing Runtime; [machine.md](machine.md) owns
+the protocol. Candidate base is `848e99d21b9a6d080875f8c6db60c4a9993357c5` plus
+the working-tree implementation. Formatting, all-target Clippy, locked default-
+parallel Rust tests (108 unit + 10 integration), locked release compilation, and
+all 11 owned/launcher/staging Node tests passed. Host Rust was 1.98.1 and Node
+22.22.2, not Node 24; all four hosted platform builds remain a parent CI gate.
+No dependencies, release version or npm behavior changed.
+
+The actual final release CLI passed in a disposable native FCOS
+44.20260913.3.2 VM, kernel 7.2.5-200.fc44.x86_64, SELinux Enforcing, rootless
+Podman 5.8.4, official OpenShell 0.0.116 and reviewed guest Node 22.22.1.
+The same pinned FCOS/OpenShell artifacts described in the setup record were
+checksum-verified again. Gateway digest was
+`05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645`;
+the reviewed immutable local agent archive loaded image ID
+`f41665067d11e4f2738a3134c93ea69ea47b8cf61a301f91a3a10e466398cdde`.
+The VM's own gateway explicitly enabled the existing bind ceiling for the
+snapshot gate; copy stayed the generated project default. No host gateway,
+credential, home, engine socket or policy was imported or widened.
+
+| Actual CLI gate | Result |
+| --- | --- |
+| Resolve/init/up/status/stop/start/close preserve | PASS; missing resolve is read-only, approval enforced, same ID and guest-only content survive resume/no-op |
+| Owned binary streaming | PASS; stdout/stderr before explicit producer release, exact >2 MiB streams including independent PID-based legitimate Node-warning oracle, tails, exit 23, resistant descendant/group absence and control removal |
+| Finite unowned stdin | PASS; 65,536 bytes delivered before launch, >cap and owned stdin refused |
+| Full FIFO INT/TERM and broken consumer | PASS; output failure exits nonzero, group absent, unrelated sentinel survives, controls removed; final run approximately 3.5–4.7 seconds |
+| Copy upload/export | PASS; structured no-prompt review, approved refresh/apply, conflict and busy refusal; failed apply retains recovery and blocks both transfers |
+| Identity and status independence | PASS; wrong bound ID refuses; Ready/Stopped explicit-config status works with host project absent |
+| Live transfer | PASS local upload/export refusal only; no live sandbox creation or new live-mount containment claim |
+| Owned interactive | PASS actual machine invocation, real PTY input/Ctrl-C, resize 100x40, terminal restoration and exit 23 |
+| Corrupt snapshot | PASS new execution/start refused; Ready/Stopped status, stop and existing owned cleanup remain artifact-independent |
+
+Native testing found two defects before the final pass: 1 MiB stdin exceeded
+OpenShell's complete decoded-request cap despite its larger nominal CLI cap;
+the machine payload cap is now 64 KiB. Backpressure cleanup initially waited for
+output EOF even with a valid independent receipt; failed output now cannot block
+group confirmation/control removal. Snapshot creation also exposed setup
+verification text on machine stdout; shared verification now honors quiet output.
+These are production CLI results, not substitution of the earlier scratch proof.
+
+Final tested release SHA-256:
+`0ab96a5d646e2147aaf337bca5a598614f2ac51e01b4e890624617d6f8b978bd`.
+Source/artifact hashes, reproducible scripts, exact stream hashes and gate results
+are retained at `/tmp/opencode/dungeon-machine20-native/evidence`. Final exact
+stdout was 1,048,588 bytes and stderr 1,048,764 bytes across 525 frames.
+Two subsequent test-only assertions reject oversized/truncated frames; focused
+tests, formatting and Clippy passed. Runtime code and the native-tested binary
+are unchanged; `final-source-after-test.sha256` records that final source tree.
+Owned VM resources, keys, disks, certificates and raw logs were deleted;
+QEMU was reaped and its loopback port 48391 absent. Before/after host container
+inventory and Dungeon/OpenShell metadata fingerprints matched.
+
+Strict malformed/duplicate/noncanonical/oversized frame parsing and sticky
+clean-receipt refusal have synthetic tests. The earlier scratch native fault
+matrix is not a production malformed/oversized/truncated transport-fault matrix;
+that broader production gate, memory instrumentation, and additional platform/
+transport faults remain unvalidated. This bounded record does not establish
+general containment, authentication, Node 24, power-loss recovery, remote
+execution, live stdin, Sandcastle integration or independent review approval.
+
 ### Issue #16 copy-transfer serialization and manual recovery
 
 The candidate on main `b4e581b` plus the recorded change passed on Fedora 44,

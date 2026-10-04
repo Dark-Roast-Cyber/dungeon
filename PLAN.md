@@ -164,8 +164,15 @@ accepted rereview does not establish new runtime/editor containment claims.
    [CI run 37173607186](https://github.com/Dark-Roast-Cyber/dungeon/actions/runs/37173607186)
    passed on main `cdffe9d42e3747efe7a018fa46289f2b68a4b7dd`.
    Native macOS builds do not establish macOS transfer durability.
-6. #20 and #21 remain later, separate work; #16 delivery does not mean either
-   the machine interface or adapter has started.
+6. #20 schema-1 implementation is in the working tree for parent review: shared
+   Runtime lifecycle JSON, bounded workload-byte JSONL, finite unowned stdin and
+   existing owned raw interaction. The corrected native proof informed framing;
+   actual production CLI validation is recorded separately in docs/validation.md.
+   Five review corrections plus production malformed/oversized/truncated/primary-
+   failure and sustained96MiB RSS gates now pass on the pinned VM; parent rereview
+   and hosted CI remain pending.
+   Review/CI/delivery remain separate gates. #21 is unimplemented: whole-project
+   reviewed transfers do not fit unchanged arbitrary-path copy/automatic sync.
 
 ### Issue #16 copy-transfer correctness (delivered)
 
