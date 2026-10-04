@@ -2,6 +2,7 @@ mod binding;
 mod cli;
 mod config;
 mod export;
+mod imports;
 mod openshell;
 mod policy;
 

@@ -57,8 +57,15 @@ fn live_project_mount(config: &Config) -> Option<LiveProjectMount> {
     })
 }
 
-fn live_driver_config(config: &Config) -> Option<String> {
-    live_project_mount(config).map(|mount| json!({"podman": {"mounts": [mount]}}).to_string())
+fn mount_driver_config(config: &Config) -> Option<String> {
+    let mut mounts: Vec<Value> = live_project_mount(config)
+        .into_iter()
+        .map(|m| json!(m))
+        .collect();
+    if let Some(source) = crate::imports::mount_source(config) {
+        mounts.push(json!({"type":"bind", "source":source, "target":"/sandbox/.config/nvim", "read_only":true, "selinux_label":"private"}));
+    }
+    (!mounts.is_empty()).then(|| json!({"podman": {"mounts": mounts}}).to_string())
 }
 
 pub(crate) fn project_transfer_plan(config: &Config) -> Value {
@@ -102,6 +109,7 @@ pub(crate) struct Runtime<'a> {
 
 impl<'a> Runtime<'a> {
     pub(crate) fn ssh_owned(&self, arguments: &[String]) -> Result<i32> {
+        crate::imports::verify(self.config)?;
         #[cfg(target_os = "linux")]
         {
             owned::ssh(self, arguments)
@@ -113,6 +121,7 @@ impl<'a> Runtime<'a> {
         }
     }
     pub(crate) fn execute_owned(&self, arguments: &[String]) -> Result<i32> {
+        crate::imports::verify(self.config)?;
         #[cfg(target_os = "linux")]
         {
             owned::run(self, arguments)
@@ -136,6 +145,7 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn up(&self) -> Result<i32> {
+        crate::imports::verify(self.config)?;
         if !self.config.state_path().exists() {
             self.create()?;
             match self.config.values.project_transfer {
@@ -183,6 +193,7 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn start(&self) -> Result<i32> {
+        crate::imports::verify(self.config)?;
         match Self::phase(&self.checked(false, true)?)? {
             Phase::Ready => Ok(0),
             Phase::Stopped => {
@@ -266,6 +277,11 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn create(&self) -> Result<i32> {
+        let _lock = crate::imports::creation_lock(self.config)?;
+        if !self.config.values.imports.is_empty() {
+            #[cfg(target_os = "linux")]
+            local_setup::verify_import_gateway(self.config)?;
+        }
         if self.config.state_path().exists() {
             self.checked(false, true)?;
             println!("Environment already exists; no changes made.");
@@ -318,6 +334,7 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn execute(&self, command: &[String], tty: bool, workdir: &str) -> Result<i32> {
+        crate::imports::verify(self.config)?;
         if command.is_empty()
             || command[0].is_empty()
             || command.iter().any(|arg| arg.contains('\0'))
@@ -417,6 +434,7 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn connect_vscode(&self) -> Result<i32> {
+        crate::imports::verify(self.config)?;
         self.checked(true, true)?;
         self.status(&[
             "sandbox".into(),
@@ -428,6 +446,7 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn ssh_config(&self) -> Result<i32> {
+        crate::imports::verify(self.config)?;
         self.checked(true, true)?;
         self.status(&[
             "sandbox".into(),
@@ -441,6 +460,7 @@ impl<'a> Runtime<'a> {
         port: NonZeroU16,
         local_port: Option<NonZeroU16>,
     ) -> Result<i32> {
+        crate::imports::verify(self.config)?;
         self.checked(true, true)?;
         let local_port = local_port.unwrap_or(port);
         self.status(&[
@@ -541,6 +561,10 @@ impl<'a> Runtime<'a> {
         self.check_remote(remote, ready, policy)
     }
 
+    pub(crate) fn inspect_bound(&self) -> Result<Value> {
+        self.checked(false, true)
+    }
+
     fn bound_state(&self) -> Result<RuntimeState> {
         let state: RuntimeState = serde_json::from_value(read_json(&self.config.state_path())?)
             .map_err(|error| Error::new(format!("invalid runtime.json: {error}")))?;
@@ -607,7 +631,7 @@ pub(crate) fn create_arguments(config: &Config, policy_path: &Path) -> Vec<Strin
     for provider in &config.values.providers {
         args.extend(["--provider".into(), provider.clone()]);
     }
-    if let Some(driver_config) = live_driver_config(config) {
+    if let Some(driver_config) = mount_driver_config(config) {
         args.extend(["--driver-config-json".into(), driver_config]);
     }
     args
@@ -618,7 +642,7 @@ pub(crate) fn plan_create_arguments(config: &Config, policy_path: &Path) -> Vec<
     if let Some(index) = args.iter().position(|arg| arg == "--driver-config-json")
         && let Some(value) = args.get_mut(index + 1)
     {
-        *value = "<derived from project_transfer>".into();
+        *value = "<derived from project_transfer and approved imports>".into();
     }
     args
 }
@@ -830,6 +854,49 @@ esac
                 .filter(|line| line.contains(&format!("sandbox {action} ")))
                 .count()
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn import_mounts_are_closed_and_missing_artifact_does_not_block_stop_or_identity() {
+        let mut fixture = Fixture::new();
+        fixture.runtime().create().unwrap();
+        fixture.config.values.imports = vec![crate::config::Import {
+            source: fixture.root.path().join("original-nvim"),
+            destination: "/sandbox/.config/nvim".into(),
+            snapshot: Some("a".repeat(64)),
+        }];
+        let copy: Value =
+            serde_json::from_str(&mount_driver_config(&fixture.config).unwrap()).unwrap();
+        assert_eq!(copy["podman"]["mounts"].as_array().unwrap().len(), 1);
+        assert_eq!(copy["podman"]["mounts"][0]["read_only"], true);
+        assert_eq!(
+            copy["podman"]["mounts"][0]["target"],
+            "/sandbox/.config/nvim"
+        );
+        assert_ne!(
+            copy["podman"]["mounts"][0]["source"],
+            json!(fixture.config.values.imports[0].source)
+        );
+        fixture.config.values.project_transfer = ProjectTransfer::Live;
+        let live: Value =
+            serde_json::from_str(&mount_driver_config(&fixture.config).unwrap()).unwrap();
+        assert_eq!(live["podman"]["mounts"].as_array().unwrap().len(), 2);
+        assert_eq!(live["podman"]["mounts"][0]["read_only"], false);
+        let runtime = fixture.runtime();
+        assert!(
+            runtime
+                .execute(&["true".into()], false, GUEST_PROJECT)
+                .is_err()
+        );
+        runtime.inspect_bound().unwrap();
+        // This is also the boundary used by owned cleanup; it must not reopen artifacts.
+        let remote = runtime.get().unwrap();
+        runtime.check_remote(remote, true, true).unwrap();
+        runtime.down().unwrap();
+        runtime.inspect_bound().unwrap();
+        fixture.flag("mismatch");
+        assert!(runtime.inspect_bound().is_err());
     }
 
     #[cfg(unix)]
@@ -1268,7 +1335,10 @@ esac
             .iter()
             .position(|arg| arg == "--driver-config-json")
             .unwrap();
-        assert_eq!(plan_args[index + 1], "<derived from project_transfer>");
+        assert_eq!(
+            plan_args[index + 1],
+            "<derived from project_transfer and approved imports>"
+        );
 
         let plan = project_transfer_plan(&live);
         assert_eq!(plan["mode"], "live");

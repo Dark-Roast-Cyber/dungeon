@@ -162,6 +162,7 @@ Low-friction project binding may remove repeated `--config` ceremony, but it mus
 | Agent sessions | Guest agent-owned |
 | Config/runtime binding | Private host directory |
 | Export baseline | Private config directory (`baseline.json`) |
+| Approved Neovim snapshot | Private config `imports/<digest>/nvim`; read-only guest bind, original source separate |
 | Credentials | OpenShell providers or vendor-owned guest login |
 | Project capability requests | Untrusted request input, never authority |
 
@@ -252,12 +253,16 @@ Unsupported or unsatisfied requests remain explicit. Missing authority never cau
 
 ### Snapshot imports
 
-The plan-only slice accepts a reviewed Neovim directory declaration in the authoritative private config and inventories it in `plan`. Runtime commands refuse it: OpenShell 0.0.116 uploads as the sandbox user, so guest-writable `/sandbox` cannot enforce a read-only imported subtree using uploaded file modes. Enforceable guest read-only snapshots remain an implementation gate.
+The Neovim slice accepts zero or one explicit directory declaration in the authoritative private config. `imports stage` captures bounded descriptor-checked files, reviews the captured hashes/data diff and selects an approved digest. The manifest is an artifact, not another configuration registry. Creation derives one read-only bind from the private digest-addressed snapshot, never from its original source. Copy project upload and optional live project transfer remain separate. Imports require the exact existing Dungeon-owned local bind-enabled UID998 gateway; setup predicates, not the weaker aggregate diagnostic report, authorize creation.
+
+The contract protects mounted **contents**, not their guest pathname. Native proof observed that UID998 could rename `/sandbox/.config` and create a replacement `/sandbox/.config/nvim`. The mounted original bytes stayed read-only. Dungeon does not guarantee which configuration subsequent Neovim invocations execute and does not mount the parent or change policy to prevent redirection.
+
+The selected digest enters existing config/runtime identity; source contents never enter identity dynamically. `plan` observes drift without refreshing. Staging refuses any existing runtime binding, including stopped or invalid state; refreshing an active environment requires a separately initialized environment. Stage/create share a narrow native file lock and reread authority. This is not general lifecycle serialization or crash/power-loss durability. Missing/tampered artifacts block work launch, not identity/policy checks used for status, stop and owned cleanup.
 
 Separately, the live read-write workspace transfer is now implemented as an explicit pre-validation candidate. It derives one bind mount from the canonical private-config project path to `/sandbox/project`; users cannot supply raw driver JSON or arbitrary mount lists. The workspace remains the only requested writable host path, imports remain a separate read-only snapshot lifecycle, and credentials, SSH keys, and engine sockets are never implicitly mounted. The copied upload/export path remains supported. The OpenShell 0.0.116/rootless-Podman/Fedora gate now has a recorded result; live still does not become the generated/default mode without an explicit promotion decision.
 
 - The host source path is selected explicitly from private Dungeon configuration.
-- Snapshot preflight rejects special files and symlinks for the initial implementation.
+- Snapshot preflight rejects special files, symlinks, hardlinks, unsafe ownership/permissions and known credential/native-state names; limits bound depth, entries and bytes.
 - Imported editor configuration is treated as code that may execute inside the guest. Dungeon never sources or evaluates it on the host.
 - Host home/config/cache trees, credential stores, browser state, SSH keys, agent databases, and shared caches are never implicitly imported.
 - Writable tool state is separate from the read-only snapshot.

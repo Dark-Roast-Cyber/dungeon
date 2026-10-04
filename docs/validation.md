@@ -230,14 +230,68 @@ An OpenShell MicroVM attempt on this host remained Provisioning with a guest Lan
 
 ## Live gates
 
-Issue #5 plan-only first slice: synthetic tests exercise a Neovim directory
+Historical Issue #5 plan-only first slice: synthetic tests exercised a Neovim directory
 declaration in the existing private schema-2 config, config fingerprint change,
 duplicate destination, traversal, project/config-tree import, credential-state
-entry, symlink, and socket refusal. `plan` inventories selected files but does
-not apply a guest import. All runtime commands fail closed for a declared import;
+entry, symlink, and socket refusal. That `plan` inventoried selected files but did
+not apply a guest import. All runtime commands then failed closed for a declared import;
 the OpenShell 0.0.116 upload path runs as the guest sandbox user and cannot by
 itself enforce a read-only destination under writable `/sandbox`. No live import
-or guest read-only claim has been established.
+or guest read-only claim was established by that slice.
+
+### Issue #5 staged contents-only snapshots (2026-10-04 UTC)
+
+The candidate on clean main base `e41e223b3f2d1df64c5184096a92ee870adbac01`
+adds explicit `imports stage` approval, digest-selected private artifacts and
+one read-only bind. Scope is **mounted contents only**, not immutable guest
+pathnames or trusted subsequent editor execution. No parent mount, new guest
+environment variable, image change, credential copier or policy widening exists.
+
+Native CLI runs used disposable QEMU/KVM **Fedora CoreOS 44.20260913.3.2**,
+kernel **7.2.5-200.fc44.x86_64**, SELinux **Enforcing**, rootless **Podman 5.8.4**,
+official **OpenShell 0.0.116**, and image-owned **Neovim 0.12.5**. FCOS compressed
+and uncompressed images and the OpenShell archive matched the official hashes
+recorded in the setup gate above. The existing reviewed agent image ID
+`f41665067d11e4f2738a3134c93ea69ea47b8cf61a301f91a3a10e466398cdde`
+(host digest `sha256:5a5353c130370361934d4826ee792e2f8038de40763f2713025dbb4ba83e0ce5`)
+was transferred as an OCI archive and loaded by exact image ID; it was not rebuilt
+or published. Gateway digest remained
+`sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645`.
+These checksum comparisons are not independent signature attestation.
+
+| Gate | Result |
+| --- | --- |
+| Actual fresh CLI setup, stage and first `up`, copy and live | PASS; explicit `--yes` selected a digest; noninteractive missing approval left config unchanged |
+| Exact native mount sets | PASS; one extra read-only snapshot; live adds only its writable project bind; original source/parent never mounted |
+| Private permissions and UID998 read access | PASS; snapshot directories 0500/files 0400; automatic Neovim load calculated synthetic 42 |
+| Separate editor state | PASS; guest data/state/cache markers created; independent state markers checked before restarting Neovim after same-ID resume |
+| Copy/live project behavior | PASS; copy first upload/resume without refresh and guest-only preservation; live bidirectional writes retained host owner/mode |
+| Frozen source drift and refresh refusal | PASS; source edits/deletion/symlink did not change identity or active content; bound refresh refused without config mutation |
+| Read-only content enforcement | PASS; write/chmod/unlink/file rename returned EROFS; target rename/recursive removal failed; unmount/remount nonzero; mount flags ro and host hash unchanged |
+| Source labeling | PASS; original source directory/file SELinux labels unchanged; Enforcing retained |
+| Artifact tamper or disappearance during owned work | PASS; new execution blocked; owned TERM cleanup returned 143 with controls removed; identity-checked status/stop remained available |
+| Bounded denials | PASS; `/var/tmp` write and example.com request failed; `/tmp` allowed; checked sockets/host source absent; no broader network/containment claim |
+| Ancestor rename and replacement config | **OBSERVED LIMITATION**; guest renamed `/sandbox/.config` and created replacement config; original mounted bytes unchanged; replacement execution not attempted |
+| Cleanup | PASS; owned VM containers/gateway/network/registration removed, QEMU reaped/listener absent; disks/keys/state/raw logs deleted; host inventories and setup/registration metadata unchanged |
+
+Sanitized gates/harness/source hashes are at
+`/tmp/opencode/dungeon-import5-applied/evidence` and
+`/tmp/opencode/dungeon-import5-closure/evidence`. The latter tested binary
+SHA-256 `1a3cc82fb76900d2d44042bf44de76e4e3f1bddc94db7af931b07c1c80b970ae`,
+including ASCII-escaped Unicode/bidi review names. Harness-only corrections
+handled leftover synthetic files/registrations and explicitly owned fixtures
+after VM reboot; failed attempts do not count as passes or reboot durability.
+
+A subsequent narrow runtime correction explicitly unlocks stage/create locks
+on drop even when a concurrent fork temporarily retains the file descriptor.
+A deterministic fork-held-descriptor regression and final default-parallel tests
+passed. Final release binary SHA-256 is
+`8ff703be6d23052e0395a35dc7280e90e6129741a764b049339c8a8ba3180f24`;
+the full native matrix was not repeated after that lock-release-only correction.
+Final formatting, Clippy, locked tests (93 unit + 5 integration), release build,
+and all 11 owned/launcher/staging Node tests passed on Rust 1.98.1 and host Node
+22.22.2. Supported Node 24 and other platforms were not exercised here.
+Independent rereview/delivery remain separate; this is no general isolation audit.
 
 Issue #24 now has a static pre-validation candidate: schema 2 resolves omitted
 project transfer to copy, accepts only copy/live, fingerprints live distinctly,

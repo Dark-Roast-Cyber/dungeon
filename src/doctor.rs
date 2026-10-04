@@ -80,7 +80,8 @@ pub(crate) fn run(explicit: Option<std::path::PathBuf>, json: bool) -> Result<i3
                 "Review dungeon plan before runtime operations.",
             );
             if !config.values.imports.is_empty() {
-                report.add("imports", "blocked", true, "Configuration imports are plan-only; runtime refuses them.", "Remove the declaration explicitly for runtime use; see Issue #5. No import was executed.");
+                let valid = crate::imports::verify(&config).is_ok();
+                report.add("imports", if valid { "recorded-not-verified" } else { "blocked" }, !valid, "Imports require approved frozen contents and the exact bind-enabled local gateway; guest pathname is mutable.", "Use imports stage before first creation. Doctor does not mount or execute imports; see Issue #5.");
             }
             Some(config)
         }
@@ -617,7 +618,9 @@ mod linux {
             None
         };
         let mapping = bind.map(|b| b.mapping);
-        let live = config.is_some_and(|c| c.values.project_transfer == ProjectTransfer::Live);
+        let live = config.is_some_and(|c| {
+            c.values.project_transfer == ProjectTransfer::Live || !c.values.imports.is_empty()
+        });
         let compatible =
             local && bind.is_some_and(|b| b.enabled && b.mapping) && healthy && socket_ok;
         report.add("keep_id_mapping", if !local || mapping.is_none() { "unknown" } else if mapping == Some(true) { "healthy" } else { "incompatible" }, live && mapping != Some(true), "Live requires Podman driver userns=keep-id:uid=998,gid=998; the gateway container's own user namespace is not this setting.", "Review the dedicated live gateway recipe in docs/live-validation.md. Doctor never changes user namespaces.");
@@ -897,7 +900,8 @@ mod linux {
                     pid_file.display()
                 ),
             );
-            let mut child = Command::new(&binary)
+            let mut child = Command::new("/bin/sh")
+                .arg(&binary)
                 .current_dir("/")
                 .env_clear()
                 .stdin(Stdio::null())

@@ -11,8 +11,7 @@ dungeon --config "$CONFIG" doctor --json
 Doctor selects only an explicitly supplied configuration or an already existing
 private binding for the current directory. Missing binding is informational and
 does not prompt or create directories. Invalid selected config/policy is
-blocking, but does not hide independent machine checks. Imports remain
-**plan-only, runtime blocked**; nothing is imported or executed.
+blocking, but does not hide independent machine checks. Doctor observes selected snapshot validity but never stages, mounts or executes imports.
 
 Diagnostic config/policy reads require a private user-owned configuration
 directory and private user-owned regular files (no symlink, FIFO or hardlink).
@@ -444,7 +443,7 @@ the forward. Interactive TUI message submission remains unverified, and this
 version pair is not a matched-version validation. See the
 [recorded evidence](validation.md#remote-first-service-forwarding).
 
-## Reviewed import declarations (plan-only first slice)
+## Reviewed Neovim snapshots
 
 Schema 2 now accepts an optional `imports` array in the same private `dungeon.json`. For the first Neovim case only, add an explicit directory source and the fixed destination:
 
@@ -454,9 +453,26 @@ Schema 2 now accepts an optional `imports` array in the same private `dungeon.js
 
 Add the `imports` member to the existing config; the example omits its other required fields.
 
-`plan` checks the directory and prints the source, destination, file hashes, requested image-owned `nvim`, and separate guest-private Neovim state paths. It does not copy or execute the files, contact OpenShell, or verify that the selected image contains `nvim`. No host content is sourced. Sources must be absolute, symlink-free ordinary directories with symlink-free regular contents, outside the project and private config; traversal, special entries, known credential/native-state paths, and duplicate destinations are rejected. Inspect all content yourself: these checks are not a secret scanner. There is no project-local discovery.
+`plan` observes source drift and selected snapshot validity, prints escaped ordered hashes and separate guest-private Neovim state paths. It does not copy/execute files, contact OpenShell, or verify image-owned `nvim`. Declare zero or one import only. Sources must be specific absolute paths outside the project and private config; traversal and known credential/native-state paths are rejected. There is no project-local discovery.
 
-**Application is not implemented:** `create`, `up`, `run`, and other runtime operations refuse configurations declaring imports. OpenShell 0.0.116 uploads as the sandbox user into writable guest scope; merely changing the uploaded file modes would not make them read-only to that user. Do not treat the plan as an applied snapshot or an isolation test. Remove the declaration to use existing runtime operations; a safe, tested guest read-only mechanism is required before enabling import application. This does not change `policy.json`, the reviewed image, or environment propagation.
+Before first creation, capture and approve the actual staged bytes:
+
+```sh
+dungeon --config "$CONFIG" imports stage
+# Automation: imports stage --yes explicitly approves the displayed captured snapshot.
+dungeon --config "$CONFIG" plan
+dungeon --config "$CONFIG" up
+```
+
+Stage shows file hashes, counts, ordered data diff, mount capability and limits, never file contents. Review/plan JSON uses ASCII escapes, including Unicode bidi/control characters, while preserving the actual names when parsed. Interactive approval requires typed `yes`; noninteractive approval requires `--yes`. Inspect all input yourself: these checks are **not a secret scanner**. Capture uses held no-follow/nonblocking descriptors and refuses symlinks, special files, hardlinks, foreign ownership, group/world-writable inputs and known credential/native-state names. Limits: 32 directory levels, 4096 entries, 4 MiB per file, 32 MiB total, 1 MiB manifest. Ordinary contents only; source modes, executable bits, ownership, ACLs, xattrs and timestamps are not preserved.
+
+Approval publishes private `imports/<digest>/manifest.json` and `nvim/` adjacent to the config, and atomically adds `snapshot: "<lowercase SHA-256>"` to the declaration. The digest covers canonical source/destination/inventory metadata. Enclosing storage is user-owned 0700; captured directories 0500 and files 0400. Published digest directories are never overwritten or garbage-collected. Failed/interrupted staging or publication may leave a private review directory or unselected artifact for inspection; no automatic recovery or power-loss transaction is promised.
+
+Creation requires the exact recognized existing local Dungeon gateway with bind capability and driver `keep-id:uid=998,gid=998`. Copy gateways, foreign/remote gateways and unknown extra authority refuse; no setup/migration is invoked. Copy projects still upload normally; live projects retain their sole writable project bind. One additional read-only private-SELinux snapshot bind initially targets `/sandbox/.config/nvim`; the original source is never mounted or relabeled. Lua executes only inside the guest under existing policy. Dungeon installs no plugins/tools, synchronizes no credentials, adds no guest environment variables and never widens policy. Imported Lua is executable code, not a promise that configuration itself cannot download or install guest content within existing authority.
+
+**Contents-only contract:** the guest cannot alter the mounted snapshot through its read-only bind. Writable guest ancestors can be renamed and replacement `/sandbox/.config/nvim` created; subsequent Neovim execution is not guaranteed to use the approved snapshot. This observed limitation is not an immutable-pathname or trusted-execution guarantee.
+
+Source edits/deletion/new symlinks do not change the selected digest, fingerprint or active mount. `plan` reports drift/unavailable-or-unsafe without refreshing. Stage refuses any existing `runtime.json`, even stopped or invalid: initialize a separate environment for refresh. Missing/tampered snapshots block new work/start/attachment; identity-checked status, stop and owned-command cleanup remain artifact-independent. Do not edit config/runtime identity to bypass drift. Neovim state/data/cache remain guest-private under HOME `/sandbox`.
 
 The live read-write workspace transfer candidate is implemented separately from imports. It is narrowly guarded to the canonical configured project and is not the generated/default path; it does not change the import model or remove the copied upload/export automation path. The recorded OpenShell 0.0.116, rootless Podman 5.8.4, Fedora/SELinux gate is in [validation](validation.md). Promotion remains a separate decision.
 
