@@ -164,15 +164,33 @@ accepted rereview does not establish new runtime/editor containment claims.
    [CI run 37173607186](https://github.com/Dark-Roast-Cyber/dungeon/actions/runs/37173607186)
    passed on main `cdffe9d42e3747efe7a018fa46289f2b68a4b7dd`.
    Native macOS builds do not establish macOS transfer durability.
-6. #20 schema-1 implementation is in the working tree for parent review: shared
-   Runtime lifecycle JSON, bounded workload-byte JSONL, finite unowned stdin and
-   existing owned raw interaction. The corrected native proof informed framing;
-   actual production CLI validation is recorded separately in docs/validation.md.
-   Five review corrections plus production malformed/oversized/truncated/primary-
-   failure and sustained96MiB RSS gates now pass on the pinned VM; parent rereview
-   and hosted CI remain pending.
-   Review/CI/delivery remain separate gates. #21 is unimplemented: whole-project
-   reviewed transfers do not fit unchanged arbitrary-path copy/automatic sync.
+6. #20 schema-1 machine interface is delivered in merged
+   [PR #37](https://github.com/Dark-Roast-Cyber/dungeon/pull/37); #20 is closed.
+   All seven jobs passed on feature `8f5844efb6452ef1b148b484fdea0981c30c881b`
+   ([CI 37197184382](https://github.com/Dark-Roast-Cyber/dungeon/actions/runs/37197184382))
+   and main `1ce88a7a82795c62183355f4cbb9a95c41d457f9`
+   ([CI 37197297984](https://github.com/Dark-Roast-Cyber/dungeon/actions/runs/37197297984)).
+   Shared Runtime lifecycle JSON, bounded workload-byte JSONL, finite unowned
+   stdin and existing owned raw interaction are implemented; revision-qualified
+   native validation is recorded in [docs/validation.md](docs/validation.md#issue-20-machine-namespace-delivered-2026-10-04-utc).
+   #21 remains open and unimplemented: whole-project reviewed transfers do not
+   fit unchanged arbitrary-path copy/automatic sync. Read-only source analysis of
+   Sandcastle `62307ab65ad9f8414f7a4893d96328a0353b0c3f` found pinned-layout blockers:
+   [head creation](https://github.com/mattpocock/sandcastle/blob/62307ab65ad9f8414f7a4893d96328a0353b0c3f/src/SandboxFactory.ts#L525-L558)
+   and [startup mounts](https://github.com/mattpocock/sandcastle/blob/62307ab65ad9f8414f7a4893d96328a0353b0c3f/src/startSandbox.ts#L135-L155)
+   require project -> `/home/agent/workspace` and `.git` -> its absolute host path,
+   unlike Dungeon's single canonical project -> `/sandbox/project`. A normal
+   in-project `.git` needs no outside authority; the mismatch is the requested
+   guest layout, not an inherent Git restriction. Isolated startup always uses
+   git-bundle arbitrary-path copies; automatic host patch apply bypasses reviewed export.
+   Per-command cancellation is not propagated; grace expiry may leave execution
+   overlapping commit collection.
+   full-run release calls `close` on failure and could signal/drain an owned child.
+   No adapter or live experiment exists. Next is a bounded external design with
+   provider-owned workspace mapping, unnecessary `.git` alias suppression and
+   per-command cancellation semantics. Upstream implementation/branch strategy
+   needs separate authorization, not blanket external-adapter scope. Copy stays
+   default; explicit experimental live mode does not require automatic promotion.
 
 ### Issue #16 copy-transfer correctness (delivered)
 
