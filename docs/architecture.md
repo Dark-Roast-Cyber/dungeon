@@ -60,6 +60,9 @@ A feature that belongs primarily to those orchestration concerns should live in 
 `dungeon` is one Rust binary with plain responsibility modules:
 
 - `cli`: command parsing and dispatch.
+- `machine`: versioned request parsing, selection and fixed protocol serialization;
+  dispatches the same Runtime, not another backend.
+- `output`: concrete human/quiet operation output and structured export review.
 - `config`: config/state parsing, validation, strict JSON, and fingerprints.
 - `policy`: the starter policy and policy safety validation.
 - `openshell`: the single OpenShell subprocess boundary and lifecycle operations.
@@ -140,6 +143,14 @@ receipt. Only the live guardian signals its own group. The observer observes gro
 absence and never signals a reaped leader. Handshakes are bounded, transport faults
 are sticky, and receipts cannot override primary transport or restoration errors.
 The responsibility seam is `owned_ssh` under `owned`, not a second backend.
+
+Machine execution adds `stream` under that same owned boundary: a bounded strict
+frame parser and nonblocking Linux FIFO sink in the existing cleanup loop. The
+guest outer status owner frames dedicated application descriptors outside the
+killed group. It never frames wrapper/native diagnostics. Ordinary machine
+lifecycle/export use quiet operation output, not global fd redirection or parsing
+captured human output. [Schema 1](machine.md) owns the wire contract; remote
+execution and selective Sandcastle transfer are not implemented.
 
 ## Runtime identity
 

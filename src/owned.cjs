@@ -6,6 +6,8 @@ const { spawn } = require('node:child_process');
 const C = fs.constants;
 const [mode, token, ...argv] = process.argv.slice(1);
 if (process.platform !== 'linux' || !/^[a-f0-9]{64}$/.test(token || '')) process.exit(125);
+const framed = mode === 'machine-launch' || mode === 'stream-launch';
+const unowned = mode === 'stream-launch';
 const directory = `/tmp/dungeon-owned-${token}`;
 const flags = C.O_NOFOLLOW | C.O_NONBLOCK;
 let dir;
@@ -23,7 +25,7 @@ function receipt(base) {
   const fd = fs.openSync(`${base}/result`, C.O_RDONLY | flags);
   try {
     regular(fd);
-    if (fs.fstatSync(fd).size > 128) throw Error('oversized result');
+    if (fs.fstatSync(fd).size > 256) throw Error('oversized result');
     const value = JSON.parse(fs.readFileSync(fd, 'utf8'));
     if (value.token !== token || !Number.isInteger(value.code) || value.code < 0 || value.code > 255) throw Error('invalid result');
     return value;
@@ -35,6 +37,7 @@ const guardian = String.raw`
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const argv = process.argv.slice(1);
+const framed = argv.shift() === 'framed';
 // detached spawn establishes a new session; validate it before starting work.
 const stat = fs.readFileSync('/proc/self/stat', 'utf8');
 const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
@@ -54,7 +57,7 @@ process.on('disconnect', finish);
 process.on('message', value => {
   if (value === 'stop') finish();
   if (value === 'start' && !finishing && !command) {
-    command = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'inherit', 'inherit'], detached: false });
+    command = spawn(argv[0], argv.slice(1), { stdio: framed ? ['ignore', 4, 5] : ['ignore', 'inherit', 'inherit'], detached: false });
     command.once('error', () => {
       process.send({ code: 127 }, finish);
     });
@@ -218,15 +221,41 @@ try {
       fs.unlinkSync(`${base}/stop`);
       fs.rmdirSync(directory);
     }
-  } else if (mode === 'launch') {
+  } else if (mode === 'launch' || framed) {
     if (!argv[0]) throw Error('missing command');
     // mkdir is exclusive: never adopt existing control state.
     fs.mkdirSync(directory, { mode: 0o700 });
     const base = openDirectory();
     const control = fs.openSync(`${base}/stop`, C.O_RDWR | C.O_CREAT | C.O_EXCL | flags, 0o600);
-    const child = spawn(process.execPath, ['-e', guardian, '--', ...argv], {
-      detached: true, stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
-    });
+    const child = unowned
+      ? spawn(argv[0], argv.slice(1), { detached: false, stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawn(process.execPath, ['-e', guardian, '--', framed ? 'framed' : 'native', ...argv], {
+        detached: true, stdio: framed ? ['ignore', 'ignore', 'ignore', 'ipc', 'pipe', 'pipe'] : ['ignore', 'inherit', 'inherit', 'ipc'],
+      });
+    if (unowned) {
+      process.stdin.pipe(child.stdin);
+      child.stdin.on('error', () => {});
+    }
+    let sequence = 0;
+    let outputComplete = !framed;
+    let outputFailed = false;
+    function writeFrame(value) {
+      return new Promise((resolve, reject) => {
+        process.stdout.write(JSON.stringify({ v: 1, seq: sequence++, ...value }) + '\n', error => error ? reject(error) : resolve());
+      });
+    }
+    if (framed) {
+      process.stdout.on('error', () => { outputFailed = true; if (child.connected) child.send('stop'); });
+      async function frame(stream, source) {
+        for await (const chunk of source) {
+          for (let offset = 0; offset < chunk.length; offset += 4096) {
+            await writeFrame({ event: 'output', stream, data: chunk.subarray(offset, offset + 4096).toString('base64') });
+          }
+        }
+      }
+      Promise.all([frame('stdout', unowned ? child.stdout : child.stdio[4]), frame('stderr', unowned ? child.stderr : child.stdio[5])])
+        .then(() => { outputComplete = true; }, () => { outputFailed = true; if (child.connected) child.send('stop'); });
+    }
     let code;
     let stopped = false;
     let ready = false;
@@ -254,10 +283,33 @@ try {
         } catch { child.disconnect(); }
       } else if (Number.isInteger(value?.code) && value.code >= 0 && value.code <= 255) code = value.code;
     });
-    child.once('error', () => { clearInterval(interval); process.exitCode = 125; });
+    child.once('error', () => {
+      clearInterval(interval);
+      if (unowned) { fs.closeSync(control); code = 127; finishOutput(); }
+      else process.exitCode = 125;
+    });
+    function finishOutput() {
+      const deadline = Date.now() + 2000;
+      function drain() {
+        if (!outputComplete && !outputFailed && Date.now() < deadline) { setTimeout(drain, 20); return; }
+        const clean = outputComplete && !outputFailed;
+        const result = fs.openSync(`${base}/result`, C.O_WRONLY | C.O_CREAT | C.O_EXCL | flags, 0o600);
+        fs.writeFileSync(result, JSON.stringify({ token, code: clean ? (code ?? 143) : 125, ...(framed ? { output_complete: clean } : {}) }));
+        fs.closeSync(result);
+        if (!clean) { process.exit(125); return; }
+        process.exitCode = code ?? 143;
+      }
+      drain();
+    }
     child.once('exit', (_status, signal) => {
       clearInterval(interval);
       fs.closeSync(control);
+      if (unowned) {
+        const numbers = require('node:os').constants.signals;
+        code = _status === null ? 128 + (numbers[signal] || 0) : _status;
+        finishOutput();
+        return;
+      }
       // SIGKILL alone does not prove a group kill: OOM/external kills can leave work.
       if (signal !== 'SIGKILL' || (!stopped && code === undefined)) {
         process.exitCode = 125;
@@ -272,10 +324,7 @@ try {
           process.kill(-child.pid, 0);
         } catch (error) {
           if (error.code === 'ESRCH') {
-            const result = fs.openSync(`${base}/result`, C.O_WRONLY | C.O_CREAT | C.O_EXCL | flags, 0o600);
-            fs.writeFileSync(result, JSON.stringify({ token, code: code ?? 143 }));
-            fs.closeSync(result);
-            process.exitCode = code ?? 143;
+            finishOutput();
             return;
           }
           process.exitCode = 125;

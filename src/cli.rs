@@ -379,7 +379,14 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
     {
         return crate::imports::stage(config, yes);
     }
-    if !matches!(&command, Commands::Down | Commands::Stop | Commands::Status) {
+    if !matches!(
+        &command,
+        Commands::Down
+            | Commands::Stop
+            | Commands::Status
+            | Commands::Upload { .. }
+            | Commands::Export { .. }
+    ) {
         crate::imports::verify(config)?;
     }
     if config.values.project_transfer == ProjectTransfer::Live {
@@ -532,7 +539,7 @@ fn initialize(
     Ok(0)
 }
 
-fn write_environment(directory: PathBuf, values: ConfigDoc) -> Result<Config> {
+pub(crate) fn write_environment(directory: PathBuf, values: ConfigDoc) -> Result<Config> {
     sandbox_name(&values.name)?;
     for (field, value) in [
         ("gateway", values.gateway.as_str()),

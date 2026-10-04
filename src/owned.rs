@@ -13,8 +13,23 @@ const LIMIT: Duration = Duration::from_secs(10);
 #[path = "owned_ssh.rs"]
 mod interactive;
 pub(super) use interactive::run as ssh;
+#[path = "stream.rs"]
+mod streaming;
+pub(super) use streaming::run as stream;
 static SIGNAL: AtomicI32 = AtomicI32::new(0);
 static SIGNAL_LOCK: Mutex<()> = Mutex::new(());
+#[cfg(test)]
+type PhaseHook = Option<Box<dyn FnMut(&str)>>;
+#[cfg(test)]
+thread_local! { static PHASE: std::cell::RefCell<PhaseHook> = std::cell::RefCell::new(None); }
+#[cfg(test)]
+fn phase(name: &str) {
+    PHASE.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().as_mut() {
+            hook(name);
+        }
+    });
+}
 
 extern "C" fn signal(number: libc::c_int) {
     let _ = SIGNAL.compare_exchange(0, number, Ordering::SeqCst, Ordering::SeqCst);
@@ -214,13 +229,23 @@ fn checked(runtime: &Runtime<'_>, deadline: Instant) -> Result<serde_json::Value
 }
 
 fn command(runtime: &Runtime<'_>, mode: &str, token: &str, argv: &[String]) -> Command {
+    command_at(runtime, mode, token, argv, GUEST_PROJECT)
+}
+
+fn command_at(
+    runtime: &Runtime<'_>,
+    mode: &str,
+    token: &str,
+    argv: &[String],
+    cwd: &str,
+) -> Command {
     let mut args = vec![
         "sandbox".into(),
         "exec".into(),
         "--name".into(),
         runtime.config.values.name.clone(),
         "--workdir".into(),
-        GUEST_PROJECT.into(),
+        cwd.into(),
         "--no-tty".into(),
         "--".into(),
         // Absolute reviewed system path; never resolve a project-owned node/shim.
@@ -240,20 +265,40 @@ fn command(runtime: &Runtime<'_>, mode: &str, token: &str, argv: &[String]) -> C
 struct Receipt {
     token: String,
     code: u8,
+    #[serde(default)]
+    output_complete: Option<bool>,
 }
 
 pub(super) fn run(runtime: &Runtime<'_>, argv: &[String]) -> Result<i32> {
-    if argv.is_empty() || argv[0].is_empty() || argv.iter().any(|arg| arg.contains('\0')) {
-        return Err(Error::new("an executable and valid arguments are required"));
-    }
     let _lock = SIGNAL_LOCK
         .lock()
         .map_err(|_| Error::new("owned signal lock unavailable"))?;
     let _signals = Signals::install()?;
+    run_with_output(runtime, argv, GUEST_PROJECT, None)
+}
+
+fn run_with_output(
+    runtime: &Runtime<'_>,
+    argv: &[String],
+    cwd: &str,
+    mut output: Option<&mut streaming::Stream>,
+) -> Result<i32> {
+    if argv.is_empty() || argv[0].is_empty() || argv.iter().any(|arg| arg.contains('\0')) {
+        return Err(Error::new("an executable and valid arguments are required"));
+    }
     let original = checked(runtime, Instant::now() + LIMIT)?;
+    #[cfg(test)]
+    phase("prelaunch");
     let pending = SIGNAL.load(Ordering::SeqCst);
     if pending != 0 {
-        return Ok(128 + pending);
+        return if output.is_some() {
+            Err(Error::new("Machine execution cancelled before launch."))
+        } else {
+            Ok(128 + pending)
+        };
+    }
+    if let Some(output) = output.as_mut() {
+        output.prepare_started(&original)?;
     }
     let mut random = [0u8; 32];
     unsafe {
@@ -262,12 +307,49 @@ pub(super) fn run(runtime: &Runtime<'_>, argv: &[String]) -> Result<i32> {
         }
     }
     let token = data_encoding::HEXLOWER.encode(&random);
-    let child = spawn(command(runtime, "launch", &token, argv), false)?;
+    let mut launch = command_at(
+        runtime,
+        if output.is_some() {
+            "machine-launch"
+        } else {
+            "launch"
+        },
+        &token,
+        argv,
+        cwd,
+    );
+    if output.is_some() {
+        launch.stdout(Stdio::piped()).stderr(Stdio::null());
+    }
+    if SIGNAL.load(Ordering::SeqCst) != 0 {
+        return if output.is_some() {
+            Err(Error::new("Machine execution cancelled before launch."))
+        } else {
+            Ok(128 + SIGNAL.load(Ordering::SeqCst))
+        };
+    }
+    if output.is_some() {
+        runtime.output.mutating();
+    }
+    let mut child = spawn(launch, false)?;
+    if let Some(output) = output.as_mut() {
+        // Initialization failure is an output fault handled by the same STOP/receipt owner.
+        if output.started(child.0.stdout.take()).is_err() {
+            output.interrupt();
+        }
+    }
     let mut deadline = None;
     loop {
         let interrupt = SIGNAL.load(Ordering::SeqCst);
         let finished = exited(&child)?;
-        if interrupt != 0 || finished {
+        if let Some(output) = output.as_mut() {
+            output.poll(finished);
+            if interrupt != 0 {
+                output.interrupt();
+            }
+        }
+        let output_failed = output.as_ref().is_some_and(|s| s.failed());
+        if interrupt != 0 || finished || output_failed {
             let until = *deadline.get_or_insert_with(|| Instant::now() + LIMIT);
             let mut transport_failed = false;
             let result = (|| {
@@ -278,7 +360,7 @@ pub(super) fn run(runtime: &Runtime<'_>, argv: &[String]) -> Result<i32> {
                 {
                     return Err(Error::new("original owned sandbox binding changed"));
                 }
-                if interrupt != 0 && !finished {
+                if (interrupt != 0 || output_failed) && !finished {
                     // Endpoint absence is retried, never interpreted as stopped.
                     let _ = capture(command(runtime, "stop", &token, &[]), until);
                 }
@@ -293,11 +375,19 @@ pub(super) fn run(runtime: &Runtime<'_>, argv: &[String]) -> Result<i32> {
                         return Err(error);
                     }
                 };
-                let receipt: Receipt = serde_json::from_slice(&bytes)?;
+                let receipt: Receipt = serde_json::from_value(crate::config::read_json_text(
+                    std::str::from_utf8(&bytes).map_err(|_| Error::new("Invalid receipt."))?,
+                )?)?;
                 if receipt.token != token {
                     return Err(Error::new("owned receipt identity mismatch"));
                 }
-                if !exited(&child)? {
+                if let Some(output) = output.as_mut()
+                    && !output.failed()
+                    && !output.complete()
+                {
+                    return Err(Error::new("Output still draining."));
+                }
+                if !output_failed && !exited(&child)? {
                     return Err(Error::new("owned guest wrapper has not exited"));
                 }
                 let current = checked(runtime, until)?;
@@ -309,12 +399,24 @@ pub(super) fn run(runtime: &Runtime<'_>, argv: &[String]) -> Result<i32> {
                 }
                 capture(command(runtime, "remove", &token, &[]), until)?;
                 let received = SIGNAL.load(Ordering::SeqCst);
+                if output_failed {
+                    transport_failed = true;
+                    return Err(Error::new("Owned cleanup confirmed; output incomplete."));
+                }
                 // A pending host signal never overrides a failed primary transport.
                 if !primary_succeeded(&child, receipt.code)? {
                     transport_failed = true;
                     return Err(Error::new(
                         "owned cleanup confirmed but primary transport failed",
                     ));
+                }
+                if output_failed
+                    || output
+                        .as_ref()
+                        .is_some_and(|_| receipt.output_complete != Some(true))
+                {
+                    transport_failed = true;
+                    return Err(Error::new("Machine output incomplete."));
                 }
                 Ok(if received == 0 {
                     i32::from(receipt.code)
@@ -323,7 +425,14 @@ pub(super) fn run(runtime: &Runtime<'_>, argv: &[String]) -> Result<i32> {
                 })
             })();
             if let Ok(code) = result {
-                return Ok(code);
+                drop(child);
+                #[cfg(test)]
+                phase("teardown");
+                let tail = SIGNAL.load(Ordering::SeqCst);
+                if output.is_some() && tail != 0 {
+                    return Err(Error::new("Machine execution cancelled during teardown."));
+                }
+                return Ok(if tail == 0 { code } else { 128 + tail });
             }
             if transport_failed {
                 return Err(Error::new(
@@ -331,7 +440,8 @@ pub(super) fn run(runtime: &Runtime<'_>, argv: &[String]) -> Result<i32> {
                 ));
             }
             if Instant::now() >= until {
-                return Err(Error::new(
+                return Err(Error::classified(
+                    crate::ErrorCode::CleanupUnconfirmed,
                     "owned cleanup unconfirmed; original guest command/control state may remain; inspect the bound sandbox (guest requires /usr/bin/node and Linux /proc)",
                 ));
             }

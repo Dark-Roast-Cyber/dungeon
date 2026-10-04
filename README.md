@@ -180,9 +180,14 @@ See [owned interactive SSH](docs/configuration.md#owned-interactive-ssh).
 
 ## Harness interoperability
 
-Dungeon will expose a small stable machine interface so external tools can treat it as an isolated execution environment without learning OpenShell internals.
+`dungeon [--config PATH] machine --schema 1 ...` provides the development-preview
+machine namespace on the same Runtime: lifecycle JSON, workload-byte JSONL,
+explicit whole-project transfers and separately owned raw terminal interaction.
+See the [schema-1 contract and limits](docs/machine.md).
 
-Sandcastle is the first concrete compatibility target. The goal is functional compatibility with its isolated-provider seam, not an internal port of Sandcastle and not a Node dependency in Dungeon. Sandcastle and similar systems should own orchestration while Dungeon owns isolation-facing lifecycle, execution, transfer, identity, and capability contracts.
+Sandcastle remains a compatibility target, not an implemented adapter. Its unchanged
+arbitrary-path copy and automatic patch/sync workflows do not fit Dungeon's reviewed
+whole-project transfers. Harnesses own orchestration; Dungeon owns the environment.
 
 ## Optional Telltale integration
 

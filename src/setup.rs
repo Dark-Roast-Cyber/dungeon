@@ -960,7 +960,10 @@ fn private_create(dir: &fs::File, name: &str, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn verify_import_gateway(config: &crate::config::Config) -> Result<()> {
+pub(super) fn verify_import_gateway(
+    config: &crate::config::Config,
+    output: &crate::output::Output,
+) -> Result<()> {
     if config.values.gateway != GATEWAY || config.values.workspace != "default" {
         return Err(Error::new(
             "imports require the recognized local Dungeon bind-enabled gateway; foreign/remote gateways unsupported",
@@ -991,7 +994,7 @@ pub(super) fn verify_import_gateway(config: &crate::config::Config) -> Result<()
             "existing exact bind-enabled local gateway required; imports never invoke setup",
         ));
     }
-    configure(
+    configure_with_output(
         &tools,
         &state,
         &config_root,
@@ -1000,6 +1003,7 @@ pub(super) fn verify_import_gateway(config: &crate::config::Config) -> Result<()
         }),
         true,
         true,
+        output,
     )?;
     Ok(())
 }
@@ -1102,6 +1106,27 @@ fn configure(
     enable_live: bool,
     dry_run: bool,
 ) -> Result<i32> {
+    configure_with_output(
+        tools,
+        state,
+        config_root,
+        socket,
+        enable_live,
+        dry_run,
+        &crate::output::Output::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn configure_with_output(
+    tools: &Tools,
+    state: &Path,
+    config_root: &Path,
+    socket: &str,
+    enable_live: bool,
+    dry_run: bool,
+    output: &crate::output::Output,
+) -> Result<i32> {
     let image = native_json(
         &tools.podman(
             &["image", "inspect", IMAGE, "--format", "{{json .}}"],
@@ -1198,7 +1223,9 @@ fn configure(
         check_container(tools, state, socket, &image, &metadata)?;
         existing_mode(&text, enable_live)?;
         verify_health(tools, 1)?;
-        print_capability(live, dry_run, true);
+        if !output.machine {
+            print_capability(live, dry_run, true);
+        }
         return Ok(0);
     }
     if network || present(state)? || present(&registry.join(GATEWAY))? {
@@ -1206,7 +1233,9 @@ fn configure(
             "partial/conflicting Dungeon gateway files, registration or network; inspect explicitly. No adoption or overwrite",
         ));
     }
-    print_capability(enable_live, dry_run, false);
+    if !output.machine {
+        print_capability(enable_live, dry_run, false);
+    }
     if dry_run {
         return Ok(0);
     }

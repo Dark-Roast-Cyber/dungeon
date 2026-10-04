@@ -409,6 +409,7 @@ pub(in crate::openshell) fn run(runtime: &Runtime<'_>, argv: &[String]) -> Resul
             .env_clear()
             .envs(&runtime.env)
             .env_remove("SSH_AUTH_SOCK");
+        runtime.output.mutating();
         let child = foreground_spawn(command)?;
         let startup = Instant::now() + LIMIT;
         let mut ready = false;
@@ -483,6 +484,27 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::os::fd::{FromRawFd, OwnedFd};
+
+    #[test]
+    fn interactive_postlaunch_drift_keeps_code_but_not_no_effects() {
+        let fixture = crate::openshell::tests::Fixture::new();
+        fixture.runtime().create().unwrap();
+        let runtime = fixture.runtime().machine();
+        let original = checked(&runtime, Instant::now() + LIMIT).unwrap();
+        fixture.flag("mismatch");
+        let preflight = runtime
+            .output
+            .error(same(&runtime, &original, Instant::now() + LIMIT).unwrap_err());
+        assert_eq!(preflight.effects, "none");
+        // Classifier seam used after foreground_spawn, without claiming a new PTY run.
+        runtime.output.mutating();
+        let postlaunch = runtime
+            .output
+            .error(same(&runtime, &original, Instant::now() + LIMIT).unwrap_err());
+        let event = crate::machine::error_json("interactive", &postlaunch, serde_json::Value::Null);
+        assert_eq!(event["error"]["code"], "identity_mismatch");
+        assert_eq!(event["error"]["effects"], "unknown");
+    }
 
     fn node() -> std::path::PathBuf {
         let project = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
