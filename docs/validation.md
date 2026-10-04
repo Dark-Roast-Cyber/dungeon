@@ -55,6 +55,107 @@ AI/owned-lifecycle matrix was repeated.
 
 ## Existing runtime and transfer evidence
 
+### Issue #24 experimental fresh setup
+
+`setup --enable-live` now selects the exact live-capable driver configuration on
+fresh setup; `--dry-run` performs read-only preflight without state or lock
+creation. Exact existing copy/live modes are verified unchanged, and flagged
+copy migration is refused. Synthetic tests cover fresh copy/live arguments and
+configuration, plain/flagged repeat verification, no live downgrade, copy
+migration refusal with database/TLS/registration/container bytes preserved,
+extra/duplicate mount or environment rejection, identity/security/port drift,
+private FIFO/link/mode/path refusal and competing fresh-setup locks. CLI tests
+cover flag parsing, missing tools and empty-store refusal without HOME/project
+initialization. Shared bounded-query and diagnostic regressions remain required.
+
+These static/synthetic contracts alone do not prove native bootstrap,
+certificate/database/driver-data usability or containment. The separate native
+record below establishes fresh setup and verification on its exact combination;
+the manually provisioned gateway is not substituted for it. Safe copy-to-live migration remains
+blocked; no workload drain, gateway restart or state replacement is implemented.
+Generated/default transfer remains copy and #24 is not fully accepted/closed.
+
+On `a18368417bd64c375c35fe3e4a38a1ffd98cdd0d` plus this implementation diff,
+formatting, Clippy, default-parallel locked Rust tests (83 unit, 4 integration),
+locked release build, seven owned Node tests, three launcher tests and the npm
+staging test passed. Node tests used host Node 22.22.2, not the supported Node 24
+release-runtime gate. Native OpenShell/Podman binaries with isolated empty
+HOME/XDG/project refused both plain and flagged dry-run at the established-store
+guard (exit 1), leaving HOME/project empty. Before/after existing gateway ID/state
+and local setup/registration metadata fingerprints matched; it was not started
+or changed. Sanitized results and tested binary/runtime-source hashes are at
+`/tmp/opencode/dungeon-setup24-apdRiR`. This checks native refusal only, not fresh
+bootstrap or recognized running-mode verification.
+
+#### Separate native CLI gate (2026-10-04 UTC)
+
+The corrected candidate on the same main base passed actual native setup in an
+owned QEMU/KVM VM running **Fedora CoreOS 44.20260913.3.2**, kernel
+**7.2.5-200.fc44.x86_64**, SELinux **Enforcing**, rootless **Podman 5.8.4**,
+and official **OpenShell 0.0.116**. The VM is a disposable validation host, not
+a new Dungeon backend or broader platform claim. It had its own user 1000,
+HOME/XDG, engine store/socket, loopback namespace and temporary SSH key; no host
+home, project, engine socket or real SSH credential was mounted/shared.
+
+The official versioned FCOS QEMU image's compressed/uncompressed SHA-256 matched
+Fedora stream metadata (`3d1f3ebd0456accf3396cd6a330cae6c4cfa3dda0a20c35798c0665938fed285`
+and `e932898961bde508f84f534b2aebe519e2a1bbb3ca86f21bb6493e0ce687ca7a`).
+The official OpenShell Linux musl archive matched release API and checksum-file
+SHA-256 `4fb4476d80a1875a0b83547ec3aba999cf0a2e2d75f95f2f709b622e2103520e`;
+its extracted binary hash was
+`24e85062073d512d1951c76cd3890b7bce1ab01cc36a08f88b3b43c067a402da`.
+These HTTPS checksum comparisons are not independent signature/provenance
+attestation. The VM explicitly pulled the pinned gateway digest and the previously
+reviewed community base digest
+`aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e`.
+No image was rebuilt or published. Agent AI/vendor-auth behavior was not retested.
+
+Tested release binary SHA-256:
+`f3afaa0db9b264fe5af07a8f337f45f3c0f26e54423064e7fa9d3d49f929e09d`.
+That binary includes fixed-context native JSON parsing. The only subsequent
+runtime-source change replaces the now-stale "no native validation record"
+success text; the updated artifact is statically validated, not claimed as a
+second native matrix run.
+
+All seven native JSON parse sites retain strict duplicate-key rejection but
+discard parser error text in favor of fixed context. Synthetic duplicate
+sensitive-key/ANSI and malformed-output tests verify no disclosure, including
+an actual CLI stderr regression. Final formatting/Clippy, default-parallel locked
+Rust tests (84 unit + 5 integration), locked release build and all 11 Node
+owned/launcher/staging tests passed. Rust was 1.98.1 and host Node 22.22.2;
+the supported Node 24 runtime was not exercised in this tranche.
+
+| Gate | Result |
+| --- | --- |
+| Fresh plain copy setup, repeat, dry-run | PASS; exact native image defaults, namespace mapping, mounts and certificate/database permissions accepted; gateway/driver healthy |
+| Flagged existing-copy refusal | PASS; original container identity/start state, registration/TLS bytes and local-state metadata unchanged |
+| Copy lifecycle | PASS; initial upload, same-ID stop/start without refresh, guest-only file preserved, already-Ready no-op |
+| Fresh flagged live setup and dry-run | PASS; explicit driver `userns` key and bind ceiling, gateway/certificate plain keep-id unchanged |
+| Flagged/plain live repeat and dry-run | PASS; no downgrade or resource/registration/TLS metadata changes |
+| Doctor capability separation | PASS; live enabled-compatible and driver mapping healthy; absent optional agent image still makes the aggregate report blocking |
+| Live workspace | PASS; UID/GID 998 guest writes visible to host UID 1000, original 644 ownership/mode retained; host edits visible to guest; same sandbox resumes without upload |
+| SELinux and bounded denials | PASS; enforcing retained with private container-file labels; `/var/tmp` write denied, `/tmp` allowed, checked host engine sockets and SSH/home paths absent |
+| Live upload/export | PASS local refusal |
+| Unrecognized native clone | PASS refusal without changing clone/original state; extra-env/mount cases remain synthetic, not claimed as native-tested |
+
+An initial reviewed-agent archive import hit host scratch quota before setup;
+the archive/overlay were discarded and the immutable community base was pulled
+inside the VM instead. Earlier harness attempts retriggered Ignition, consumed
+streamed script stdin, or stopped at an expected blocking doctor result; only
+explicit completed assertions above count. The corrected harness used a stable
+VM UUID, uploaded script, null stdin and graceful guest shutdown. A fixture
+sandbox after an earlier abrupt VM reboot reported Error; whole-VM reboot recovery
+is not established by the successful same-sandbox stop/start gates.
+
+Owned VM sandboxes/gateway/network/registration/state were removed. QEMU was
+terminated/reaped and its loopback SSH listener disappeared; VM disks, temporary
+key, runtime certificates/database and raw logs were deleted. Existing host
+gateway identity/state and local setup/registration metadata fingerprints matched.
+Sanitized source/artifact/provisioning/gate summaries are retained at
+`/tmp/opencode/dungeon-setup24-vm-Mtue76/evidence`. No migration, policy widening,
+generated-default promotion, native extra-mount acceptance or full #24 closure
+is claimed.
+
 Offline tests cover strict duplicate-key JSON, safe names, schema rejection, starter-policy requirements, create arguments, auth command scope, removed provisional commands, native launcher selection, npm staging, and native archive production. They do not replace live isolation, vendor-auth, image/tooling, remote-editor, endpoint-security, or platform validation.
 
 Issue #8 lifecycle contract: verify first `up` creates and uploads once; resumed

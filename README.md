@@ -54,6 +54,15 @@ Setup provisions a local mTLS gateway named `dungeon-local` on loopback port 176
 
 The [local reviewed agent image](images/agent/README.md) pins reviewed OpenCode, Claude Code, Codex, Neovim, and Rust versions on the validated base. Build it with rootless Podman and explicitly select `localhost/dungeon-agent:0.0.3-dev` with `dungeon init --image`. It is not published or selected by default; publication and provenance remain separate work.
 
+Experimental fresh setup can explicitly enable the trusted gateway's live-bind ceiling:
+
+```sh
+dungeon setup --enable-live --dry-run
+dungeon setup --enable-live
+```
+
+Dry-run creates no setup state or lock. Existing exact live gateways are verified by plain or flagged setup without downgrade. Existing copy gateways refuse `--enable-live`: safe migration is not implemented. Stopped, partial, foreign and legacy-layout gateways are never started, repaired or adopted. Fresh copy/live setup and repeat verification have one disposable Fedora CoreOS/rootless-Podman native record. This does not authorize a project mount or convert a binding. See [setup modes and limits](docs/configuration.md#local-setup-modes).
+
 ## First environment
 
 Before initializing or changing anything, use `dungeon doctor` or
@@ -115,7 +124,7 @@ The generated/default transfer mode is `copy`. On first `up`, copy mode creates 
 
 Copy-mode export is a separate reviewed operation, allowed only while the bound sandbox is Ready on OpenShell 0.0.116. `dungeon --config "$CONFIG" export` downloads and stages guest changes, prints a deterministic summary, then requires interactive typed `yes` or explicit `--yes` before applying. Conflicts and special entries are refused. Upload remains a deliberate refresh/recovery action: `dungeon --config "$CONFIG" upload --yes` overwrites guest project contents and can discard guest-side edits.
 
-Issue #24 also provides an explicit `--project-transfer live` pre-validation candidate. It derives one read-write Podman bind request for the canonical configured project at `/sandbox/project`, performs no upload, and refuses upload/export. It is not the generated/default path. The dedicated gateway bind-mount and keep-id settings have one recorded OpenShell 0.0.116/rootless-Podman/Fedora result, and `dungeon setup` does not enable or migrate them automatically.
+Issue #24 also provides an explicit `--project-transfer live` experimental candidate. It derives one read-write Podman bind request for the canonical configured project at `/sandbox/project`, performs no upload, and refuses upload/export. It is not the generated/default path. The dedicated gateway bind-mount and keep-id settings have recorded OpenShell 0.0.116/rootless-Podman/Fedora results. Fresh `setup --enable-live` has a separate disposable VM CLI record; plain setup never enables live and no setup invocation migrates a copy gateway.
 
 ## Authentication
 
