@@ -960,6 +960,50 @@ fn private_create(dir: &fs::File, name: &str, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn verify_import_gateway(config: &crate::config::Config) -> Result<()> {
+    if config.values.gateway != GATEWAY || config.values.workspace != "default" {
+        return Err(Error::new(
+            "imports require the recognized local Dungeon bind-enabled gateway; foreign/remote gateways unsupported",
+        ));
+    }
+    let home = env::var_os("HOME").ok_or_else(|| Error::new("HOME required"))?;
+    let state = env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(&home).join(".local/state"))
+        .join("dungeon/local-setup");
+    let config_root = env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(&home).join(".config"));
+    if !safe_path(&state, &[&config.values.project])
+        || !safe_path(&config_root, &[&config.values.project])
+    {
+        return Err(Error::new(
+            "import gateway state must be outside the project",
+        ));
+    }
+    let tools = prerequisites(
+        env::consts::OS,
+        Some(&config.values.project),
+        setup_environment(Some(&config.values.project))?,
+    )?;
+    if !exists(&tools, "container", CONTAINER)? {
+        return Err(Error::new(
+            "existing exact bind-enabled local gateway required; imports never invoke setup",
+        ));
+    }
+    configure(
+        &tools,
+        &state,
+        &config_root,
+        &format!("/run/user/{}/podman/podman.sock", unsafe {
+            libc::geteuid()
+        }),
+        true,
+        true,
+    )?;
+    Ok(())
+}
+
 pub(crate) fn run(enable_live: bool, dry_run: bool) -> Result<i32> {
     let cwd = env::current_dir()?.canonicalize()?;
     let home = env::var_os("HOME")
@@ -1745,6 +1789,7 @@ esac
         fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700)).unwrap();
         let first = setup_lock(root.path()).unwrap();
         assert!(setup_lock(root.path()).is_err());
+        first.unlock().unwrap();
         drop(first);
         assert!(setup_lock(root.path()).is_ok());
     }

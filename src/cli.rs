@@ -84,6 +84,11 @@ enum Commands {
         non_interactive: bool,
     },
     Plan,
+    /// Capture and approve the explicitly declared Neovim snapshot (no runtime changes).
+    Imports {
+        #[command(subcommand)]
+        command: ImportCommands,
+    },
     Create,
     Up,
     Down,
@@ -136,6 +141,14 @@ enum Commands {
         owned: bool,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         arguments: Vec<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ImportCommands {
+    Stage {
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -303,23 +316,10 @@ fn create_project_binding(project: &Path) -> Result<Config> {
 }
 
 fn print_plan(config: &Config) -> Result<i32> {
-    let imports = config
-        .values
-        .imports
-        .iter()
-        .map(|import| {
-            Ok(json!({
-                "source": import.source,
-                "destination": import.destination,
-                "mode": "requested read-only snapshot; not applied",
-                "contents": crate::export::snapshot(&import.source)?,
-            }))
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let imports = crate::imports::plan(config)?;
     let mut unsatisfied = Vec::new();
     if !config.values.imports.is_empty() {
-        unsatisfied
-            .push("read-only guest import application is not yet supported; create/up refused");
+        unsatisfied.push("imports require approved unchanged snapshot and exact local bind-enabled UID998 gateway; offline plan is not runtime verification");
     }
     if config.values.project_transfer == ProjectTransfer::Live {
         unsatisfied.push(
@@ -336,7 +336,7 @@ fn print_plan(config: &Config) -> Result<i32> {
     command.extend(plan_create_arguments(config, &config.policy_path));
     println!(
         "{}",
-        serde_json::to_string_pretty(&json!({
+        crate::config::review_json(&json!({
             "adapter": "openshell",
             "version": OPEN_SHELL_VERSION,
             "environment": {
@@ -359,17 +359,8 @@ fn print_plan(config: &Config) -> Result<i32> {
     Ok(0)
 }
 
-fn runtime_allowed(config: &Config) -> Result<()> {
-    if !config.values.imports.is_empty() {
-        return Err(Error::new(
-            "read-only guest imports are not yet enforceable by the OpenShell upload path; plan is review-only; remove imports to operate this environment",
-        ));
-    }
-    Ok(())
-}
-
 fn launch_default(config: &Config) -> Result<i32> {
-    runtime_allowed(config)?;
+    crate::imports::verify(config)?;
     let runtime = Runtime::new(config)?;
     let code = runtime.up()?;
     if code != 0 {
@@ -382,7 +373,15 @@ fn launch_default(config: &Config) -> Result<i32> {
 }
 
 fn run_command(config: &Config, command: Commands) -> Result<i32> {
-    runtime_allowed(config)?;
+    if let Commands::Imports {
+        command: ImportCommands::Stage { yes },
+    } = command
+    {
+        return crate::imports::stage(config, yes);
+    }
+    if !matches!(&command, Commands::Down | Commands::Stop | Commands::Status) {
+        crate::imports::verify(config)?;
+    }
     if config.values.project_transfer == ProjectTransfer::Live {
         match &command {
             Commands::Upload { .. } => {
@@ -410,7 +409,10 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         Commands::Up => runtime.up(),
         Commands::Down | Commands::Stop => runtime.down(),
         Commands::Status => {
-            println!("{}", serde_json::to_string_pretty(&runtime.get()?)?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&runtime.inspect_bound()?)?
+            );
             Ok(0)
         }
         Commands::Upload { yes: true } => runtime.upload(),
@@ -464,6 +466,7 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         Commands::Init { .. }
         | Commands::Setup { .. }
         | Commands::Doctor { .. }
+        | Commands::Imports { .. }
         | Commands::Plan
         | Commands::Upload { yes: false } => unreachable!(),
     }
@@ -906,7 +909,12 @@ mod tests {
         doc["imports"] = json!([{"source": source, "destination": "/sandbox/.config/nvim"}]);
         let path = private.join("dungeon.json");
         write_new(&path, &doc).unwrap();
-        for action in ["create", "up", "run", "upload", "down", "forward"] {
+        let expected = if cfg!(target_os = "linux") {
+            "not approved"
+        } else {
+            "snapshot imports require Linux"
+        };
+        for action in ["create", "up", "run", "upload", "forward"] {
             let mut args = vec!["dungeon", "--config", path.to_str().unwrap(), action];
             if action == "upload" {
                 args.push("--yes");
@@ -918,7 +926,7 @@ mod tests {
                 dispatch(Cli::try_parse_from(args).unwrap())
                     .unwrap_err()
                     .to_string()
-                    .contains("not yet enforceable"),
+                    .contains(expected),
                 "{action}"
             );
         }

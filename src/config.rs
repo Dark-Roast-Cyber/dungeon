@@ -69,6 +69,8 @@ pub(crate) struct ConfigDoc {
 pub(crate) struct Import {
     pub(crate) source: PathBuf,
     pub(crate) destination: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) snapshot: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -153,6 +155,15 @@ pub(crate) fn load_config_data(
             return Err(Error::new("duplicate import destination"));
         }
         validate_import(&import.source)?;
+        if import
+            .snapshot
+            .as_deref()
+            .is_some_and(|s| !crate::imports::valid_digest(s))
+        {
+            return Err(Error::new(
+                "import snapshot must be a lowercase SHA-256 digest",
+            ));
+        }
     }
 
     if !values.project.is_absolute() {
@@ -238,41 +249,11 @@ fn validate_import(source: &Path) -> Result<()> {
                 "import includes a credential or native state path",
             ));
         }
-        let kind = fs::symlink_metadata(&path)?.file_type();
-        if kind.is_symlink() || !kind.is_dir() && path != source {
-            return Err(Error::new(
-                "import path contains a symlink or non-directory ancestor",
-            ));
-        }
-    }
-    let kind = fs::symlink_metadata(source)?.file_type();
-    if !kind.is_dir() {
-        return Err(Error::new(
-            "Neovim import source must be an ordinary directory",
-        ));
-    }
-    validate_import_tree(source)
-}
-
-fn validate_import_tree(directory: &Path) -> Result<()> {
-    for item in fs::read_dir(directory)? {
-        let item = item?;
-        if reserved_import_name(&item.file_name()) {
-            return Err(Error::new(
-                "import includes a credential or native state path",
-            ));
-        }
-        let kind = item.file_type()?;
-        if kind.is_dir() {
-            validate_import_tree(&item.path())?;
-        } else if !kind.is_file() {
-            return Err(Error::new("import contains a symlink or special file"));
-        }
     }
     Ok(())
 }
 
-fn reserved_import_name(name: &std::ffi::OsStr) -> bool {
+pub(crate) fn reserved_import_name(name: &std::ffi::OsStr) -> bool {
     let name = name.to_string_lossy().to_ascii_lowercase();
     matches!(
         name.as_str(),
@@ -281,6 +262,12 @@ fn reserved_import_name(name: &std::ffi::OsStr) -> bool {
             | ".aws"
             | ".codex"
             | ".claude"
+            | ".mozilla"
+            | "chromium"
+            | "google-chrome"
+            | "firefox"
+            | "opencode"
+            | "sessions"
             | ".local"
             | ".cache"
             | ".npmrc"
@@ -293,6 +280,9 @@ fn reserved_import_name(name: &std::ffi::OsStr) -> bool {
         || name.starts_with(".env.")
         || name.ends_with(".pem")
         || name.ends_with(".key")
+        || name.ends_with(".sqlite")
+        || name.ends_with(".sqlite3")
+        || name.ends_with(".db")
 }
 
 pub(crate) fn canonical_project(path: &Path) -> Result<PathBuf> {
@@ -386,6 +376,22 @@ pub(crate) fn digest(value: &Value) -> Result<String> {
     Ok(BASE32_NOPAD
         .encode(&Sha256::digest(serde_json::to_vec(value)?))
         .to_ascii_lowercase())
+}
+
+pub(crate) fn review_json(value: &Value) -> Result<String> {
+    let json = serde_json::to_string_pretty(value)?;
+    let mut safe = String::new();
+    for character in json.chars() {
+        if character.is_ascii() {
+            safe.push(character);
+        } else {
+            for unit in character.encode_utf16(&mut [0; 2]) {
+                use std::fmt::Write;
+                write!(safe, "\\u{unit:04x}").expect("string formatting");
+            }
+        }
+    }
+    Ok(safe)
 }
 
 fn is_home(path: &Path) -> bool {
@@ -669,7 +675,7 @@ mod tests {
     }
 
     #[test]
-    fn import_preflight_and_fingerprint_are_bound_to_the_single_config() {
+    fn import_declaration_and_fingerprint_do_not_depend_on_source_contents() {
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("project");
         let private = root.path().join("private");
@@ -716,20 +722,20 @@ mod tests {
         doc["imports"] = json!([declaration]);
         fs::create_dir(source.join(".ssh")).unwrap();
         save(&doc);
-        assert!(load_config(&config_path).is_err());
+        assert!(load_config(&config_path).is_ok());
         fs::remove_dir(source.join(".ssh")).unwrap();
         fs::write(source.join(".env"), "FAKE_TOKEN=synthetic").unwrap();
-        assert!(load_config(&config_path).is_err());
+        assert!(load_config(&config_path).is_ok());
         fs::remove_file(source.join(".env")).unwrap();
 
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink("init.lua", source.join("alias")).unwrap();
-            assert!(load_config(&config_path).is_err());
+            assert!(load_config(&config_path).is_ok());
             fs::remove_file(source.join("alias")).unwrap();
             use std::os::unix::net::UnixListener;
             let _socket = UnixListener::bind(source.join("socket")).unwrap();
-            assert!(load_config(&config_path).is_err());
+            assert!(load_config(&config_path).is_ok());
         }
     }
 }

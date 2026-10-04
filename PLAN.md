@@ -21,7 +21,7 @@ The earlier host 2.0.22/guest 2.0.14 evidence remains historical. A separate
 private extracted host 2.0.14/guest 2.0.14 pair now passed the Issue #29 native
 AI/session/lifecycle gate; the installed host client was unchanged.
 Native TUI attachment passed previously, but interactive TUI message submission remains unverified.
-Imports are plan-only/fail-closed. Telltale is not integrated.
+Neovim imports have an explicit staged snapshot candidate with a contents-only read-only bind contract; native copy/live implementation gates passed on the recorded disposable VM. Independent rereview remains required. Telltale is not integrated.
 
 ## Tracking
 
@@ -154,7 +154,7 @@ accepted rereview does not establish new runtime/editor containment claims.
    Native JSON failures now return fixed context, with duplicate secret-key/ANSI
    leakage regression coverage. Independent rereview and delivery remain separate. Retain
    generated/default transfer `copy`; no promotion decision or full #24 closure.
-4. #5: establish guest-enforced read-only snapshot ownership, not uploaded modes.
+4. #5: staged Neovim snapshots use read-only binds, not uploaded modes. Actual stage/create in copy/live modes passed native content protection, drift/resume, private state, exact mounts and artifact-independent owned cleanup. Ancestor rename/replacement is an observed limitation; accepted scope is immutable mounted contents, not guest pathname or subsequent execution identity. See the [record](docs/validation.md#issue-5-staged-contents-only-snapshots-2026-10-04-utc). Final lock-release correction has deterministic fork/default-parallel coverage; the native matrix predates only that correction. Independent rereview/delivery remain separate.
 5. #20/#21 follow separately; #16 minimal operation locking is an independent
    correctness slice, not a new orchestration framework.
 

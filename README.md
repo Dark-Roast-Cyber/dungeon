@@ -29,6 +29,7 @@ Dungeon must not weaken isolation for convenience. Project content may request c
 - Optional VS Code and SSH attachment.
 - Foreground forwarding from host loopback to guest-loopback services.
 - Explicit config, policy, typed project-transfer intent, runtime identity, and safe copy-mode upload/export checks.
+- Explicit reviewed Neovim snapshots, read-only mounted contents and separate guest-private state on the recognized local bind-enabled gateway. Guest config pathnames remain mutable.
 - One starter OpenShell policy. Additional profiles wait for validated scenario differences.
 - A validated rootless-Podman/OpenShell path; broader runtime/platform support remains explicit future validation.
 
@@ -125,6 +126,8 @@ The generated/default transfer mode is `copy`. On first `up`, copy mode creates 
 Copy-mode export is a separate reviewed operation, allowed only while the bound sandbox is Ready on OpenShell 0.0.116. `dungeon --config "$CONFIG" export` downloads and stages guest changes, prints a deterministic summary, then requires interactive typed `yes` or explicit `--yes` before applying. Conflicts and special entries are refused. Upload remains a deliberate refresh/recovery action: `dungeon --config "$CONFIG" upload --yes` overwrites guest project contents and can discard guest-side edits.
 
 Issue #24 also provides an explicit `--project-transfer live` experimental candidate. It derives one read-write Podman bind request for the canonical configured project at `/sandbox/project`, performs no upload, and refuses upload/export. It is not the generated/default path. The dedicated gateway bind-mount and keep-id settings have recorded OpenShell 0.0.116/rootless-Podman/Fedora results. Fresh `setup --enable-live` has a separate disposable VM CLI record; plain setup never enables live and no setup invocation migrates a copy gateway.
+
+Optional [Neovim imports](docs/configuration.md#reviewed-neovim-snapshots) require an explicit private declaration and `dungeon --config "$CONFIG" imports stage` approval before first creation. Dungeon binds a private frozen snapshot, never the original source. Read-only protection applies to mounted contents, not the guest pathname: writable guest ancestors can be renamed and replacement configuration can execute later.
 
 ## Authentication
 
