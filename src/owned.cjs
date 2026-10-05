@@ -239,13 +239,20 @@ try {
     let sequence = 0;
     let outputComplete = !framed;
     let outputFailed = false;
+    function send(value) {
+      if (child.connected) child.send(value, error => {
+        // A closing IPC pipe is not a spawn failure. Disconnect asks the guardian
+        // to finish; only its exit and kernel group absence can confirm cleanup.
+        if (error && child.connected) child.disconnect();
+      });
+    }
     function writeFrame(value) {
       return new Promise((resolve, reject) => {
         process.stdout.write(JSON.stringify({ v: 1, seq: sequence++, ...value }) + '\n', error => error ? reject(error) : resolve());
       });
     }
     if (framed) {
-      process.stdout.on('error', () => { outputFailed = true; if (child.connected) child.send('stop'); });
+      process.stdout.on('error', () => { outputFailed = true; send('stop'); });
       async function frame(stream, source) {
         for await (const chunk of source) {
           for (let offset = 0; offset < chunk.length; offset += 4096) {
@@ -254,7 +261,7 @@ try {
         }
       }
       Promise.all([frame('stdout', unowned ? child.stdout : child.stdio[4]), frame('stderr', unowned ? child.stderr : child.stdio[5])])
-        .then(() => { outputComplete = true; }, () => { outputFailed = true; if (child.connected) child.send('stop'); });
+        .then(() => { outputComplete = true; }, () => { outputFailed = true; send('stop'); });
     }
     let code;
     let stopped = false;
@@ -268,7 +275,7 @@ try {
         fs.readSync(control, byte, 0, 1, 0);
         if (byte[0] !== 1) throw Error('invalid stop request');
         stopped = true;
-        if (ready && child.connected) child.send('stop');
+        if (ready) send('stop');
       }
     }
     const interval = setInterval(() => {
@@ -279,14 +286,14 @@ try {
         ready = true;
         try {
           checkStop();
-          child.send(stopped ? 'stop' : 'start');
+          send(stopped ? 'stop' : 'start');
         } catch { child.disconnect(); }
       } else if (Number.isInteger(value?.code) && value.code >= 0 && value.code <= 255) code = value.code;
     });
     child.once('error', () => {
       clearInterval(interval);
       if (unowned) { fs.closeSync(control); code = 127; finishOutput(); }
-      else process.exitCode = 125;
+      else process.exit(125);
     });
     function finishOutput() {
       const deadline = Date.now() + 2000;
@@ -312,7 +319,8 @@ try {
       }
       // SIGKILL alone does not prove a group kill: OOM/external kills can leave work.
       if (signal !== 'SIGKILL' || (!stopped && code === undefined)) {
-        process.exitCode = 125;
+        // Surviving workloads can retain framed pipes; faults must not await EOF.
+        process.exit(125);
         return;
       }
       const deadline = Date.now() + 2000;
@@ -327,12 +335,12 @@ try {
             finishOutput();
             return;
           }
-          process.exitCode = 125;
+          process.exit(125);
           return;
         }
         if (Date.now() >= deadline) {
           process.stderr.write('owned group disappearance unconfirmed\n');
-          process.exitCode = 125;
+          process.exit(125);
         } else setTimeout(confirmAbsent, 20);
       }
       confirmAbsent();

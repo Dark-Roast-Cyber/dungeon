@@ -97,13 +97,51 @@ impl Config {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RuntimeState {
     pub(crate) schema: u64,
     pub(crate) id: String,
     pub(crate) config: String,
     pub(crate) observed_policy: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) initial_upload_pending: bool,
+}
+
+pub(crate) fn read_runtime_state(path: &Path) -> Result<RuntimeState> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(Error::new("invalid runtime state file"));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_JSON_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_JSON_BYTES {
+        return Err(Error::new("runtime state exceeds 1 MiB"));
+    }
+    let state: RuntimeState = serde_json::from_value(read_json_text(
+        std::str::from_utf8(&bytes).map_err(|_| Error::new("invalid runtime state"))?,
+    )?)?;
+    #[cfg(unix)]
+    if state.initial_upload_pending {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.mode() & 0o7777 != 0o600
+            || metadata.nlink() != 1
+        {
+            return Err(Error::new(
+                "unsafe pending initial upload state; inspect manually",
+            ));
+        }
+    }
+    Ok(state)
 }
 
 pub(crate) fn load_config(path: &Path) -> Result<Config> {

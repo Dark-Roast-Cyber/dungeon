@@ -340,12 +340,22 @@ Use the same explicit config for lifecycle commands: `dungeon --config PATH up`,
 `run opencode` (or another supported command), and `down`.
 
 In `copy` mode, first `up` creates the sandbox and uploads the configured
-project once. Subsequent `up` resumes without uploading, and does nothing if
+project once. The fresh winner publishes `initial_upload_pending: true` with
+its runtime identity before upload; new work and attachment refuse until upload,
+verification and baseline completion clear it. Subsequent `up` resumes without uploading, and does nothing if
 the sandbox is already Ready. `run` starts a stopped sandbox already bound to
 this config without uploading. `down` stops but preserves guest state. To
 intentionally refresh/recover the guest project, use
 `dungeon --config PATH upload --yes`; it overwrites the guest copy and may
-discard guest-side changes. To return changes, use
+discard guest-side changes. Failed/interrupted first upload stays pending:
+inspect the guest, use explicit `start` if stopped, then approve `upload --yes`.
+Neither `up` nor `create` retries the upload; `run` cannot autostart pending work.
+Status, stop and existing owned cleanup remain available. Explicit `create` and
+legacy state without the field mean false, even without a baseline; live never
+sets the flag. False is not proof that an export baseline exists. A completion
+directory-sync failure reports persistence unconfirmed: false may already be
+visible, so inspect rather than assuming rollback or automatic retry.
+To return changes, use
 `dungeon --config PATH export` only while the bound OpenShell 0.0.116 sandbox
 is Ready. Dungeon downloads/stages the complete guest tree, prints a
 deterministic summary, and waits for typed `yes`; `--yes` explicitly approves
@@ -365,9 +375,11 @@ These paths stay outside the project; enclosing private directories must be
 user-owned 0700 and lock/config/policy files user-owned regular 0600 files with
 one link. Unsafe existing state refuses without adoption or permission repair.
 Configuration and policy are reread through held private directories after
-locking; changed authority requires an explicit retry. Initial `up` acquires
-the transfer guard only through its existing upload call. Import stage/create
-locks remain separate; this is not general lifecycle coordination.
+locking; changed authority requires an explicit retry. Create/up acquire the
+environment admission lock before deciding whether creation is needed. Fresh
+copy `up` adds project locking and preflight before creation and holds both
+through upload/baseline completion; reuse never uploads and needs no host project.
+Import stage/create locks remain separate; this is not general lifecycle coordination.
 
 Prepared `dungeon-recovery-*` material is kept before the first host mutation,
 including on unwind or INT/TERM. Both upload and export refuse matching

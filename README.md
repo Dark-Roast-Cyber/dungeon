@@ -128,6 +128,12 @@ Explicit configs are not scanned or silently adopted as project bindings.
 
 The generated/default transfer mode is `copy`. On first `up`, copy mode creates the sandbox and uploads the configured project to `/sandbox/project`. A later `up` resumes the bound sandbox without uploading; if it is already Ready, `up` does nothing. `run` starts a stopped bound sandbox when needed, also without uploading. `down` stops the sandbox and preserves guest state.
 
+Failed/interrupted first copy stays `initial_upload_pending` and blocks new work,
+attachment and automatic startup. Inspect with `status`, explicitly `start` if
+stopped, then recover with `upload --yes` after preserving any guest edits.
+Reused `up`/`create` never retry upload automatically. Status/stop remain available;
+explicit `create` and legacy state are not inferred pending from a missing baseline.
+
 Copy-mode export is a separate reviewed operation, allowed only while the bound sandbox is Ready on OpenShell 0.0.116. `dungeon --config "$CONFIG" export` downloads and stages guest changes, prints a deterministic summary, then requires interactive typed `yes` or explicit `--yes` before applying. Conflicts and special entries are refused. Upload remains a deliberate refresh/recovery action: `dungeon --config "$CONFIG" upload --yes` overwrites guest project contents and can discard guest-side edits.
 
 Issue #24 also provides an explicit `--project-transfer live` experimental candidate. It derives one read-write Podman bind request for the canonical configured project at `/sandbox/project`, performs no upload, and refuses upload/export. It is not the generated/default path. The dedicated gateway bind-mount and keep-id settings have recorded OpenShell 0.0.116/rootless-Podman/Fedora results. Fresh `setup --enable-live` has a separate disposable VM CLI record; plain setup never enables live and no setup invocation migrates a copy gateway.

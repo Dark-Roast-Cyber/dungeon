@@ -24,6 +24,8 @@ sabotage and process-group escape can leave work running; unconfirmed cleanup
 is an error.
 External/OOM guardian death is not proof of cleanup: kernel group absence is
 required, with conservative refusal for unreaped zombies or recycled group IDs.
+Guardian faults terminate the non-TTY wrapper even if surviving work retains
+application output pipes; no cleanup receipt is fabricated, and work may remain.
 Failed primary transport remains an error even alongside a pending host signal.
 Forced group KILL can affect application durability but does not
 delete project/session state. Temporary guest control files are not a persistent
@@ -74,6 +76,8 @@ they do not add containment or guarantee final event delivery. See the
 OpenShell providers can grant authority even when raw secrets are brokered. `dungeon auth` starts vendor-owned login inside the guest. Resulting OAuth credentials live in guest-controlled state. Dungeon does not inspect, copy, refresh, escrow, or synchronize them.
 
 ## Remaining risks
+
+- Fresh copy `up` publishes pending initialization atomically with runtime identity and holds admission/transfer locks through upload and baseline completion. Pending blocks new work, not status/stop/explicit start or existing owned cleanup. Failure/interruption requires deliberate `upload --yes` recovery; no automatic retry. A failed completion directory sync can leave completed state visible and reports persistence unconfirmed, not rollback. This is not power-loss durability or a lock against external guest/host writers.
 
 - Allowed endpoints can receive data.
 - In copy mode, first `up` uploads the configured project once. Resume and automatic `run` startup do not upload. Explicit `upload --yes` is a deliberate refresh/recovery operation that overwrites guest project contents and may destroy guest-side edits; upload is not a secret scanner or immutable snapshot.

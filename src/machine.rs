@@ -245,6 +245,7 @@ fn result(config: &Config, remote: Option<&Value>, review: Value) -> Value {
         })
         .unwrap_or("uncreated");
     json!({"bound":true,"environment":environment(config,remote),"phase":phase,
+        "initial_upload_pending":remote.map(|v| v["initial_upload_pending"].clone()).unwrap_or(Value::Null),
         "identity":if remote.is_some(){"verified"}else{"configured"},
         "policy":if remote.is_some(){"verified"}else{"unknown"},"capabilities":capabilities(config),"review":review})
 }
@@ -358,7 +359,7 @@ fn dispatch(explicit: Option<PathBuf>, operation: Operation) -> Response {
                 return Ok((
                     0,
                     Some(
-                        json!({"bound":false,"environment":null,"phase":"unbound","identity":"unknown","policy":"unknown","capabilities":null,"review":null}),
+                        json!({"bound":false,"environment":null,"phase":"unbound","initial_upload_pending":null,"identity":"unknown","policy":"unknown","capabilities":null,"review":null}),
                     ),
                 ));
             }

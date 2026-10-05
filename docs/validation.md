@@ -55,6 +55,45 @@ AI/owned-lifecycle matrix was repeated.
 
 ## Existing runtime and transfer evidence
 
+### First-copy admission (synthetic regression)
+
+Actual CLI barrier fixtures pause fresh creation/upload and verify competing
+up/create cannot perform a second upload, pending status preserves backend Ready,
+new work refuses, interrupted publication remains pending, and explicit
+start/approved upload recover. Failure fixtures cover upload/download, host drift
+and baseline writes; private-state completion tests distinguish pre-replacement
+failure (pending retained) from post-replacement directory-sync failure
+(persistence unconfirmed, completed state may already be visible). Runtime tests
+cover all work entrypoints, explicit/legacy baseline-less reuse with absent host
+project, strict pending-state refusal and cleanup/control independence. These are
+synthetic subprocess and native host filesystem/process checks, not a repeated
+OpenShell/VM, cross-platform durability or containment claim. Evidence and final
+validation commands are in `/tmp/opencode/dungeon-prelive-check/first-up-handoff.md`
+and its correction handoff. The initial default-parallel gate exposed retained
+controls: a STOP IPC write racing guardian shutdown emitted child `error` (EPIPE),
+which the wrapper misclassified as spawn failure and exited before confirmation.
+Send callbacks now disconnect on IPC failure and leave receipt publication to the
+existing guardian-exit/kernel-group-absence checks. A deterministic injected EPIPE
+regression fails before the correction and passes afterward; three default-parallel
+machine runs and the full default-parallel locked Rust suite pass without relaxed
+cleanup assertions. Node guardian-fault tests still require bounded unconfirmed
+exit and no receipt for surviving groups. This correction has synthetic host
+process evidence only; it does not repeat the native OpenShell matrix.
+
+### Bounded framed guardian faults (synthetic regression)
+
+On base `04c0f63` plus the guardian-fault correction, production guest JavaScript
+tests reproduce retained silent output pipes after external guardian death before
+STOP, after STOP, and after command status. All three originally exceeded a
+3.5-second post-death bound; the corrected wrapper exits 125 without a receipt
+and leaves identity-checked survivors to fixture cleanup, not a reaped-group kill.
+The actual Rust machine CLI with the private synthetic OpenShell adapter returns
+fixed `cleanup_unconfirmed`, unknown effects, null application status and exit 1
+within 15 seconds. Successful framed output still drains both tails and preserves
+exit 23. This is host synthetic production-code evidence, not a new native
+OpenShell/VM, OOM, platform or containment validation. Evidence is retained at
+`/tmp/opencode/dungeon-prelive-check`.
+
 ### Issue #20 machine namespace delivered (2026-10-04 UTC)
 
 Delivered in merged [PR #37](https://github.com/Dark-Roast-Cyber/dungeon/pull/37);

@@ -1,4 +1,4 @@
-use crate::config::{Config, ProjectTransfer, RuntimeState, digest, read_json, write_new};
+use crate::config::{Config, ProjectTransfer, RuntimeState, digest, write_new};
 use crate::export;
 use crate::policy::validate_policy;
 use crate::{Error, OPEN_SHELL_VERSION, Result};
@@ -111,6 +111,7 @@ pub(crate) struct Runtime<'a> {
 impl<'a> Runtime<'a> {
     pub(crate) fn ssh_owned(&self, arguments: &[String]) -> Result<i32> {
         crate::imports::verify(self.config)?;
+        self.work_ready()?;
         #[cfg(target_os = "linux")]
         {
             owned::ssh(self, arguments)
@@ -126,6 +127,7 @@ impl<'a> Runtime<'a> {
     }
     pub(crate) fn execute_owned(&self, arguments: &[String]) -> Result<i32> {
         crate::imports::verify(self.config)?;
+        self.work_ready()?;
         #[cfg(target_os = "linux")]
         {
             owned::run(self, arguments)
@@ -150,11 +152,20 @@ impl<'a> Runtime<'a> {
 
     pub(crate) fn up(&self) -> Result<i32> {
         crate::imports::verify(self.config)?;
+        let mut transfer = export::TransferGuard::environment(self.config)?;
         if !self.config.state_path().exists() {
-            self.create()?;
+            let _imports = crate::imports::creation_lock(self.config)?;
+            let copy = self.config.values.project_transfer == ProjectTransfer::Copy;
+            if copy {
+                transfer.project(self.config)?;
+                preflight_upload(&self.config.values.project, &self.config.values.project)?;
+            }
+            if !self.create_locked(&transfer, copy)? {
+                return Ok(0);
+            }
             match self.config.values.project_transfer {
                 ProjectTransfer::Copy => {
-                    let code = self.upload().map_err(|error| Error::new(format!(
+                    let code = self.upload_locked(&transfer).map_err(|error| Error::new(format!(
                         "environment created, but initial project upload failed: {error}; sandbox preserved; retry with upload --yes"
                     )))?;
                     if code != 0 {
@@ -172,6 +183,7 @@ impl<'a> Runtime<'a> {
                 }
             }
         } else {
+            self.work_ready()?;
             match Self::phase(&self.checked(false, true)?)? {
                 Phase::Ready => match self.config.values.project_transfer {
                     ProjectTransfer::Copy => self.output.message(format_args!(
@@ -193,6 +205,7 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn run_agent(&self, command: &[String], tty: bool) -> Result<i32> {
+        self.work_ready()?;
         if Self::phase(&self.checked(false, true)?)? == Phase::Stopped {
             self.start()?;
         }
@@ -289,16 +302,28 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn create(&self) -> Result<i32> {
+        let transfer = export::TransferGuard::environment(self.config)?;
         let _lock = crate::imports::creation_lock(self.config)?;
+        self.create_locked(&transfer, false)?;
+        Ok(0)
+    }
+
+    // The caller holds environment admission and any import creation lock.
+    fn create_locked(
+        &self,
+        transfer: &export::TransferGuard,
+        initial_upload_pending: bool,
+    ) -> Result<bool> {
         if !self.config.values.imports.is_empty() {
             #[cfg(target_os = "linux")]
             local_setup::verify_import_gateway(self.config, &self.output)?;
         }
         if self.config.state_path().exists() {
             self.checked(false, true)?;
+            self.work_ready()?;
             self.output
                 .message(format_args!("Environment already exists; no changes made."))?;
-            return Ok(0);
+            return Ok(false);
         }
 
         let directory = tempfile::Builder::new()
@@ -324,15 +349,24 @@ impl<'a> Runtime<'a> {
             .get("policy")
             .ok_or_else(|| Error::new("created sandbox did not return an effective policy"))?;
         validate_policy(policy)?;
-        write_new(
-            &self.config.state_path(),
+        transfer.verify_environment(self.config)?;
+        let mut state = tempfile::NamedTempFile::new_in(self.config.path.parent().unwrap())?;
+        serde_json::to_writer_pretty(
+            &mut state,
             &RuntimeState {
                 schema: 1,
                 id: Self::remote_str(&remote, "id")?.to_owned(),
                 config: self.config.fingerprint.clone(),
                 observed_policy: digest(policy)?,
+                initial_upload_pending,
             },
         )?;
+        state.as_file().sync_all()?;
+        state
+            .persist_noclobber(self.config.state_path())
+            .map_err(|error| Error::new(error.to_string()))?;
+        #[cfg(unix)]
+        fs::File::open(self.config.path.parent().unwrap())?.sync_all()?;
 
         match self.config.values.project_transfer {
             ProjectTransfer::Copy => self.output.message(format_args!(
@@ -344,11 +378,12 @@ impl<'a> Runtime<'a> {
                 self.config.values.name
             ))?,
         }
-        Ok(0)
+        Ok(true)
     }
 
     pub(crate) fn execute(&self, command: &[String], tty: bool, workdir: &str) -> Result<i32> {
         crate::imports::verify(self.config)?;
+        self.work_ready()?;
         if command.is_empty()
             || command[0].is_empty()
             || command.iter().any(|arg| arg.contains('\0'))
@@ -383,7 +418,12 @@ impl<'a> Runtime<'a> {
             return Err(Error::new("the host project must exist for upload"));
         }
         crate::imports::verify(self.config)?;
-        let _transfer = export::TransferGuard::acquire(self.config)?;
+        let transfer = export::TransferGuard::acquire(self.config)?;
+        self.upload_locked(&transfer)
+    }
+
+    fn upload_locked(&self, transfer: &export::TransferGuard) -> Result<i32> {
+        let original = transfer.runtime_state(self.config)?;
         self.checked(true, true)?;
         preflight_upload(&self.config.values.project, &self.config.values.project)?;
         let before = export::snapshot(&self.config.values.project)?;
@@ -411,6 +451,13 @@ impl<'a> Runtime<'a> {
             let stage = self.download_project()?;
             let guest = export::snapshot(stage.path())?;
             export::save_baseline(self.config, &export::upload_baseline(&before, &guest))?;
+            self.checked(true, true)?;
+            if transfer.runtime_state(self.config)? != original {
+                return Err(Error::new("upload binding changed before completion"));
+            }
+            if original.initial_upload_pending {
+                transfer.complete_initial_upload(self.config, &original)?;
+            }
         }
         Ok(code)
     }
@@ -423,6 +470,7 @@ impl<'a> Runtime<'a> {
         }
         crate::imports::verify(self.config)?;
         let _transfer = export::TransferGuard::acquire(self.config)?;
+        self.work_ready()?;
         self.checked(true, true)?;
         let baseline = export::load_baseline(self.config)?;
         let stage = self.download_project()?;
@@ -465,6 +513,7 @@ impl<'a> Runtime<'a> {
 
     pub(crate) fn connect_vscode(&self) -> Result<i32> {
         crate::imports::verify(self.config)?;
+        self.work_ready()?;
         self.checked(true, true)?;
         self.status(&[
             "sandbox".into(),
@@ -477,6 +526,7 @@ impl<'a> Runtime<'a> {
 
     pub(crate) fn ssh_config(&self) -> Result<i32> {
         crate::imports::verify(self.config)?;
+        self.work_ready()?;
         self.checked(true, true)?;
         self.status(&[
             "sandbox".into(),
@@ -491,6 +541,7 @@ impl<'a> Runtime<'a> {
         local_port: Option<NonZeroU16>,
     ) -> Result<i32> {
         crate::imports::verify(self.config)?;
+        self.work_ready()?;
         self.checked(true, true)?;
         let local_port = local_port.unwrap_or(port);
         self.status(&[
@@ -632,11 +683,23 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn inspect_bound(&self) -> Result<Value> {
-        self.checked(false, true)
+        let mut remote = self.checked(false, true)?;
+        remote["initial_upload_pending"] = json!(self.bound_state()?.initial_upload_pending);
+        Ok(remote)
+    }
+
+    fn work_ready(&self) -> Result<()> {
+        if self.bound_state()?.initial_upload_pending {
+            return Err(Error::refusal(
+                crate::ErrorCode::OperationFailed,
+                "initial project upload is pending; inspect the sandbox, start it if stopped, then recover explicitly with upload --yes",
+            ));
+        }
+        Ok(())
     }
 
     fn bound_state(&self) -> Result<RuntimeState> {
-        let state: RuntimeState = serde_json::from_value(read_json(&self.config.state_path())?)
+        let state = crate::config::read_runtime_state(&self.config.state_path())
             .map_err(|error| Error::new(format!("invalid runtime.json: {error}")))?;
 
         if state.schema != 1 || state.config != self.config.fingerprint {
@@ -830,6 +893,7 @@ fn preflight_upload(path: &Path, root: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::read_json;
     use crate::config::{Agent, ConfigDoc, ProjectTransfer};
     use crate::policy::starter_policy;
 
@@ -977,6 +1041,8 @@ esac
     fn transfer_snapshot_guards_precede_locks_baseline_and_native_mutation() {
         let mut fixture = Fixture::new();
         fixture.runtime().create().unwrap();
+        // Creation now establishes admission state; isolate the transfer preflight.
+        fs::remove_file(fixture.root.path().join("transfer.lock")).unwrap();
         fixture.config.values.imports = vec![crate::config::Import {
             source: fixture.root.path().join("nvim-source"),
             destination: "/sandbox/.config/nvim".into(),
@@ -1084,6 +1150,11 @@ esac
     fn live_up_never_uploads_and_resume_reuses_the_bound_sandbox() {
         let mut fixture = Fixture::new();
         fixture.config.values.project_transfer = ProjectTransfer::Live;
+        fs::write(
+            &fixture.config.path,
+            serde_json::to_vec(&fixture.config.values).unwrap(),
+        )
+        .unwrap();
         let runtime = fixture.runtime();
 
         runtime.up().unwrap();
@@ -1091,6 +1162,7 @@ esac
         assert_eq!(fixture.calls("upload"), 0);
         assert_eq!(fixture.calls("download"), 0);
         assert!(!fixture.config.baseline_path().exists());
+        assert!(!runtime.bound_state().unwrap().initial_upload_pending);
 
         runtime.up().unwrap();
         assert_eq!(fixture.calls("create"), 1);
@@ -1135,8 +1207,13 @@ esac
         assert_eq!(fixture.calls("create"), 1);
         assert_eq!(fixture.calls("upload"), 1);
         assert!(!fixture.config.baseline_path().exists());
+        assert!(runtime.bound_state().unwrap().initial_upload_pending);
+        assert!(runtime.up().is_err());
+        assert!(runtime.create().is_err());
+        assert_eq!(fixture.calls("upload"), 1);
         fs::remove_file(fixture.root.path().join("fail-upload")).unwrap();
         runtime.upload().unwrap();
+        assert!(!runtime.bound_state().unwrap().initial_upload_pending);
         assert_eq!(fixture.calls("upload"), 2);
         assert!(fixture.config.baseline_path().exists());
         fs::write(fixture.config.values.project.join("file"), "refreshed").unwrap();
@@ -1149,6 +1226,128 @@ esac
         fixture.flag("fail-upload");
         assert_eq!(runtime.upload().unwrap(), 8);
         assert!(!fixture.config.baseline_path().exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pending_initial_copy_blocks_every_work_entrypoint_but_not_control_or_cleanup() {
+        let fixture = Fixture::new();
+        fixture.flag("fail-upload");
+        let runtime = fixture.runtime();
+        assert!(runtime.up().is_err());
+        let calls = fs::read_to_string(fixture.root.path().join("calls")).unwrap();
+        let argv = vec!["synthetic-work".into()];
+        assert!(runtime.execute(&argv, false, GUEST_PROJECT).is_err());
+        assert!(runtime.execute(&argv, true, GUEST_PROJECT).is_err());
+        assert!(runtime.run_agent(&argv, false).is_err());
+        assert!(runtime.execute_owned(&argv).is_err());
+        assert!(!matches!(
+            runtime.machine_execute(&argv, GUEST_PROJECT, false, None),
+            Ok(0)
+        ));
+        assert!(!matches!(
+            runtime.machine_execute(&argv, GUEST_PROJECT, true, None),
+            Ok(0)
+        ));
+        assert!(runtime.ssh_owned(&argv).is_err());
+        assert!(runtime.connect_vscode().is_err());
+        assert!(runtime.ssh_config().is_err());
+        assert!(
+            runtime
+                .forward_service(NonZeroU16::new(4096).unwrap(), None)
+                .is_err()
+        );
+        assert!(runtime.export(true).is_err());
+        assert_eq!(
+            fs::read_to_string(fixture.root.path().join("calls")).unwrap(),
+            calls
+        );
+        assert_eq!(
+            runtime.inspect_bound().unwrap()["initial_upload_pending"],
+            true
+        );
+        runtime.down().unwrap();
+        assert!(runtime.run_agent(&argv, false).is_err());
+        assert_eq!(fixture.calls("start"), 0);
+        runtime.start().unwrap();
+        assert_eq!(fixture.calls("start"), 1);
+        // The same identity/policy check used by owned cleanup is not a work gate.
+        runtime
+            .check_remote(runtime.get().unwrap(), true, true)
+            .unwrap();
+        fs::remove_file(fixture.root.path().join("fail-upload")).unwrap();
+        runtime.upload().unwrap();
+        runtime.execute(&argv, false, GUEST_PROJECT).unwrap();
+        assert_eq!(fixture.calls("exec"), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_creation_admission_and_reuse_preserve_explicit_empty_intent() {
+        let fixture = Fixture::new();
+        let runtime = fixture.runtime();
+        let guard = export::TransferGuard::environment(&fixture.config).unwrap();
+        assert!(matches!(
+            runtime.up().unwrap_err().code,
+            crate::ErrorCode::Busy
+        ));
+        assert!(matches!(
+            runtime.create().unwrap_err().code,
+            crate::ErrorCode::Busy
+        ));
+        assert_eq!(fixture.calls("create"), 0);
+        assert!(runtime.create_locked(&guard, false).unwrap());
+        assert!(!runtime.create_locked(&guard, true).unwrap());
+        drop(guard);
+        assert!(!runtime.bound_state().unwrap().initial_upload_pending);
+        assert!(!fixture.config.baseline_path().exists());
+        assert!(
+            read_json(&fixture.config.state_path())
+                .unwrap()
+                .get("initial_upload_pending")
+                .is_none()
+        );
+        runtime.up().unwrap();
+        runtime
+            .execute(&["true".into()], false, GUEST_PROJECT)
+            .unwrap();
+        assert_eq!(fixture.calls("create"), 1);
+        assert_eq!(fixture.calls("upload"), 0);
+        fs::remove_dir_all(&fixture.config.values.project).unwrap();
+        runtime.create().unwrap();
+        runtime.up().unwrap();
+        runtime.down().unwrap();
+        runtime.up().unwrap();
+        assert_eq!(fixture.calls("upload"), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_initial_download_host_drift_and_identity_checks_do_not_complete() {
+        for replacement in [
+            ("for dest do :; done; cp", "exit 8; for dest do :; done; cp"),
+            (
+                "test ! -e \"$root/fail-upload\" || exit 8",
+                "echo changed > \"$root/project/file\"",
+            ),
+            (
+                "test ! -e \"$root/fail-upload\" || exit 8",
+                "touch \"$root/replaced\"",
+            ),
+        ] {
+            let fixture = Fixture::new();
+            let source = fs::read_to_string(&fixture.binary).unwrap();
+            fs::write(
+                &fixture.binary,
+                source.replace(replacement.0, replacement.1),
+            )
+            .unwrap();
+            let runtime = fixture.runtime();
+            assert!(runtime.up().is_err());
+            assert!(runtime.bound_state().unwrap().initial_upload_pending);
+            assert!(runtime.up().is_err());
+            assert_eq!(fixture.calls("upload"), 1);
+        }
     }
 
     #[cfg(unix)]
@@ -1345,10 +1544,11 @@ esac
                 .up()
                 .unwrap_err()
                 .to_string()
-                .contains("initial project upload failed")
+                .contains("symlink")
         );
         assert_eq!(fixture.calls("upload"), 0);
-        assert_eq!(fixture.calls("create"), 1);
+        assert_eq!(fixture.calls("create"), 0);
+        assert!(!fixture.config.state_path().exists());
     }
 
     #[cfg(unix)]
