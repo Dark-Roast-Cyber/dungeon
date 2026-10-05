@@ -257,12 +257,16 @@ pub(in crate::openshell) fn run(
         .lock()
         .map_err(|_| Error::new("Signal owner unavailable."))?;
     let _signals = Signals::install()?;
-    let result = (if owned {
-        run_with_output(runtime, argv, cwd, Some(&mut output))
-    } else {
-        unowned(runtime, argv, cwd, stdin, &mut output)
-    })
-    .map_err(|error| runtime.output.error(error));
+    let result = runtime
+        .work_ready()
+        .and_then(|()| {
+            if owned {
+                run_with_output(runtime, argv, cwd, Some(&mut output))
+            } else {
+                unowned(runtime, argv, cwd, stdin, &mut output)
+            }
+        })
+        .map_err(|error| runtime.output.error(error));
     let delivered = output.finish(&result);
     Ok(
         if delivered.is_err() || SIGNAL.load(Ordering::SeqCst) != 0 {

@@ -409,9 +409,16 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         Commands::Up => runtime.up(),
         Commands::Down | Commands::Stop => runtime.down(),
         Commands::Status => {
+            let remote = runtime.inspect_bound()?;
             println!(
                 "{}",
-                serde_json::to_string_pretty(&runtime.inspect_bound()?)?
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "id": remote["id"],
+                    "name": remote["name"],
+                    "workspace": remote["workspace"],
+                    "phase": remote["phase"],
+                    "initial_upload_pending": remote["initial_upload_pending"],
+                }))?
             );
             Ok(0)
         }

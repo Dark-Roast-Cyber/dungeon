@@ -207,11 +207,15 @@ impl Drop for Fixture {
                 let fields = fields.split_whitespace().collect::<Vec<_>>();
                 if fields.len() > 19
                     && Some(fields[19]) == value["start"].as_str()
-                    && fields[2].parse::<u64>().ok() == Some(pid)
-                    && value["group"].as_u64() == Some(pid)
+                    && fields[2].parse::<u64>().ok() == value["group"].as_u64()
                 {
                     unsafe {
-                        libc::kill(-(pid as i32), libc::SIGKILL);
+                        let target = if value["group"].as_u64() == Some(pid) {
+                            -(pid as i32)
+                        } else {
+                            pid as i32
+                        };
+                        libc::kill(target, libc::SIGKILL);
                     }
                 }
             }
@@ -261,8 +265,35 @@ fn synthetic_guest_paths_and_cleanup_are_fixture_private() {
             .join(controls[0].file_name().unwrap())
             .exists()
     );
+    // A pending initialization gate must not disable already-owned cleanup.
+    let state_path = f.config.parent().unwrap().join("runtime.json");
+    let mut state: Value = serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
+    state["initial_upload_pending"] = json!(true);
+    fs::write(&state_path, state.to_string()).unwrap();
+    fs::set_permissions(&state_path, fs::Permissions::from_mode(0o600)).unwrap();
+    let refused = f
+        .machine()
+        .args([
+            "exec",
+            "--owned",
+            "--",
+            "/usr/bin/node",
+            "-e",
+            "process.exit(99)",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(1));
+    let refused: Value = serde_json::from_slice(&refused.stdout).unwrap();
+    assert_eq!(refused["error"]["effects"], "none");
+    assert_eq!(refused["error"]["code"], "operation_failed");
     // These guards also run during assertion unwinding, without a global guest directory.
     drop(child);
+    assert_eq!(
+        fs::read_dir(root.join("guest-controls")).unwrap().count(),
+        0
+    );
+    assert_eq!(unsafe { libc::kill(-group, 0) }, -1);
     drop(f);
     assert_eq!(unsafe { libc::kill(-group, 0) }, -1);
     assert!(!root.exists());
@@ -476,6 +507,55 @@ fn malformed_primary_stream_cannot_be_overridden_by_a_clean_receipt() {
             .count(),
         0
     );
+}
+
+#[test]
+fn guardian_death_with_retained_framed_pipes_is_bounded_cleanup_unconfirmed() {
+    let f = Fixture::new();
+    let registry = f.root.path().join("guest-processes.jsonl");
+    let app = format!(
+        "const fs=require('fs');const fields=fs.readFileSync('/proc/self/stat','utf8').split(') ')[1].split(' ');fs.appendFileSync({},JSON.stringify({{pid:process.pid,group:+fields[2],start:fields[19]}})+'\\n');process.on('SIGTERM',()=>{{}});process.kill(process.ppid,'SIGKILL');setInterval(()=>{{}},1000)",
+        serde_json::to_string(&registry).unwrap()
+    );
+    let mut child = f.spawn(
+        f.machine()
+            .args(["exec", "--owned", "--", "/usr/bin/node", "-e", &app])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "guardian fault hung the actual CLI"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stderr.is_empty());
+    let events = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(events[0]["event"], "started");
+    let final_event = events.last().unwrap();
+    assert_eq!(final_event["event"], "finished");
+    assert_eq!(final_event["ok"], false);
+    assert!(final_event["exit_code"].is_null());
+    assert_eq!(final_event["error"]["code"], "cleanup_unconfirmed");
+    assert_eq!(final_event["error"]["effects"], "unknown");
+    let controls = fs::read_dir(f.root.path().join("guest-controls"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(controls.len(), 1);
+    assert!(!controls[0].join("result").exists());
+    // Fixture Drop kills only the independently recorded, identity-matching survivor.
 }
 
 #[test]

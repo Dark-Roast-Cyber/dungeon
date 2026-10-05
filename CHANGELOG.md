@@ -2,6 +2,8 @@
 
 ## Unreleased preview additions (0.0.2)
 
+- Serialize first-copy creation/upload and block new work while durable initial upload is pending; recovery remains explicit `upload --yes`, without automatic retry or rollback guarantees.
+
 - Add schema-1 machine lifecycle JSON and workload-byte JSONL on the same Runtime, with explicit whole-project transfer approval; no Sandcastle adapter or arbitrary-path synchronization.
 - Add read-only `doctor` diagnostics and opt-in Linux owned foreground/interactive execution. Ownership assists cleanup, not stronger containment.
 - Add explicit experimental live project transfer and fresh `setup --enable-live`; copy remains the default and copy-gateway migration is refused. Validation is limited to the recorded Linux/OpenShell/Podman combinations.

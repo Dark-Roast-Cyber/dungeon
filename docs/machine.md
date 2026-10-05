@@ -85,6 +85,17 @@ policy `unknown`, even if an unobserved runtime already exists. An unbound resol
 uses null environment/capabilities, phase `unbound`, identity/policy `unknown`.
 Observed phases are `ready`, `stopped`, `error`, `transitioning` or `unknown`.
 
+`initial_upload_pending` is a bound-state boolean, or null without runtime
+inspection (including resolve/uncreated/unbound). It does not redefine backend
+phase: Ready can still be pending. Pending first-copy initialization blocks new
+execution, attachment and automatic start with `operation_failed`, effects `none`
+before launch. Explicit start, status, stop and existing owned cleanup remain
+available. Inspect and recover deliberately with Ready-only `upload --yes`;
+reused up/create never retry automatically. False includes explicit create and
+legacy state and does not prove an export baseline exists. A failed completion
+directory sync has unknown effects and may leave false already visible; there is
+no rollback guarantee.
+
 Capabilities each contain string `state` and nullable string `reason`. States are
 `supported`, `unsupported`, `unknown` or `degraded`. Supported describes the contract,
 not observed prerequisite availability or containment attestation. Streaming/owned

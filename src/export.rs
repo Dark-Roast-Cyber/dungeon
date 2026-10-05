@@ -24,6 +24,12 @@ impl Drop for TransferGuard {
 
 impl TransferGuard {
     pub(crate) fn acquire(config: &Config) -> Result<Self> {
+        let mut guard = Self::environment(config)?;
+        guard.project(config)?;
+        Ok(guard)
+    }
+
+    pub(crate) fn project(&mut self, config: &Config) -> Result<()> {
         let path = crate::binding::transfer_lock_path(&config.values.project)?;
         #[cfg(test)]
         let path = config
@@ -33,11 +39,20 @@ impl TransferGuard {
             .unwrap()
             .join("transfer-locks")
             .join(path.file_name().unwrap());
-        Self::acquire_at(config, &path)
+        self.project_at(config, &path)
     }
 
     #[cfg(not(unix))]
-    fn acquire_at(_: &Config, _: &Path) -> Result<Self> {
+    pub(crate) fn environment(_: &Config) -> Result<Self> {
+        // Non-Unix creation retains its existing contract; copy transfer refuses below.
+        Ok(Self {
+            locks: vec![],
+            _directories: vec![],
+        })
+    }
+
+    #[cfg(not(unix))]
+    fn project_at(&mut self, _: &Config, _: &Path) -> Result<()> {
         Err(Error::refusal(
             crate::ErrorCode::Unsupported,
             "private copy-transfer locking requires a Unix host",
@@ -45,7 +60,7 @@ impl TransferGuard {
     }
 
     #[cfg(unix)]
-    fn acquire_at(config: &Config, project_lock: &Path) -> Result<Self> {
+    pub(crate) fn environment(config: &Config) -> Result<Self> {
         use private::*;
         let parent = directory(config.path.parent().expect("config parent"), false)?;
         let mut guard = Self {
@@ -55,36 +70,29 @@ impl TransferGuard {
         guard
             .locks
             .push(lock(&guard._directories[0], "transfer.lock")?);
-        if project_lock.starts_with(&config.values.project) {
-            return Err(Error::new("transfer locks must stay outside the project"));
-        }
-        let authority = directory(project_lock.parent().unwrap().parent().unwrap(), true)?;
-        let root = directory(project_lock.parent().expect("lock parent"), true)?;
-        guard
-            .locks
-            .push(lock(&root, project_lock.file_name().unwrap())?);
-        guard._directories.push(root);
-        guard._directories.push(authority);
+        guard.verify_environment(config)?;
+        Ok(guard)
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn verify_environment(&self, config: &Config) -> Result<()> {
+        use private::*;
         let current = directory(config.path.parent().unwrap(), false)?;
         use std::os::unix::fs::MetadataExt;
         let a = current.metadata()?;
-        let b = guard._directories[0].metadata()?;
+        let b = self._directories[0].metadata()?;
         if a.dev() != b.dev() || a.ino() != b.ino() {
             return Err(Error::new(
                 "configuration directory changed during transfer",
             ));
         }
-        let current = directory(project_lock.parent().unwrap(), false)?;
-        let a = current.metadata()?;
-        let b = guard._directories[1].metadata()?;
-        if a.dev() != b.dev() || a.ino() != b.ino() {
-            return Err(Error::new("project lock directory changed during transfer"));
-        }
-        let dir = &guard._directories[0];
+        let dir = &self._directories[0];
         let mut values: crate::config::ConfigDoc =
             serde_json::from_value(json_file(dir, config.path.file_name().unwrap())?)
                 .map_err(|_| Error::new("invalid private transfer configuration"))?;
-        values.project = crate::config::canonical_project(&values.project)?;
+        if values.project.exists() {
+            values.project = crate::config::canonical_project(&values.project)?;
+        }
         let policy = json_file(dir, "policy.json")?;
         if serde_json::to_value(values)? != serde_json::to_value(&config.values)?
             || policy != config.policy
@@ -93,8 +101,102 @@ impl TransferGuard {
                 "policy/configuration changed before transfer; retry explicitly",
             ));
         }
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    pub(crate) fn verify_environment(&self, _: &Config) -> Result<()> {
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn project_at(&mut self, config: &Config, project_lock: &Path) -> Result<()> {
+        use private::*;
+        self.verify_environment(config)?;
+        if crate::config::canonical_project(&config.values.project)? != config.values.project {
+            return Err(Error::new("project identity changed before transfer"));
+        }
+        if project_lock.starts_with(&config.values.project) {
+            return Err(Error::new("transfer locks must stay outside the project"));
+        }
+        let authority = directory(project_lock.parent().unwrap().parent().unwrap(), true)?;
+        let root = directory(project_lock.parent().expect("lock parent"), true)?;
+        self.locks
+            .push(lock(&root, project_lock.file_name().unwrap())?);
+        let current = directory(project_lock.parent().unwrap(), false)?;
+        use std::os::unix::fs::MetadataExt;
+        let a = current.metadata()?;
+        let b = root.metadata()?;
+        if a.dev() != b.dev() || a.ino() != b.ino() {
+            return Err(Error::new("project lock directory changed during transfer"));
+        }
+        self._directories.push(root);
+        self._directories.push(authority);
         check_recovery(&config.values.project)?;
-        Ok(guard)
+        Ok(())
+    }
+
+    pub(crate) fn runtime_state(&self, config: &Config) -> Result<crate::config::RuntimeState> {
+        #[cfg(unix)]
+        {
+            self.verify_environment(config)?;
+            Ok(serde_json::from_value(private::json_file(
+                &self._directories[0],
+                "runtime.json",
+            )?)?)
+        }
+        #[cfg(not(unix))]
+        {
+            crate::config::read_runtime_state(&config.state_path())
+        }
+    }
+
+    pub(crate) fn complete_initial_upload(
+        &self,
+        config: &Config,
+        expected: &crate::config::RuntimeState,
+    ) -> Result<()> {
+        self.complete_initial_upload_with(
+            config,
+            expected,
+            |temp, path| {
+                temp.persist(path).map_err(|e| Error::new(e.to_string()))?;
+                Ok(())
+            },
+            |parent| Ok(File::open(parent)?.sync_all()?),
+        )
+    }
+
+    fn complete_initial_upload_with(
+        &self,
+        config: &Config,
+        expected: &crate::config::RuntimeState,
+        replace: impl FnOnce(tempfile::NamedTempFile, &Path) -> Result<()>,
+        sync: impl FnOnce(&Path) -> Result<()>,
+    ) -> Result<()> {
+        if !expected.initial_upload_pending || self.runtime_state(config)? != *expected {
+            return Err(Error::new(
+                "initial upload binding changed before completion",
+            ));
+        }
+        let parent = config.path.parent().unwrap();
+        let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+        let completed = crate::config::RuntimeState {
+            initial_upload_pending: false,
+            ..expected.clone()
+        };
+        serde_json::to_writer_pretty(&mut temp, &completed)?;
+        temp.write_all(b"\n")?;
+        temp.as_file().sync_all()?;
+        // All transfer/baseline checks precede publication. A later directory-sync
+        // failure may leave this completed state visible; it must not be rolled back.
+        if self.runtime_state(config)? != *expected {
+            return Err(Error::new(
+                "initial upload binding changed before completion",
+            ));
+        }
+        replace(temp, &config.state_path())?;
+        sync(parent).map_err(|_| Error::new("initial upload completed but state persistence unconfirmed; inspect before continuing"))
     }
 }
 
@@ -1030,12 +1132,103 @@ mod tests {
                 id: "id".into(),
                 config: "fingerprint".into(),
                 observed_policy: "digest".into(),
+                initial_upload_pending: false,
             },
         )
         .unwrap();
         write_new(&config.path, &config.values).unwrap();
         write_new(&config.policy_path, &config.policy).unwrap();
         (root, config, guest)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn initial_completion_failures_distinguish_before_and_after_publication() {
+        let (_root, config, _) = fixture();
+        let mut expected = crate::config::read_runtime_state(&config.state_path()).unwrap();
+        expected.initial_upload_pending = true;
+        fs::write(config.state_path(), serde_json::to_vec(&expected).unwrap()).unwrap();
+        let guard = TransferGuard::environment(&config).unwrap();
+        let before = guard.complete_initial_upload_with(
+            &config,
+            &expected,
+            |_, _| Err(Error::new("synthetic pre-replacement failure")),
+            |_| Ok(()),
+        );
+        assert!(before.is_err());
+        assert!(
+            crate::config::read_runtime_state(&config.state_path())
+                .unwrap()
+                .initial_upload_pending
+        );
+        let after = guard.complete_initial_upload_with(
+            &config,
+            &expected,
+            |temp, path| {
+                temp.persist(path).unwrap();
+                Ok(())
+            },
+            |_| Err(Error::new("synthetic directory-sync failure")),
+        );
+        assert!(
+            after
+                .unwrap_err()
+                .to_string()
+                .contains("persistence unconfirmed")
+        );
+        assert!(
+            !crate::config::read_runtime_state(&config.state_path())
+                .unwrap()
+                .initial_upload_pending
+        );
+        assert!(
+            read_json(&config.state_path())
+                .unwrap()
+                .get("initial_upload_pending")
+                .is_none()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn initial_completion_refuses_changed_or_unsafe_private_state() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        for kind in ["identity", "boolean", "mode", "symlink", "hardlink", "fifo"] {
+            let (root, config, _) = fixture();
+            let mut expected = crate::config::read_runtime_state(&config.state_path()).unwrap();
+            expected.initial_upload_pending = true;
+            fs::write(config.state_path(), serde_json::to_vec(&expected).unwrap()).unwrap();
+            let guard = TransferGuard::environment(&config).unwrap();
+            let state = config.state_path();
+            match kind {
+                "identity" => {
+                    let mut changed = expected.clone();
+                    changed.id = "replacement".into();
+                    fs::write(&state, serde_json::to_vec(&changed).unwrap()).unwrap();
+                }
+                "boolean" => {
+                    let mut changed = serde_json::to_value(&expected).unwrap();
+                    changed["initial_upload_pending"] = serde_json::json!("true");
+                    fs::write(&state, changed.to_string()).unwrap();
+                }
+                "mode" => fs::set_permissions(&state, fs::Permissions::from_mode(0o644)).unwrap(),
+                "symlink" => {
+                    fs::rename(&state, root.path().join("target")).unwrap();
+                    symlink(root.path().join("target"), &state).unwrap();
+                }
+                "hardlink" => fs::hard_link(&state, root.path().join("target")).unwrap(),
+                "fifo" => {
+                    fs::remove_file(&state).unwrap();
+                    let path = std::ffi::CString::new(state.to_str().unwrap()).unwrap();
+                    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                guard.complete_initial_upload(&config, &expected).is_err(),
+                "{kind}"
+            );
+        }
     }
 
     #[test]
