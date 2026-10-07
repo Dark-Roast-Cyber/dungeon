@@ -126,6 +126,7 @@ case "$1:$2" in
  sandbox:exec)
    while test "$#" -gt 0 && test "$1" != --; do shift; done
    shift
+   if test "$#" = 2 && test "$1" = /bin/bash && test "$2" = -l; then exit 0; fi
    test "$#" = 1 && test "$1" = synthetic-edit || exit 92
    printf 'guest-work\n' > "$root/guest/file";;
  *) exit 93;;
@@ -188,6 +189,22 @@ esac
         .unwrap();
         state["initial_upload_pending"].as_bool().unwrap_or(false)
     }
+}
+
+#[test]
+fn shell_opens_in_the_guest_project_without_uploading_again() {
+    let f = Fixture::new();
+    assert!(f.run(&["up"]).status.success());
+    let out = f.run(&["shell"]);
+    assert!(out.status.success(), "{out:?}");
+    let calls = fs::read_to_string(f.root.path().join("calls")).unwrap();
+    let exec = calls
+        .lines()
+        .find(|line| line.starts_with("sandbox exec "))
+        .unwrap();
+    assert!(exec.contains("/sandbox/project"), "{exec}");
+    assert!(exec.ends_with("-- /bin/bash -l"), "{exec}");
+    assert_eq!(f.calls("upload"), 1);
 }
 
 #[test]

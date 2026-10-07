@@ -11,6 +11,24 @@ CI checks formatting, Clippy, locked Rust tests, release compilation, CLI versio
 - npm launcher validation targets Node 24 LTS.
 - OpenShell 0.0.116 is an intentional compatibility pin because Dungeon consumes version-sensitive CLI and structured-output contracts.
 
+## Simplified project onboarding (2026-10-06)
+
+Synthetic actual-CLI tests cover current-project/private-binding defaults,
+explicit overrides and custom directories, repository-config non-adoption,
+noninteractive approval, refusal without approval, no overwriting existing
+configuration, and offline `config`/`plan` without binding creation or OpenShell.
+Invalid config and project-contained destinations (including symlink aliases)
+refuse before writes. A synthetic lifecycle test checks that `shell` requests the
+guest project cwd without re-uploading.
+
+On Linux/Rust 1.98.1, formatting, all-target Clippy with warnings denied,
+`cargo test --locked` (**147 passed**), all **3 npm launcher tests**, and
+`git diff --check` passed. Launcher tests used host Node **22.22.2**, not the
+supported Node 24 release gate. Log: `/tmp/opencode/dungeon-onboarding-validation.log`.
+No live OpenShell/Podman, interactive PTY, authentication, image build, other
+platform or containment validation was repeated; existing native records retain
+their revision limits. Copy, image and policy defaults remain unchanged.
+
 ## Issue #22 read-only diagnostics
 
 `dungeon doctor [--json]` has synthetic coverage for independent inventory when

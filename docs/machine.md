@@ -4,7 +4,7 @@ Development-preview contract for external harnesses. One Rust Runtime and the
 existing policy, identity, transfer and owned-process checks remain authoritative.
 This is not an SDK, daemon, remote execution protocol or orchestrator.
 
-After [building the CLI and setting up the gateway](../README.md#build), build
+After [building the CLI and setting up the gateway](../README.md#quick-start), build
 the [local agent image](../images/agent/README.md) before selecting it below.
 Run these examples from a project directory, not your home or filesystem root.
 The `--yes` flags are explicit demonstration approvals: first `up` uploads the

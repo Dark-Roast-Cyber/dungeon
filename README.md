@@ -1,41 +1,18 @@
 # Dungeon
 
-Low-friction, policy-managed environments for coding agents. Dungeon helps individuals and teams adopt [OpenShell](https://github.com/NVIDIA/OpenShell) where practical, run agents inside isolation while keeping terminal/editor workflows familiar, and prepare for optional [Telltale](https://github.com/Dark-Roast-Cyber/telltale) integration once its downstream contract is stable. Part of the [Agent Archaeology](https://agentarchaeology.ai/) family.
+Run coding agents and development tools in isolated project environments, using
+their normal CLIs. Dungeon manages setup, private configuration, lifecycle and
+reviewed project transfers. [OpenShell](https://github.com/NVIDIA/OpenShell) owns
+isolation and policy enforcement; your tools own prompts, models and sessions.
+Part of [Agent Archaeology](https://agentarchaeology.ai/).
 
-Dungeon is an environment manager and adoption layer, not an agent orchestrator. Agent CLIs, editors, desktop clients, CI systems, and external harnesses should be able to use Dungeon-backed environments while Dungeon mostly disappears into the background.
+**Development preview:** this README describes the source-only Rust 0.0.2
+implementation on main. Published v0.0.1 is the older Python implementation.
+Neither is an audited isolation product.
 
-**Main is the source-only Rust 0.0.2 development preview; the latest published release, v0.0.1, is the older Python implementation and does not match this manual. Neither is an audited isolation product.**
+## Quick start
 
-## Product boundary
-
-Dungeon owns the user-facing setup and environment-management layer:
-
-- help users install, verify, and operate supported OpenShell configurations;
-- define project scope and environment identity;
-- configure reviewed tools, read-only configuration imports, guest-private state, network requests, and provider requirements;
-- coordinate lifecycle, authentication entrypoints, project transfer, and safe return of changes;
-- expose terminal, agent CLI, VS Code, SSH, and future remote attachment paths that feel native;
-- provide stable machine-readable operations so external harnesses can use Dungeon as an isolation provider.
-
-OpenShell owns workload isolation and policy enforcement. Agent tools and harnesses own prompts, model selection, iteration loops, issue processing, parallel-agent scheduling, review workflows, and other orchestration.
-
-Dungeon must not weaken isolation for convenience. Project content may request capabilities in future configuration surfaces, but it cannot grant itself filesystem, network, credential, provider, mount, or privilege access.
-
-## Current implementation
-
-- One Rust CLI with no host interpreter dependency. Owned execution modes require guest Node and Linux `/proc`, as documented below.
-- Direct OpenCode, Claude Code, Codex, shell, and arbitrary command execution.
-- Vendor-native guest authentication for Codex device login and Claude Code browser login.
-- Optional VS Code and SSH attachment.
-- Foreground forwarding from host loopback to guest-loopback services.
-- Explicit config, policy, typed project-transfer intent, runtime identity, and safe copy-mode upload/export checks.
-- Explicit reviewed Neovim snapshots, read-only mounted contents and separate guest-private state on the recognized local bind-enabled gateway. Guest config pathnames remain mutable.
-- One starter OpenShell policy. Additional profiles wait for validated scenario differences.
-- A validated rootless-Podman/OpenShell path; broader runtime/platform support remains explicit future validation.
-
-Dungeon targets **OpenShell 0.0.116**. The OpenShell version is intentionally pinned because Dungeon validates version-sensitive CLI and structured-output contracts. Windows management is intended through WSL2 or a supported remote Linux host; native Windows workload containment is not claimed.
-
-## Build
+### 1. Build the CLI
 
 For the supported Linux path, install Git, a Rust toolchain manager providing
 `cargo`, OpenShell **0.0.116**, and rootless Podman separately. The repository pins
@@ -44,180 +21,181 @@ For the supported Linux path, install Git, a Rust toolchain manager providing
 ```sh
 git clone https://github.com/Dark-Roast-Cyber/dungeon.git
 cd dungeon
-cargo build --release
+cargo build --release --locked
 export PATH="$PWD/target/release:$PATH"
 dungeon --help
 ```
 
-The PATH export applies to this shell. Start the user Podman API socket (`systemctl --user enable --now podman.socket`) and explicitly pull the immutable OpenShell gateway image before setup:
+The PATH export applies to this shell. Native Rust release archives and the npm
+launcher are **not published yet**. See [distribution](docs/distribution.md).
+
+### 2. Set up the local gateway
+
+Start the user Podman API socket and pull the pinned gateway image explicitly:
 
 ```sh
+systemctl --user enable --now podman.socket
 podman pull ghcr.io/nvidia/openshell/gateway@sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645
 dungeon setup
+dungeon doctor
 ```
 
-Setup provisions a local mTLS gateway named `dungeon-local` on loopback port 17670 with the Podman driver and workspace `default`. Repeat `dungeon setup` to verify it; incompatible existing registrations/containers are never overwritten. It does not create a sandbox, upload a project, install packages with privilege, download OpenShell, or fall back to MicroVM. Native Windows and macOS setup are not supported. Only the recorded Linux/Podman/OpenShell combination has live validation; setup health does not prove containment on every host.
+Setup creates a local mTLS gateway, `dungeon-local`, on loopback port 17670 using
+rootless Podman and workspace `default`. Repeating it verifies compatible running
+state; it never overwrites conflicts, repairs stopped gateways, installs
+prerequisites or falls back to weaker isolation. `doctor` is read-only and can
+also be used before setup to identify missing prerequisites.
 
-The [local reviewed agent image](images/agent/README.md) pins reviewed OpenCode, Claude Code, Codex, Neovim, and Rust versions on the validated base. Build it with rootless Podman and explicitly select `localhost/dungeon-agent:0.0.3-dev` with `dungeon init --image`. It is not published or selected by default; publication and provenance remain separate work.
+### 3. Review a project, then start it
 
-Experimental fresh setup can explicitly enable the trusted gateway's live-bind ceiling:
-
-```sh
-dungeon setup --enable-live --dry-run
-dungeon setup --enable-live
-```
-
-Dry-run creates no setup state or lock. Existing exact live gateways are verified by plain or flagged setup without downgrade. Existing copy gateways refuse `--enable-live`: safe migration is not implemented. Stopped, partial, foreign and legacy-layout gateways are never started, repaired or adopted. Fresh copy/live setup and repeat verification have one disposable Fedora CoreOS/rootless-Podman native record. This does not authorize a project mount or convert a binding. See [setup modes and limits](docs/configuration.md#local-setup-modes).
-
-## First environment
-
-Before initializing or changing anything, use `dungeon doctor` or
-`dungeon doctor --json`. It checks read-only prerequisites and an existing
-current-directory private binding, if any; `--config PATH` selects an explicit
-configuration. It never prompts, initializes a binding, installs prerequisites,
-starts a gateway/sandbox, or enables live mounts. Missing capabilities remain
-explicit. See [diagnostic states and limits](docs/configuration.md#read-only-diagnostics).
-
-After machine-level setup, the normal interactive launcher is project-oriented:
+Tools must be installed in the selected sandbox image; Dungeon does not use your
+host's tools. The default community `base:latest` image is a mutable tag, not a
+reviewed version pin. To use pinned OpenCode, Claude Code, Codex, Neovim and Rust,
+build the [local reviewed image](images/agent/README.md) first and replace plain
+`init` below with `dungeon init --image localhost/dungeon-agent:0.0.3-dev`.
+That image is not published or selected automatically.
 
 ```sh
-dungeon setup
 cd my-project
-dungeon
-```
-
-With no positional path, `dungeon` uses the current directory. Pass a directory
-to launch another project directly:
-
-```sh
-dungeon ../other-project
-dungeon /home/user/projects/demo
-```
-
-Dungeon canonicalizes the selected project and resolves one deterministic
-private environment under
-`${XDG_CONFIG_HOME:-$HOME/.config}/dungeon/projects/<project-key>`. It never
-loads policy or security authority from the repository. On first use, an
-interactive terminal is required: Dungeon shows the project, private config
-path, copy transfer mode, gateway, image, and default agent, asks for
-confirmation, writes the private configuration, then brings the environment up
-and launches the configured agent.
-
-After that, lifecycle commands resolve the same private environment from the
-current directory without repeated config-path ceremony:
-
-```sh
+dungeon init
+dungeon plan
 dungeon up
-dungeon run opencode
-dungeon code
-dungeon down
+dungeon shell
 ```
 
-The explicit configuration flow remains supported for deterministic automation,
-recovery, and hand-authored environments:
+`init` uses the current project, a generated name, private config storage and
+copy transfer. It shows the scope and asks once before writing configuration;
+it starts nothing. `plan` lets you review the policy without runtime contact.
+First `up` creates the sandbox and copies the project to `/sandbox/project`;
+`shell` opens Bash there. **Review project contents and policy before `up`;
+transfer is not a secret scanner.**
+
+## Everyday use
+
+From the project directory, choose the interface you need:
+
+| Task | Command |
+| --- | --- |
+| Launch the configured agent | `dungeon` |
+| Choose an agent | `dungeon run opencode`, `dungeon run claude`, or `dungeon run codex` |
+| Run a tool or tests | `dungeon exec -- cargo test` (requires Cargo in the image) |
+| Run an interactive tool | `dungeon exec --tty -- nvim file.txt` (requires Neovim in the image) |
+| Open a terminal | `dungeon shell` |
+| Inspect sandbox state | `dungeon status` |
+| Review and return guest edits | `dungeon export` |
+| Stop, preserving guest state | `dungeon down` |
+
+No repeated config path is needed. `dungeon` initializes/resumes and launches the
+default agent; `dungeon ../other-project` selects another project. Agents may
+require [guest authentication](#authentication) before use.
+
+- `up` resumes the same sandbox without another upload; already Ready is a no-op.
+- `run` can start a stopped bound sandbox, also without uploading. `exec`,
+  `shell` and attachment commands require it already Ready.
+- `down` preserves guest files, sessions and authentication.
+
+### Returning changes in copy mode
+
+Guest edits stay in the sandbox until `dungeon export`. Stop active writers in
+the guest and on the host, review the staged summary, then type `yes` to apply.
+Conflicts and special entries are refused; `--yes` explicitly skips the prompt.
+
+Host edits are not automatically synchronized either. `dungeon upload --yes`
+refreshes the guest project and **may discard guest edits**. It is a deliberate
+overwrite operation, not ordinary startup.
+
+Failed first upload blocks new work. Inspect with `status`, preserve guest edits,
+use `start` if stopped, then recover deliberately with `upload --yes`.
+`up` does not retry a failed initial upload.
+
+## Configure your environment
+
+Select options for a new binding (instead of plain `init` above), without a
+separate wizard:
 
 ```sh
-dungeon init --directory "$HOME/.config/dungeon/demo" --project "$PWD" --gateway dungeon-local --image localhost/dungeon-agent:0.0.3-dev
-CONFIG="$HOME/.config/dungeon/demo/dungeon.json"
-dungeon --config "$CONFIG" plan
-dungeon --config "$CONFIG" up
+dungeon init --agent codex
+dungeon config                  # resolved values and config/policy paths
+dungeon config --path           # just the dungeon.json path
 ```
 
-Explicit configs are not scanned or silently adopted as project bindings.
-`--config PATH` remains authoritative when supplied.
+| Setting | Default | Initialization flag |
+| --- | --- | --- |
+| Project | Current directory | `--project PATH` |
+| Config directory | Private project binding | `--directory PATH` |
+| Environment name | Generated from the project path | `--name NAME` |
+| Agent | OpenCode | `--agent opencode\|claude\|codex` |
+| Image | Community `base:latest` | `--image OCI_REFERENCE` |
+| Transfer | Copy, no writable host mounts | `--project-transfer copy\|live` |
+| Gateway | `dungeon-local` | `--gateway NAME` |
+| Workspace | `default` | `--workspace NAME` |
+| Providers | None | `--provider NAME` (repeatable; existing providers, not secrets) |
 
-The generated/default transfer mode is `copy`. On first `up`, copy mode creates the sandbox and uploads the configured project to `/sandbox/project`. A later `up` resumes the bound sandbox without uploading; if it is already Ready, `up` does nothing. `run` starts a stopped bound sandbox when needed, also without uploading. `down` stops the sandbox and preserves guest state.
+For noninteractive configuration writing:
 
-Failed/interrupted first copy stays `initial_upload_pending` and blocks new work,
-attachment and automatic startup. Inspect with `status`, explicitly `start` if
-stopped, then recover with `upload --yes` after preserving any guest edits.
-Reused `up`/`create` never retry upload automatically. Status/stop remain available;
-explicit `create` and legacy state are not inferred pending from a missing baseline.
+```sh
+dungeon init --yes --project /path/to/my-project --agent codex
+```
 
-Copy-mode export is a separate reviewed operation, allowed only while the bound sandbox is Ready on OpenShell 0.0.116. `dungeon --config "$CONFIG" export` downloads and stages guest changes, prints a deterministic summary, then requires interactive typed `yes` or explicit `--yes` before applying. Conflicts and special entries are refused. Upload remains a deliberate refresh/recovery action: `dungeon --config "$CONFIG" upload --yes` overwrites guest project contents and can discard guest-side edits.
+`--yes` approves saving configuration only; it does not start a sandbox or upload
+files. Existing directories are never overwritten. Full configuration rules are
+in [configuration](docs/configuration.md#initialize-and-customize).
 
-Issue #24 also provides an explicit `--project-transfer live` experimental candidate. It derives one read-write Podman bind request for the canonical configured project at `/sandbox/project`, performs no upload, and refuses upload/export. It is not the generated/default path. The dedicated gateway bind-mount and keep-id settings have recorded OpenShell 0.0.116/rootless-Podman/Fedora results. Fresh `setup --enable-live` has a separate disposable VM CLI record; plain setup never enables live and no setup invocation migrates a copy gateway.
+Configuration lives under
+`${XDG_CONFIG_HOME:-$HOME/.config}/dungeon/projects/<project-key>`, never in the
+repository. Edit adjacent `policy.json` for network/filesystem policy and
+`dungeon.json` for environment choices **before creating the sandbox**. Changes
+to a bound configuration fail identity checks; Dungeon does not silently rebuild
+or widen policy. Use `--directory PATH` for a separately managed environment and
+`dungeon --config PATH COMMAND` to select it explicitly.
 
-Optional [Neovim imports](docs/configuration.md#reviewed-neovim-snapshots) require an explicit private declaration and `dungeon --config "$CONFIG" imports stage` approval before first creation. Dungeon binds a private frozen snapshot, never the original source. Read-only protection applies to mounted contents, not the guest pathname: writable guest ancestors can be renamed and replacement configuration can execute later.
+Experimental live transfer exposes the selected host project read-write and
+requires a recognized bind-enabled gateway plus explicit
+`init --project-transfer live`. Fresh `setup --enable-live` can create such a
+gateway. It is not the default; existing copy gateways cannot be migrated
+automatically. See [setup modes and limits](docs/configuration.md#local-setup-modes).
 
 ## Authentication
 
 ```sh
-dungeon --config "$CONFIG" auth codex
-dungeon --config "$CONFIG" auth claude
+dungeon auth codex
+dungeon auth claude
 ```
 
-Codex uses `codex login --device-auth`. Claude starts inside the guest so the user can run `/login`. Dungeon does not parse, copy, store, refresh, or escrow OAuth credentials. OpenShell providers remain the separate path for brokered API credentials. OpenCode authentication remains provider-specific.
+Run `up` first. Codex uses device login; Claude opens its guest CLI for `/login`.
+Credentials stay guest/vendor-owned. Dungeon never copies host credentials or
+native sessions. OpenShell named providers are the separate brokered API path;
+OpenCode login remains provider-specific.
 
 ## Optional attachment
 
 ```sh
-dungeon --config "$CONFIG" code
-dungeon --config "$CONFIG" ssh-config
-dungeon --config "$CONFIG" forward --port 4096 --local-port 14096
-dungeon --config "$CONFIG" status
+dungeon code
+dungeon ssh-config
+dungeon forward --port 4096 --local-port 14096
+dungeon ssh --owned -- nvim file.txt
 ```
 
-Remote/editor attachment should remain a first-class way to use an isolated environment. Dungeon manages the environment boundary; the user should otherwise experience the normal CLI, editor, or remote workflow.
+These require a Ready binding. Forwarding is foreground and host-loopback only;
+it neither starts nor authenticates the guest service. Interrupting forwarding
+stops the listener, not the service. Explicit `exec --owned` and `ssh --owned`
+assist bounded command cleanup on Linux, not stronger containment; guest Node
+and `/proc` are required. See [attachment](docs/configuration.md#remote-first-attachment),
+[owned execution](docs/configuration.md#owned-foreground-execution) and
+[reviewed Neovim snapshots](docs/configuration.md#reviewed-neovim-snapshots).
 
-Start remote-first: keep the editor and its configuration on the host, and run
-the agent/tools inside the guest. With explicit `live` transfer on the validated
-local gateway, guest edits appear immediately in the host checkout; no Neovim
-config import is needed. Copy mode still requires reviewed export.
+## Automation and limits
 
-`forward` exposes only a guest-loopback service on host `127.0.0.1`, runs in the
-foreground, and requires the bound sandbox to be Ready with unchanged identity
-and policy. It does not start a server, publish a container port, or manage
-credentials. See [configuration](docs/configuration.md#remote-first-attachment)
-for the OpenCode serve/forward/attach workflow and its validation limits.
-
-For an explicitly owned foreground command, use
-`dungeon --config "$CONFIG" exec --owned -- COMMAND ARG...`.
-This Linux-only, non-TTY mode supplies no stdin and requires guest
-`/usr/bin/node` and Linux `/proc`. It requires the bound sandbox already Ready.
-Normal exit and host INT/TERM trigger bounded shutdown of only its launched
-process group; cleanup failure is an error, not success. Ordinary `exec`,
-`run`, and `forward` are unchanged. See [configuration](docs/configuration.md#owned-foreground-execution)
-for scope and failure limits.
-
-For one explicitly owned interactive command, use
-`dungeon --config "$CONFIG" ssh --owned -- nvim FILE`.
-This Linux-only mode requires a real foreground terminal, host OpenSSH, guest
-`/usr/bin/node` and Linux `/proc`, and an already Ready binding. Native SSH owns
-input and resize; Dungeon requests bounded cleanup of only that invocation's
-guest process group on exit, host HUP/INT/TERM or detected SSH/terminal failure.
-It does not change `ssh-config`, editor attachment or ordinary execution.
-See [owned interactive SSH](docs/configuration.md#owned-interactive-ssh).
-
-## Harness interoperability
-
-`dungeon [--config PATH] machine --schema 1 ...` provides the development-preview
-machine namespace on the same Runtime: lifecycle JSON, workload-byte JSONL,
-explicit whole-project transfers and separately owned raw terminal interaction.
-See the [schema-1 contract and limits](docs/machine.md).
-
-Sandcastle remains a compatibility target, not an implemented adapter. Its unchanged
-arbitrary-path copy and automatic patch/sync workflows do not fit Dungeon's reviewed
-whole-project transfers. Harnesses own orchestration; Dungeon owns the environment.
-
-## Optional Telltale integration
-
-Telltale is not part of the active Dungeon runtime. Integration remains deferred until Telltale 0.7.0 and Event4 provide the intended stable downstream contract.
-
-The long-term goal is optional composition: teams may use Dungeon alone, Dungeon with OpenShell, Dungeon with Telltale, or the combined path where each component keeps a clear responsibility boundary.
-
-## Distribution
-
-Native archives are built in CI but have not been released for Rust 0.0.2;
-use the source build above. GitHub release binaries are the intended native
-distribution contract. The following npm commands are planned, **not currently usable**:
-
-```sh
-npx @agent-archaeology/dungeon
-npm install -g @agent-archaeology/dungeon
-```
-
-The npm package is only a launcher for the same Rust binary. Node 24 LTS is the supported launcher runtime; Node is not required by the native binary. The npm scope is provisional and is **not published yet**. See [distribution](docs/distribution.md).
+- Harnesses use [`dungeon machine --schema 1 ...`](docs/machine.md) for lifecycle
+  JSON, workload-byte JSONL and explicit whole-project transfer. No daemon or
+  agent orchestration is added. Sandcastle integration is not implemented.
+- Runtime evidence covers specific Linux/OpenShell **0.0.116**/rootless-Podman
+  combinations, not general desktop, EDR, macOS or native Windows containment.
+  Setup health and tests are not security attestation.
+- No host home, engine socket, credentials or dotfiles are shared automatically.
+  Project files cannot authorize mounts or policy changes.
+- Telltale integration remains deferred until its 0.7.0/Event4 contract stabilizes.
+  It is not part of the active runtime.
 
 ## Development
 
@@ -228,7 +206,8 @@ cargo test
 node --test npm/launcher/test/platform.test.mjs
 ```
 
-CI uses explicit GA runner images rather than mutable `*-latest` labels and pins third-party actions to immutable commits corresponding to stable releases.
+CI uses explicit GA runner images rather than mutable `*-latest` labels and pins
+third-party actions to immutable commits corresponding to stable releases.
 
 Read [architecture](docs/architecture.md), [configuration](docs/configuration.md), [security](SECURITY.md), [validation](docs/validation.md), [live validation runbook](docs/live-validation.md), and [distribution](docs/distribution.md).
 

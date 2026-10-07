@@ -95,7 +95,61 @@ gates.
 
 Dungeon keeps one private directory per environment and never discovers configuration or policy from a repository. For normal interactive use, `dungeon` resolves the current directory, or an explicit positional project path, to a deterministic private binding under `${XDG_CONFIG_HOME:-$HOME/.config}/dungeon/projects/<project-key>`. Explicit `--config PATH` remains the authoritative automation/recovery surface and is never silently replaced by project resolution.
 
-`dungeon setup` needs no project configuration. On Linux it uses gateway `dungeon-local`, workspace `default`, port 17670, and rootless Podman. The gateway container's config, generated mTLS/JWT keys, database, and private OpenShell driver data live in `${XDG_STATE_HOME:-$HOME/.local/state}/dungeon/local-setup` (private host state). The `driver-data` directory is mounted at the identical absolute path inside the trusted gateway and supplied as `XDG_DATA_HOME`; OpenShell 0.0.116 may later give a supervisor binary from that directory back to host Podman as a bind source when sandbox user namespaces require extraction. This path is gateway-only and is never mounted into the sandbox as Dungeon project authority. OpenShell owns its gateway registration and mTLS client material in `${XDG_CONFIG_HOME:-$HOME/.config}/openshell/gateways/dungeon-local`; Podman owns the `dungeon-local` network and `openshell-gateway-dungeon-local` container. Neither stores Dungeon project policy. A conflicting or partial installation requires explicit operator inspection; setup does not overwrite it. The initial `dungeon init` prompt defaults to `dungeon-local`, but use `--image localhost/dungeon-agent:0.0.3-dev` only after building the reviewed local image; the community base remains the CLI image default until a separate publication decision.
+`dungeon setup` needs no project configuration. On Linux it uses gateway `dungeon-local`, workspace `default`, port 17670, and rootless Podman. The gateway container's config, generated mTLS/JWT keys, database, and private OpenShell driver data live in `${XDG_STATE_HOME:-$HOME/.local/state}/dungeon/local-setup` (private host state). The `driver-data` directory is mounted at the identical absolute path inside the trusted gateway and supplied as `XDG_DATA_HOME`; OpenShell 0.0.116 may later give a supervisor binary from that directory back to host Podman as a bind source when sandbox user namespaces require extraction. This path is gateway-only and is never mounted into the sandbox as Dungeon project authority. OpenShell owns its gateway registration and mTLS client material in `${XDG_CONFIG_HOME:-$HOME/.config}/openshell/gateways/dungeon-local`; Podman owns the `dungeon-local` network and `openshell-gateway-dungeon-local` container. Neither stores Dungeon project policy. A conflicting or partial installation requires explicit operator inspection; setup does not overwrite it.
+
+### Initialize and customize
+
+```sh
+cd my-project
+dungeon init
+dungeon config
+dungeon plan
+```
+
+`init` shows the resolved scope and asks for one confirmation, rather than
+prompting for each field. It writes only private configuration and the starter
+policy; it does not contact OpenShell, create/start a sandbox, stage imports or
+upload files. Override values with flags before confirming:
+
+| Flag | Default |
+| --- | --- |
+| `--project PATH` | Current directory, canonicalized |
+| `--directory PATH` | Deterministic private binding for the selected project |
+| `--name NAME` | Project-derived name plus path hash, at most 19 characters |
+| `--gateway NAME` | `dungeon-local` |
+| `--workspace NAME` | `default` |
+| `--agent opencode\|claude\|codex` | `opencode` |
+| `--image OCI_REFERENCE` | `ghcr.io/nvidia/openshell-community/sandboxes/base:latest` |
+| `--project-transfer copy\|live` | `copy` |
+| `--provider NAME` (repeatable) | No providers; names refer to existing OpenShell providers |
+| `--yes` | Off; explicitly approve saving without a terminal |
+
+`--non-interactive` is an alias for `--yes`. The default community image is a
+mutable tag, not a reviewed tool-version pin. Select
+`--image localhost/dungeon-agent:0.0.3-dev` only after building the
+[local reviewed image](../images/agent/README.md); it is not selected automatically.
+No tool installer or policy expansion is implied by image selection.
+
+Without `--directory`, `init --project PATH` creates the same binding that later
+commands resolve from that project. An explicit directory is never scanned or
+adopted as a project binding; use `--config PATH` afterward. Existing directories
+are never overwritten, even with `--yes`. Invalid names, images, provider lists
+and project-contained config destinations are rejected before any files are
+created. Existing path ancestors are resolved before this scope check; traversal
+through missing directories is refused. This is not protection against concurrent
+host path replacement.
+
+`dungeon config` prints JSON with resolved values and the config/policy paths.
+`dungeon config --path` prints only the config pathname for scripts. Both require
+an existing config, never initialize one and never contact OpenShell. They do not
+print provider credentials. `plan` also requires an existing config and never
+initializes a missing binding. These are human CLI conveniences; machine callers
+should use the [versioned machine contract](machine.md).
+
+Edit `dungeon.json` and adjacent `policy.json` before creating a sandbox. Changes
+to a bound configuration or policy do not automatically recreate the environment:
+identity/drift checks refuse. Initialize a separately managed environment for
+different authority, rather than editing `runtime.json` to bypass those checks.
 
 ### Local setup modes
 
@@ -162,7 +216,7 @@ This is not migration, live-default promotion or broader platform attestation.
 {
   "schema": 2,
   "name": "demo",
-  "gateway": "local",
+  "gateway": "dungeon-local",
   "workspace": "default",
   "project": "/home/user/projects/demo",
   "project_transfer": "copy",
@@ -317,10 +371,12 @@ rejects filesystem root/home scope, derives a stable private project key, and
 resolves only the matching Dungeon-owned config directory. It does not scan the
 repository or other config directories.
 
-If no private binding exists, direct launch, `up`, `create`, or `plan`
+If no private binding exists, direct launch, `up`, or `create`
 may initialize one only in an interactive terminal. Before writing files,
 Dungeon shows the canonical project, private config path, transfer mode,
-gateway, image, and default agent and requires confirmation. The generated
+gateway, image, and default agent and requires one confirmation. Use `init`
+first to customize those defaults, or `init --yes` for explicit noninteractive
+configuration writing. `plan` and `config` never create a binding. The generated
 binding currently starts in `copy` mode; Issue #24's live candidate remains
 explicit pending a separate promotion decision.
 
@@ -336,8 +392,12 @@ for a subcommand against another project, run it from that directory or use the
 explicit config.
 
 
-Use the same explicit config for lifecycle commands: `dungeon --config PATH up`,
-`run opencode` (or another supported command), and `down`.
+Run `up` before using arbitrary tools: `exec -- COMMAND ARG...` executes at
+`/sandbox/project` in an already Ready sandbox; `shell` opens Bash there.
+Image selection owns tool availability; Dungeon never falls back to host execution.
+`run` supports OpenCode, Claude and Codex and can resume a stopped bound sandbox.
+For a separately managed environment, use the same explicit config for lifecycle
+commands: `dungeon --config PATH up`, `run opencode`, and `down`.
 
 In `copy` mode, first `up` creates the sandbox and uploads the configured
 project once. The fresh winner publishes `initial_upload_pending: true` with

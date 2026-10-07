@@ -196,6 +196,13 @@ canonical project path and launches its configured default agent, bringing the
 environment up first when needed. Subcommands without `--config` resolve the
 current directory's same private binding.
 
+`init` separates configuration review from runtime creation: project, name and
+private directory have deterministic defaults, with explicit flags for overrides.
+The human CLI asks once before saving; `init --yes` is explicit noninteractive
+approval. The same config writer and validator serve direct binding and machine
+initialization. `config` exposes resolved values/paths without a new registry;
+`config` and `plan` never initialize missing bindings or contact OpenShell.
+
 There is no mutable project-binding registry and no repository scan. The
 private config path is derived from the canonical project path under the user's
 Dungeon config root. This keeps one authoritative configuration per binding and
@@ -208,7 +215,7 @@ The architectural requirements are:
 - a project resolves one private Dungeon environment without repeated config-path ceremony;
 - explicit `--config` remains available and authoritative for automation/recovery;
 - project-local material cannot grant security authority;
-- first binding is interactive and shows project, transfer mode, and security-relevant scope before files or runtime state are created;
+- first binding shows project, transfer mode, and security-relevant scope before saving, and requires interactive confirmation or explicit initialization approval; implicit direct-launch binding remains interactive;
 - first creation and security-relevant changes remain reviewable;
 - ambiguous or stale bindings fail explicitly;
 - the normal user can work through the native agent CLI, shell, VS Code, SSH, or other supported attachment rather than through a Dungeon-specific interaction model.

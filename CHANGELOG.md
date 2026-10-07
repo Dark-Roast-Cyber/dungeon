@@ -2,6 +2,7 @@
 
 ## Unreleased preview additions (0.0.2)
 
+- Simplify `init` with current-project, generated-name and private-binding defaults; one scope confirmation or `--yes`, with explicit customization flags. Add offline `config`/`config --path`, make `plan` non-initializing, improve command help, and open `shell` in the guest project. Validate initial configuration before writing files; no image/policy default change.
 - Serialize first-copy creation/upload and block new work while durable initial upload is pending; recovery remains explicit `upload --yes`, without automatic retry or rollback guarantees.
 
 - Add schema-1 machine lifecycle JSON and workload-byte JSONL on the same Runtime, with explicit whole-project transfer approval; no Sandcastle adapter or arbitrary-path synchronization.

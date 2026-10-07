@@ -49,6 +49,13 @@ Dungeon-owned config location from that path. It never loads policy, transfer
 mode, raw mount data, or credentials from repository files. Renamed/moved
 projects are not silently rebound.
 
+Human `init` requires one scope confirmation or explicit `--yes` before writing
+private configuration. It never starts a sandbox or uploads files. Implicit
+first-use launch binding still requires a terminal. `plan` and `config` only
+inspect existing configuration and cannot create authority. Initialization
+validates config and resolved destination scope before creating files; this is
+not a lock against concurrent host path replacement.
+
 ## Local setup
 
 Experimental `setup --enable-live` explicitly grants trusted local gateway driver

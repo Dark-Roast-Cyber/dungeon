@@ -4,7 +4,7 @@ The Rust `dungeon` binary is the only implementation. Every distribution path mu
 
 ## Current availability
 
-Rust 0.0.2 on main is source-only; follow the [source build](../README.md#build).
+Rust 0.0.2 on main is source-only; follow the [source build](../README.md#1-build-the-cli).
 CI builds native archives and npm tarballs, but no Rust 0.0.2 release or npm
 package is published. The latest published release, v0.0.1, contains the older
 Python wheel/source archive and does not implement this Rust manual. The
