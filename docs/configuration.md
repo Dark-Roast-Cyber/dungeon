@@ -7,7 +7,8 @@ workload byte streaming and explicitly approved whole-project transfer. It share
 this configuration and Runtime; it never prompts or initializes a missing binding
 implicitly. `--config` and `resolve --project` cannot be combined. `init --yes`
 writes the explicitly selected private directory; arbitrary directories require
-later `--config`. Generated transfer remains copy. Remote execution is unsupported.
+later `--config`. Machine initialization defaults to copy; new human CLI
+bindings default to reviewed live transfer. Remote host execution is unsupported.
 
 ## Read-only diagnostics
 
@@ -551,6 +552,12 @@ process kill or project deletion. A crash or SIGKILL cannot guarantee cleanup:
 inspect `dungeon status` and use `dungeon down` to stop the sandbox if needed.
 `dungeon run opencode` still runs the guest TUI. The following manual steps
 remain available for other clients and troubleshooting:
+
+Dungeon preserves guest conversation history, but `attach` does not choose the
+last conversation or reuse an independently running service. It starts its own
+foreground service and requires matching host/guest OpenCode versions. Host
+config/auth/plugins/themes are not automatically imported into that service;
+the reviewed Neovim snapshot import below is a separate, explicit capability.
 
 ```sh
 dungeon --config "$CONFIG" up

@@ -15,7 +15,7 @@ not a requirement to use a particular agent protocol.
 | VS Code | `code` | NOT TESTABLE: client/Remote SSH extension/display unavailable in the recorded Issue #30 checkpoint. |
 | Guest terminal editor over native SSH | `ssh-config`, private OpenSSH config, guest `nvim` | Edit/save/test and saved-state reconnect/restart passed; SSH disconnect left editor processes alive (Issue #30 partial). |
 | Claude Desktop / ChatGPT remote projects | `ssh-config`, then client setup | Documented integration target, not live-certified. |
-| OpenCode remote client | Guest `serve`, `forward`, native `--server` | Matched 2.0.14 AI edit/test and native session restart/resume passed; interactive TUI message submission unverified. |
+| OpenCode remote client | Interactive `dungeon` / `attach`; manual `serve` + `forward` remains available | Matched 2.1.2 auth, host UI rendering, Enter/Ctrl-C and forward-failure recovery passed on the recorded Linux combination. The older matched 2.0.14 AI/session gate is separate evidence, not a new-flow AI task pass. |
 | Owned foreground service | `exec --owned -- COMMAND ARG...` | Explicit opt-in shutdown/live gates passed on the recorded Linux pair; not a daemon or containment guarantee. |
 | Owned interactive command | `ssh --owned -- COMMAND ARG...` | Native guest Neovim/resize/save/test, bounded invocation cleanup and failure gates passed on the recorded Linux pair; generic SSH disconnect semantics unchanged. |
 | Read-only diagnostics | `doctor [--json]` | Inventory/private-state safety checks passed; does not dynamically certify integrations. |
@@ -45,8 +45,8 @@ Codex runs `codex login --device-auth` in `/sandbox`, so the user completes
 the displayed URL and one-time code in a normal browser. Claude starts its
 interactive CLI in `/sandbox`; use `/login` and complete the browser flow.
 
-These are vendor-owned flows. Dungeon does not parse terminal output, copy
-tokens, implement OAuth callbacks, mint credentials, or synchronize the guest
+These are vendor-owned login flows. Dungeon does not parse their output, copy
+provider tokens, implement OAuth callbacks, mint credentials, or synchronize the guest
 credential store to the host. Credentials therefore have the same trust and
 lifetime as the retained guest environment.
 
@@ -83,19 +83,35 @@ Some desktop paths send actual credentials into the guest. They must not be
 advertised as broker-only access. An arbitrary SSH connection is not evidence
 that every desktop feature or all its tools execute inside the boundary.
 
-## OpenCode server alternative
+## Host OpenCode attachment
 
-Use the authoritative [remote-first configuration guide](configuration.md#remote-first-attachment)
-for the OpenCode V2 foreground `serve` / loopback `forward` / native `--server`
-workflow. V2 generates its server password; supply it only to the host client
-through ephemeral `OPENCODE_PASSWORD`. Do not pass a guest directory as a host
-positional path: it triggers local `chdir`, not remote workspace selection.
+For a configured OpenCode project, interactive `dungeon` (or `dungeon attach`)
+starts/resumes the sandbox, checks that host and guest versions match, starts
+the guest service and forwards to a temporary host-loopback port. It verifies
+unauthenticated denial and authenticated guest version, keeps the generated
+password in process memory and supplies it only through the host client's
+ephemeral `OPENCODE_PASSWORD`. The plain Enter prompt leaves the connection
+details visible before opening the native host UI.
+
+Normal exit or Ctrl-C stops the service and forward, retaining the sandbox. If
+cleanup is unconfirmed, a plain prompt offers an exact-name-confirmed sandbox
+stop or leaves it running. This does not guarantee cleanup after SIGKILL/crash,
+handle concurrent attaches, automatically select the last conversation, or
+adopt another service. Host config, provider auth, plugins and themes are not
+automatically made available inside the guest.
+
+The [remote-first guide](configuration.md#remote-first-attachment) also retains
+the manual foreground `serve` / `forward` / native `--server` workflow. In that
+path, supply the server's password only to the host client, not config or argv.
+Do not pass a guest directory as a host positional path: that triggers local
+`chdir`, not remote workspace selection.
 
 For explicit non-TTY service ownership, see [owned foreground execution](configuration.md#owned-foreground-execution).
 Interrupting `forward` removes only its host listener, not the independently
 started guest service. Dungeon stores no password and does not supervise service
-restarts. The [matched-pair record](validation.md#issue-29-matched-opencode-pair-2026-10-03)
-states the tested versions and remaining UI limits.
+restarts. See the [current attachment checks](validation.md#foreground-opencode-attachment-2026-10-21-source-checkout)
+and [historical matched-pair gate](validation.md#issue-29-matched-opencode-pair-2026-10-03)
+for their separate tested versions and remaining limits.
 
 ## Primary references
 

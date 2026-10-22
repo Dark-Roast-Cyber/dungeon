@@ -24,14 +24,14 @@ The current milestone remains focused on making the contained development loop c
 
 Completed or substantially implemented:
 
-1. **Reviewed agent image, Issue #6.** The local image candidate pins official OpenCode, Claude Code, and Codex packages on the validated immutable base. Publication/provenance and default-image selection remain separate approval boundaries. Claude account-dependent validation remains tracked by Issue #11.
+1. **Reviewed agent image, Issue #6.** The local Linux amd64 candidate pins official OpenCode, Claude Code, and Codex packages on the validated immutable base. New human CLI bindings select the versioned local OpenCode 2.1.2 image, which must be explicitly built first. Publication/provenance remains a separate boundary. `versions --check` reports upstream stable updates without installing them. Claude account-dependent validation remains tracked by Issue #11.
 2. **One-command local setup, Issue #7.** `dungeon setup` provisions and verifies the local Linux/rootless-Podman gateway after explicit prerequisite installation and immutable gateway-image pull.
 3. **Daily lifecycle, Issue #8.** `up`, `run`, and `down` preserve guest state and do not silently re-upload on resume.
 4. **Safe project export, Issue #9.** Reviewed staged export is implemented on the validated OpenShell 0.0.116/rootless-Podman path.
 
 **Reviewed tool/editor imports, Issue #5 (staged candidate).** Explicit `imports stage` reviews captured Neovim bytes and selects a private digest-addressed artifact. The recognized local bind-enabled UID998 gateway mounts that artifact read-only; original source changes never refresh it. Copy/live native gates are recorded, with independent rereview still pending. Protection is mounted contents only: writable guest ancestors permit config-path replacement, not trusted subsequent execution. No uploaded permission illusion, parent mount, credential copying or policy widening.
 
-**Live workspace mount, Issue #24.** The single schema-2 model has closed copy/live transfer intent. Live derives exactly one read-write OpenShell Podman bind request from the canonical configured project to `/sandbox/project`, while raw driver config and arbitrary mounts remain unavailable. Existing/default init remains copy, upload/export stays copy-only, and the current gateway is not auto-migrated. A narrowly scoped OpenShell 0.0.116/rootless-Podman/Fedora gate is recorded in [validation](docs/validation.md); live does not become the normal default without an explicit promotion decision.
+**Live workspace mount, Issue #24.** New human CLI bindings now default to one reviewed live read-write mount of the canonical project at `/sandbox/project`; raw driver config and arbitrary mounts remain unavailable. Existing omitted-transfer configs and machine initialization retain copy semantics; explicit copy/upload/export remains available. Fresh setup enables the required bind capability, but existing copy gateways are not auto-migrated. Native evidence and its combination-specific limits are recorded in [validation](docs/validation.md#new-cli-live-workspace-default-2026-10-21-source-checkout); this is not broad platform or containment attestation.
 
 Keep Issue #16 as bounded follow-up hardening for export durability, concurrency, and broader-platform semantics.
 
@@ -41,12 +41,15 @@ After the current 0.0.3 loop is stable, prioritize these slices in dependency or
 
 **Remote-first use with live local edits.** Keep the user's
 editor/client and configuration on the host; run agent tools and state inside
-isolation. A full native OpenCode remote AI edit/test and same-session restart
-resume passed; interactive TUI message submission and managed serve/forward/
-attach lifecycle remain open. See [validation](docs/validation.md) for the
-recorded gates. `forward` is foreground and loopback-only; it does not own or
+isolation. The plain foreground `dungeon` / `attach` workflow now starts the
+guest service, authenticates a loopback forward and opens a matching host
+OpenCode UI after an Enter prompt; normal exit and confirmed-stop recovery were
+tested with 2.1.2. The historical AI/session-restart gate is separate; a new-flow
+AI task, crash recovery, concurrent attachment and automatic conversation resume
+remain unvalidated or unimplemented. See [validation](docs/validation.md) for the
+recorded gates. Manual `forward` is foreground and loopback-only; it does not own or
 stop an independently started guest server. Validate VS Code Remote and vendor
-remote paths individually. Automate lifecycle only after its ownership gates.
+remote paths individually; OpenCode evidence does not establish their support.
 Guest configuration imports are optional follow-up, not a prerequisite for the
 remote-first loop. Reviewed custom images remain the installed-tool mechanism.
 Telltale stays optional and separate from isolation.

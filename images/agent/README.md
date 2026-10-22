@@ -29,6 +29,7 @@ Issue #17 sources reviewed on 2026-09-25 UTC:
 From the repository root, using rootless Podman:
 
 ```sh
+podman pull ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e
 podman build --pull=never -t localhost/dungeon-agent:0.0.3-opencode-2.1.2 \
   -f images/agent/Containerfile images/agent
 podman run --rm --network none --entrypoint node \
@@ -40,7 +41,7 @@ Pull the exact `FROM` digest first if it is not cached. No registry publication 
 
 The pnpm bootstrap archive and all Neovim/Rust archives are SHA-256 checked before extraction or local installer execution. Package installation uses the frozen lock with scripts disabled; only the two reviewed npm vendor native-binary setup scripts run afterward, with network disabled. Rust component `install.sh` files are executed only after their containing official archives pass the reviewed hash check. No remote installer is piped to a shell, no rustup toolchain manager is added, and no mutable Rust or Neovim release channel is resolved. A missing binary cannot trigger an unlocked fallback download. The final stage copies only the installed agent packages and reviewed image-tool filesystem, not pnpm's bootstrap, package store, or downloaded archives. The build context allowlist excludes all other files.
 
-For an agent version update, edit the manifest, regenerate the lock with its pinned pnpm (`pnpm install --lockfile-only --ignore-scripts` in this directory), review upstream install scripts and integrity metadata, then rebuild and repeat live validation. For a Neovim or Rust update, replace only the manifest version/distribution coordinates and reviewed artifact hashes, then repeat the same image and containment validation. A pnpm version update also requires reviewing and replacing its bootstrap checksum in the Containerfile.
+For an agent version update, edit the manifest, regenerate the lock with its pinned pnpm (`pnpm install --ignore-workspace --lockfile-only --ignore-scripts` in this directory), review upstream install scripts and integrity metadata, then rebuild and repeat live validation. `--ignore-workspace` prevents an unrelated parent workspace from taking over the image lock update. For a Neovim or Rust update, replace only the manifest version/distribution coordinates and reviewed artifact hashes, then repeat the same image and containment validation. A pnpm version update also requires reviewing and replacing its bootstrap checksum in the Containerfile.
 
 ## Containment contract
 

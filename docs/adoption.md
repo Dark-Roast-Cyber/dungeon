@@ -50,6 +50,12 @@ needs an explicit disposal/reprovision decision. Doctor health is not proof of i
 
 ## 3. Choose a project and agent
 
+Build the [reviewed local Linux amd64 image](../images/agent/README.md) before
+the first launch. To use the host OpenCode UI, separately install a host client
+matching the guest pin (currently 2.1.2); use `dungeon versions` to compare them.
+`dungeon run opencode` uses only the guest CLI if no matching host client is
+available.
+
 ```sh
 cd /path/to/project
 dungeon                         # review project mount, attach host UI to guest OpenCode
@@ -68,10 +74,10 @@ dungeon plan                     # inspect policy and requested mounts
 dungeon                           # first up, then the selected agent
 ```
 
-The default reviewed candidate must be [built locally](../images/agent/README.md)
-before `up`; it is not published or pulled by Dungeon. Use `dungeon versions`
-to compare the host CLI and reviewed guest pin, or `versions --check` to check
-the registry stable tag. Do not rely on host tools or host auth in the guest.
+The image is not published or pulled by Dungeon. `dungeon versions --check`
+reads the registry stable tag but does not download or execute an update.
+Existing bindings keep their selected image. Do not rely on host tools or
+host auth/config/plugins/themes being available in the guest.
 Claude/Codex login is guest-owned (`dungeon auth claude|codex` after `up`);
 OpenCode uses its own guest `/connect` flow. Changing image, policy, or scope
 after creation fails identity checks rather than rebuilding in place.
@@ -92,6 +98,12 @@ noninteractive invocation refuses attachment. `dungeon run opencode` remains
 the direct guest TUI; the [manual service/forward flow](configuration.md#remote-first-attachment)
 remains available. Codex and Claude's vendor-specific remote modes need their
 own validation and still run as guest CLIs.
+
+Guest conversation history survives `down` and normal attachment exit, but
+Dungeon does not automatically resume the last conversation or adopt an
+independently running service. Use the harness's native session selection.
+After a crash/SIGKILL, inspect the sandbox before reattaching; `dungeon down`
+stops it without deleting its state.
 
 | Need | Command |
 | --- | --- |

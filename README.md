@@ -63,26 +63,31 @@ reviewed OpenCode 2.1.2. **Build it explicitly before `up`** using the
 release needs review. Existing bindings and their image choices are unchanged.
 
 ```sh
+podman pull ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e
 podman build --pull=never -t localhost/dungeon-agent:0.0.3-opencode-2.1.2 \
   -f images/agent/Containerfile images/agent
 ```
 
-Pull the image's exact base digest first if it is not already cached; see the
-image procedure for the digest and offline verification.
+The reviewed image is a local Linux amd64 candidate, not a published or
+cross-platform default. See the image procedure for offline verification.
+For host OpenCode attachment, install the matching **OpenCode 2.1.2** host
+client separately. Dungeon checks the match; it does not install or upgrade it.
 
 ```sh
 cd my-project
 dungeon init
 dungeon plan
 dungeon up
-dungeon shell
+dungeon                         # OpenCode: review connection details, press Enter
+# dungeon shell                 # Bash instead; no host OpenCode client needed
 ```
 
 `init` uses the current project, a generated name, private config storage and
-one live read/write project mount. It shows the exact scope and asks once before writing configuration;
-it starts nothing. `plan` lets you review the policy without runtime contact.
+one live read/write project mount. It shows the exact scope and asks once before
+writing configuration; it starts nothing. `plan` reviews policy without runtime
+contact.
 First `up` creates the sandbox with the selected host project at `/sandbox/project`;
-`shell` opens Bash there. Guest writes appear on the host immediately. Choose
+guest writes appear on the host immediately. Choose
 `dungeon init --project-transfer copy` for a sandbox copy and reviewed export.
 **Review project contents and policy before `up`; transfer is not a secret scanner.**
 
@@ -93,41 +98,52 @@ From the project directory, choose the interface you need:
 | Task | Command |
 | --- | --- |
 | Launch the configured agent | `dungeon` |
+| Attach the host OpenCode UI explicitly | `dungeon attach` |
 | Choose an agent | `dungeon run opencode`, `dungeon run claude`, or `dungeon run codex` |
+| Compare host/reviewed guest versions and check upstream stable | `dungeon versions --check` |
 | Run a tool or tests | `dungeon exec -- cargo test` (requires Cargo in the image) |
 | Run an interactive tool | `dungeon exec --tty -- nvim file.txt` (requires Neovim in the image) |
 | Open a terminal | `dungeon shell` |
 | Inspect sandbox state | `dungeon status` |
-| Review and return guest edits | `dungeon export` |
+| Review and return guest edits (copy mode only) | `dungeon export` |
 | Stop, preserving guest state | `dungeon down` |
 | See bindings in/under this directory | `dungeon list` |
 | See all private project bindings | `dungeon list -a` |
 | Delete a finished sandbox | `dungeon down`, then `dungeon destroy` |
 
-No repeated config path is needed. In a terminal, `dungeon` initializes/resumes
-and attaches the **host OpenCode UI** to an authenticated guest OpenCode server
-through a temporary loopback forward. Host and guest versions must match. On
-normal exit or Ctrl-C, Dungeon stops the service and forward and keeps the
-sandbox. If it cannot confirm cleanup, a plain text prompt offers to stop the
+No repeated config path is needed. With OpenCode configured, interactive
+`dungeon` initializes/resumes and attaches the **host OpenCode UI** to an
+authenticated guest OpenCode server through a temporary loopback forward.
+Host and guest versions must match. Dungeon pauses at **Press Enter to open
+OpenCode (Ctrl-C to cancel)** so its startup and connection details remain
+visible before the UI takes over the terminal. On normal exit or Ctrl-C,
+Dungeon stops the service and forward and keeps the sandbox. If it cannot
+confirm cleanup, a plain text prompt offers to stop the
 sandbox (preserving data) or leave it running. `dungeon run opencode` still runs
 the guest TUI; Claude and Codex run their guest CLIs. `dungeon ../other-project`
-selects another project. Agents may
-require [guest authentication](#authentication) before use.
+selects another project. Agents may require [guest authentication](#authentication)
+before use. `dungeon` does not automatically select your last conversation or
+adopt an independently detached service; guest session history remains in the
+retained sandbox. A crash or SIGKILL can leave a service running: inspect the
+sandbox and use `dungeon down` if it needs to be stopped.
 
 On a new project, `dungeon run claude` (or `codex`) also requests the one-time
 binding review, records that agent as the default, then creates and launches the
 environment. An existing binding keeps its configured default; `run` selects an
 agent for this invocation. A first `run` against an initialized but not-yet-up
-environment performs the initial copy. Neither path grants new mounts or policy.
+environment creates its configured live mount, or uploads once in copy mode.
+It does not add authority beyond the reviewed binding.
 
 - `up` resumes the same sandbox without another upload; already Ready is a no-op.
-- `run` can start a stopped bound sandbox, also without uploading. `exec`,
-  `shell` and attachment commands require it already Ready.
+- `run` can start a stopped bound sandbox, also without uploading. `attach`
+  creates/resumes before connecting. `exec`, `shell`, `code`, `ssh-config`,
+  `forward` and `ssh --owned` require it already Ready.
 - `down` preserves guest files, sessions and authentication.
 
-`list` is an offline JSON inventory of private project bindings, not a query of
-OpenShell or Podman. A `bound` row contains the recorded sandbox ID, not its
-current phase; `configured` means no recorded sandbox. It cannot find sandbox
+`list` shows bindings for the current directory and its descendants; `list -a`
+shows all private bindings. It is offline JSON, not a query of OpenShell or
+Podman or a list of agent conversations. A `bound` row contains the recorded
+sandbox ID, not its current phase; `configured` means no recorded sandbox. It cannot find sandbox
 orphans, external gateways, or explicit `--directory` configs outside the
 project-binding root. Use `status` for one binding's live state.
 
@@ -135,8 +151,9 @@ When finished with a bound environment, run `down` and then `destroy`.
 `destroy` rechecks the stopped sandbox's identity, asks you to type its name
 (or accepts explicit `--yes`), and requests OpenShell deletion. **Guest files,
 sessions and authentication are lost.** Private `dungeon.json`, policy and
-approved imports remain; the next `up` makes a fresh sandbox and initial copy.
-Review/export copy-mode guest edits first. This is not a container prune or a
+approved imports remain; the next `up` makes a fresh sandbox using the same
+transfer mode. Live-project host files are not deleted; copy-mode guest edits
+must be exported before destruction. This is not a container prune or a
 gateway teardown; if deletion or local cleanup fails, inspect before retrying.
 
 ### Returning changes in copy mode
@@ -211,7 +228,9 @@ dungeon auth claude
 Run `up` first. Codex uses device login; Claude opens its guest CLI for `/login`.
 Credentials stay guest/vendor-owned. Dungeon never copies host credentials or
 native sessions. OpenShell named providers are the separate brokered API path;
-OpenCode login remains provider-specific.
+OpenCode login remains provider-specific. Read-only sharing of host harness
+configuration, auth, plugins and themes is **not implemented**; the current
+guest does not automatically inherit them.
 
 ## Optional attachment
 
