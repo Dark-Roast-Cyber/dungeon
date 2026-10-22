@@ -109,6 +109,19 @@ select the versioned reviewed image; existing bindings retain their image.
 
 ## Foreground OpenCode attachment (2026-10-21, source checkout)
 
+Startup visibility follow-up: attachment now waits at `Press Enter to open
+OpenCode (Ctrl-C to cancel)` after showing the connection details and before
+launching the host UI. In a disposable native project with the same matched
+2.1.2 pair, no host client existed before Enter; after Enter the UI rendered
+and normal exit cleaned up the service/forward. Ctrl-C at the prompt exited
+130 without launching the UI, and guest process inspection confirmed no server
+remained. Helper transports use separate host process groups so terminal
+Ctrl-C does not kill the forward before Dungeon can verify cleanup. The first
+cancellation attempt exposed that issue and timed out; its synthetic guest
+server was explicitly stopped before the corrected rerun. The test fixture was
+removed; the operator's existing Ready project sandbox was not stopped or
+modified.
+
 The simple `dungeon attach` path was added after the manual matched-version API
 probe above. In a disposable live-project sandbox using the reviewed OpenCode
 2.1.2 image, it started the guest service, captured the generated password in

@@ -540,7 +540,9 @@ For OpenCode 2.1.2, the simple foreground path is now `dungeon` from a bound
 project (or `dungeon attach`): it starts/resumes the sandbox, verifies matching
 host/guest OpenCode versions, starts the guest's authenticated loopback server,
 forwards to an available host-loopback port, checks unauthenticated denial and
-authenticated guest version, then opens the host OpenCode UI. The generated
+authenticated guest version, then pauses for Enter before opening the host UI
+so the startup details remain readable. Ctrl-C at that prompt cancels attachment
+with the same service/forward cleanup. The generated
 password is process-memory only and is never printed or placed on an argv. Exit
 or Ctrl-C stops the owned service through its PTY and closes the forward while
 preserving the sandbox. If shutdown cannot be verified, choose from a plain

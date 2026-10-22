@@ -6,7 +6,8 @@ use data_encoding::BASE64;
 use std::fs::File;
 use std::io::{self, IsTerminal, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::thread;
@@ -203,6 +204,7 @@ impl Session {
             true,
         );
         command
+            .process_group(0)
             .stdin(Stdio::from(slave.try_clone()?))
             .stdout(Stdio::from(slave.try_clone()?))
             .stderr(Stdio::from(slave));
@@ -237,6 +239,7 @@ impl Session {
         );
         self.forward = Some(
             command
+                .process_group(0)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -433,6 +436,14 @@ pub(crate) fn attach_opencode(runtime: &Runtime<'_>) -> Result<i32> {
         eprintln!(
             "Connected to guest OpenCode at {url}. Leave the host UI to stop the service and forward; sandbox state is kept."
         );
+        io::stdout().flush()?;
+        let proceed = wait_for_ui(io::stdin().as_raw_fd(), &mut io::stderr().lock())?;
+        if INTERRUPTED.load(Ordering::SeqCst) != 0 {
+            return Ok(128 + INTERRUPTED.load(Ordering::SeqCst));
+        }
+        if !proceed {
+            return Ok(0);
+        }
         let mut child = Command::new(binary)
             .args(["--server", &url])
             .env("OPENCODE_PASSWORD", session.password.as_deref().unwrap())
@@ -473,6 +484,44 @@ pub(crate) fn attach_opencode(runtime: &Runtime<'_>) -> Result<i32> {
     result
 }
 
+fn wait_for_ui(input: RawFd, output: &mut impl Write) -> io::Result<bool> {
+    write!(output, "Press Enter to open OpenCode (Ctrl-C to cancel): ")?;
+    output.flush()?;
+    while INTERRUPTED.load(Ordering::SeqCst) == 0 {
+        let mut poll = libc::pollfd {
+            fd: input,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        if unsafe { libc::poll(&mut poll, 1, 200) } < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        if poll.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) == 0 {
+            continue;
+        }
+        let mut byte = 0u8;
+        let count = unsafe { libc::read(input, (&mut byte as *mut u8).cast(), 1) };
+        if count == 0 {
+            return Ok(false);
+        }
+        if count < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        if byte == b'\n' {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn version_valid(value: &str) -> bool {
     let Some(text) = value.strip_prefix("opencode v") else {
         return false;
@@ -487,6 +536,17 @@ fn version_valid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_ui_waits_for_enter_and_eof_cancels() {
+        let (input, mut writer) = std::os::unix::net::UnixStream::pair().unwrap();
+        writer.write_all(b"\n").unwrap();
+        let mut output = Vec::new();
+        assert!(wait_for_ui(input.as_raw_fd(), &mut output).unwrap());
+        assert!(String::from_utf8(output).unwrap().contains("Press Enter"));
+        drop(writer);
+        assert!(!wait_for_ui(input.as_raw_fd(), &mut Vec::new()).unwrap());
+    }
 
     #[test]
     fn accepts_only_a_complete_generated_password_line() {

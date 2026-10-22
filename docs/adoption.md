@@ -82,6 +82,9 @@ For a configured OpenCode project, interactive `dungeon` (or explicit
 `dungeon attach`) starts an authenticated guest service, opens a temporary
 host-loopback forward and attaches your installed host OpenCode UI. It checks
 that host and guest versions match; it does not install or replace either CLI.
+Dungeon pauses at `Press Enter to open OpenCode` so the startup and connection
+details stay visible before the host UI takes over the terminal. Ctrl-C there
+cancels attachment and cleans up the service and forward.
 Exit the host UI or press Ctrl-C to stop the service and forward, keeping the
 sandbox. If cleanup cannot be confirmed, choose to stop the sandbox (preserves
 data; name confirmation required) or leave it running, then inspect it. A
