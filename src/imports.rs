@@ -40,6 +40,14 @@ impl Drop for CreationLock {
 #[cfg(target_os = "linux")]
 pub(crate) use linux::{creation_lock, plan, stage, verify};
 
+#[cfg(target_os = "linux")]
+pub(crate) use linux::cleanup_lock;
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn cleanup_lock(config: &Config) -> Result<Option<CreationLock>> {
+    creation_lock(config)
+}
+
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn verify(config: &Config) -> Result<()> {
     if config.values.imports.is_empty() {
@@ -460,6 +468,14 @@ mod linux {
         }
         let (_, lock) = locked(config)?;
         verify(config)?;
+        Ok(Some(lock))
+    }
+
+    pub(crate) fn cleanup_lock(config: &Config) -> Result<Option<CreationLock>> {
+        if config.values.imports.is_empty() {
+            return Ok(None);
+        }
+        let (_, lock) = locked(config)?;
         Ok(Some(lock))
     }
 

@@ -11,6 +11,144 @@ CI checks formatting, Clippy, locked Rust tests, release compilation, CLI versio
 - npm launcher validation targets Node 24 LTS.
 - OpenShell 0.0.116 is an intentional compatibility pin because Dungeon consumes version-sensitive CLI and structured-output contracts.
 
+## New CLI live-workspace default (2026-10-21, source checkout)
+
+The offline `dungeon list` view now filters private bindings to the current
+directory and its descendants; `dungeon list -a` includes every private binding.
+Synthetic CLI fixtures cover exact and nested projects, similarly prefixed
+sibling paths, unbound directories, and all-mode inclusion without OpenShell.
+This lists environment bindings, **not** OpenCode conversations or detached
+service processes. With `TMPDIR=$PWD/target/dungeon-test-tmp`, the combined
+locked Rust suite passed (126 unit tests plus all integration targets); fmt,
+all-target Clippy and `git diff --check` passed. The previously recorded `/tmp`
+quota caveat still applies to runs that write fixtures there.
+
+Before commit, the selected changes were exported from the Git index into a
+separate snapshot, excluding pre-existing unrelated machine/socket edits. That
+snapshot passed formatting, all-target Clippy, all 162 locked Rust tests (125
+unit plus 37 integration), the three npm launcher tests and installer shell
+syntax checks. The 126-unit combined-checkout totals below include unrelated
+pending work; they are not the selected commit's test count.
+
+After explicit operator approval, the changed Dungeon release binary was
+installed to `~/.local/bin/dungeon` with the repository's `--replace` helper.
+Its SHA-256 matched `target/release/dungeon`. An installed-binary synthetic
+`init --yes` selected the live mount and reviewed local OpenCode 2.1.2 image;
+it created only private configuration, no sandbox. That synthetic binding and
+project fixture were removed. This does not mean any real project, including
+the Dungeon checkout, was bound or mounted.
+
+New human CLI project bindings now serialize `project_transfer: live` after
+explicit review and fresh plain `setup` requests the bind-capable UID 998 driver.
+Explicit `init --project-transfer copy` and `setup --copy-only` remain available;
+existing schema-2 documents omitting transfer still decode as copy, so old
+bindings are not widened by a binary update. The versioned machine initializer
+retains its copy default for existing automation clients. Existing exact
+copy-only gateways refuse plain setup without migration or state mutation.
+
+Synthetic CLI/setup/config tests cover defaults, explicit copy and refusal.
+These checks do **not** validate native read/write mounts on a fresh gateway,
+host editor changes, remote OpenCode client startup, credentials or containment.
+The operator explicitly authorized replacing the empty copy-only
+`dungeon-local` gateway. Preflight observed zero sandboxes across workspaces,
+only its labeled container on its dedicated network, and no project bindings.
+After targeted removal, fresh `setup` created a bind-capable gateway on Linux,
+OpenShell 0.0.116 and rootless Podman 5.8.7; `doctor` reported healthy gateway,
+healthy UID998 mapping and `live_bind: enabled-compatible`. No host images,
+unrelated containers or existing projects were removed.
+
+A synthetic project under the ignored `target/` tree used the new CLI default
+(`project_transfer: live`), explicitly reviewed a plan deriving only its one
+read/write project bind, and reached Ready without upload. Guest UID/GID 998
+read the host file, wrote a new file immediately visible with the host user's
+ownership, and saw a later host edit without transfer. `/var/tmp` write was
+denied and guest engine-socket paths were absent. Stop/resume kept sandbox ID
+`2cd6b934-0b3c-4ba2-9537-9fe7956edc35` and the guest-created host file;
+the disposable sandbox/binding/project files were removed afterward. A separate
+synthetic explicit-copy project on the same bind-capable gateway uploaded once;
+its guest-created file did not appear on the host and its sandbox was removed.
+The fresh gateway remains running; `dungeon list` is empty. Logs are under
+`target/dungeon-live-*` and `target/dungeon-copy-regression-*` (ignored).
+This demonstrates the project mount and copy regression on this combination,
+not an audited containment boundary, host OpenCode remote UI, AI task, auth,
+cross-platform compatibility or broad policy-denial matrix. At test time,
+`~/.local/bin/dungeon` was the older 0.0.2 build; this test used
+`target/debug/dungeon` from the changed source checkout.
+
+## Reviewed OpenCode 2.1.2 image and matched transport (2026-10-21)
+
+The official registry `@opencode/cli` stable tag was 2.1.2. Its package tarball
+SHA-512 matched the registry integrity and its postinstall was inspected; it
+selects the platform binary and can fall back to npm, so the image's rebuild
+still runs with `--network=none` after lock-verified installation. The reviewed
+manifest and frozen pnpm lock now pin all OpenCode packages to 2.1.2. A distinct
+local image `localhost/dungeon-agent:0.0.3-opencode-2.1.2` built successfully;
+the offline verifier reported OpenCode 2.1.2, unchanged pinned Claude/Codex,
+Neovim and Rust. Local image ID was
+`bd446d0373bcd22b6f3d5323944b268c9ab09d7bbd7dfc4ef085f25a975cc142`.
+
+In a disposable live-project sandbox using that image, an OpenCode 2.1.2 guest
+service on guest loopback generated its own password. An OpenShell foreground
+forward bound host loopback; unauthenticated `/api/info` returned 401. HTTP
+Basic authentication and host native OpenCode 2.1.2 `api --server` both returned
+guest version 2.1.2. The password remained in probe process memory and was
+not written to project/config/logs or passed on argv. Sending Ctrl-C **through
+the service PTY** stopped the guest service, verified by guest process listing.
+By contrast, stopping only the host exec process left a guest service running;
+those synthetic processes were explicitly stopped. This is matched-version
+service/auth/API-client transport evidence, **not** a host TUI session or a
+one-command service/forward/client lifecycle. At the time of this probe, the
+changed Dungeon binary was not installed; no images were published and no
+OpenCode client was replaced.
+
+`dungeon versions` reports the embedded reviewed guest version, local image tag
+and installed host client. `versions --check` reads the official registry
+stable dist-tag with a bounded request and indicates whether a newer release
+needs review. It does not pull or execute an update. New human CLI bindings
+select the versioned reviewed image; existing bindings retain their image.
+
+## Foreground OpenCode attachment (2026-10-21, source checkout)
+
+The simple `dungeon attach` path was added after the manual matched-version API
+probe above. In a disposable live-project sandbox using the reviewed OpenCode
+2.1.2 image, it started the guest service, captured the generated password in
+memory, confirmed unauthenticated 401 and authenticated guest version through a
+loopback OpenShell forward, and rendered the host native OpenCode 2.1.2 UI.
+Ctrl-C exited the host UI; Dungeon sent the interrupt via the service PTY,
+verified the guest `opencode serve` process was gone, closed its forward listener
+and left the same sandbox Ready. Interactive plain `dungeon` followed the same
+path. `dungeon run opencode` retains the guest TUI.
+
+A targeted failure test terminated only the attachment's forward while the
+host UI was running. On exit, Dungeon did not claim cleanup; the plain-text
+prompt offered stopping the sandbox or leaving it running. Confirming the exact
+synthetic sandbox name stopped it and preserved its state. Non-TTY attachment
+refuses before sandbox startup in focused tests. The disposable sandbox and
+binding were removed afterward; the gateway remains running with no bindings
+or sandboxes. These are one Linux/OpenShell 0.0.116/rootless Podman 5.8.7 and
+matched OpenCode 2.1.2 observations. They do not cover SIGKILL/host crash,
+multiple simultaneous attaches, authenticated AI task execution, other client
+versions or vendor remote modes. At test time the installed Dungeon binary was
+the older build; tests used the changed `target/debug/dungeon`. The owned/interactive
+full-suite failures under `/tmp` quota were observed on earlier runs; this is
+not a blanket claim for a quota-saturated `/tmp` environment.
+
+A later failure-pass check stopped the owned forward while the host UI was
+still open, without sending Ctrl-C to Dungeon. Dungeon detected the lost
+transport, closed the host client, offered the recovery prompt, and stopped
+the named sandbox after confirmation. It exited nonzero to retain the
+transport failure result. This is a foreground failure-path check, not a
+guarantee for process crashes or concurrent attaches.
+
+Final `TMPDIR=$PWD/target/dungeon-test-tmp cargo test --locked` passed: 126
+binary/unit tests and all integration tests. One transfer-lock integration
+fixture needed an explicit `--project-transfer copy` to preserve its intended
+copy-mode assertion after the new CLI default changed. Formatting, all-target
+Clippy with warnings denied, and npm launcher checks passed. Previous full
+test attempts failed in the owned/interactive group while `/tmp` was at quota;
+the successful suite used a checkout-local test fixture directory and does not
+erase that earlier environment limitation.
+
 ## Simplified project onboarding (2026-10-06)
 
 Synthetic actual-CLI tests cover current-project/private-binding defaults,

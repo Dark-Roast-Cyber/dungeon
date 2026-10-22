@@ -11,6 +11,7 @@ fn setup_flags_parse_and_missing_prerequisites_leave_home_and_project_empty() {
     for args in [
         vec!["setup", "--dry-run"],
         vec!["setup", "--enable-live", "--dry-run"],
+        vec!["setup", "--copy-only", "--dry-run"],
     ] {
         let result = Command::new(env!("CARGO_BIN_EXE_dungeon"))
             .current_dir(&project)
@@ -24,6 +25,11 @@ fn setup_flags_parse_and_missing_prerequisites_leave_home_and_project_empty() {
         assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
         assert_eq!(fs::read_dir(&project).unwrap().count(), 0);
     }
+    let incompatible = Command::new(env!("CARGO_BIN_EXE_dungeon"))
+        .args(["setup", "--copy-only", "--enable-live"])
+        .output()
+        .unwrap();
+    assert!(!incompatible.status.success());
 }
 
 #[cfg(target_os = "linux")]

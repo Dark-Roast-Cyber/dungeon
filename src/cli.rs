@@ -12,8 +12,10 @@ use std::env;
 use std::io::{self, IsTerminal, Write};
 use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-const DEFAULT_IMAGE: &str = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest";
+const DEFAULT_IMAGE: &str = "localhost/dungeon-agent:0.0.3-opencode-2.1.2";
+const OPENCODE_TAGS: &str = "https://registry.npmjs.org/-/package/@opencode%2Fcli/dist-tags";
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 #[value(rename_all = "lower")]
@@ -27,7 +29,7 @@ enum AuthAgent {
     name = "dungeon",
     version,
     about = "Manage agent environments with OpenShell",
-    after_help = "Quick start (after dungeon setup):\n  dungeon init                Review and save private project configuration\n  dungeon up                  Create/resume; first use copies the project\n  dungeon run codex           Run an agent inside the sandbox\n  dungeon exec -- cargo test  Run any image-provided tool\n  dungeon export              Review and return guest changes to the host\n  dungeon down                Stop, preserving guest state\n\nRun dungeon with no subcommand to initialize/resume and launch the default agent.\nUse dungeon config --path to find your private configuration.\nAutomation: dungeon machine --help",
+    after_help = "Quick start (after dungeon setup):\n  dungeon init                Review and save private project configuration\n  dungeon                     Attach host OpenCode to guest service (configured OpenCode)\n  dungeon run opencode        Run the guest OpenCode TUI instead\n  dungeon run codex           Run another agent in the same environment\n  dungeon exec -- cargo test  Run an image-provided tool\n  dungeon export              Review guest changes (copy mode)\n  dungeon down                Stop, preserving guest state\n  dungeon list                List bindings in/under this directory (offline)\n  dungeon list -a             List all private bindings (offline)\n  dungeon destroy             Delete a stopped bound sandbox after confirmation\n\nUse dungeon config --path to find your private configuration.\nAutomation: dungeon machine --help",
     subcommand_precedence_over_arg = true
 )]
 struct Cli {
@@ -50,9 +52,12 @@ struct Cli {
 enum Commands {
     /// Set up or verify the supported local OpenShell gateway (Linux/rootless Podman).
     Setup {
-        /// Enable experimental local driver bind capability; does not authorize a project mount.
-        #[arg(long)]
+        /// Enable project bind capability on a fresh gateway (the default); kept for explicit scripts.
+        #[arg(long, conflicts_with = "copy_only")]
         enable_live: bool,
+        /// Create a copy-only gateway without bind capability (fresh setup only).
+        #[arg(long)]
+        copy_only: bool,
         /// Inspect prerequisites and print the capability diff without creating state.
         #[arg(long)]
         dry_run: bool,
@@ -62,13 +67,25 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// List private project bindings in/under the current directory (not backend inventory).
+    List {
+        /// Include bindings outside the current directory.
+        #[arg(short = 'a', long = "all")]
+        all: bool,
+    },
+    /// Show the reviewed OpenCode image version and host client; optionally check upstream stable.
+    Versions {
+        /// Query the official npm registry's stable dist-tag (read-only, bounded).
+        #[arg(long)]
+        check: bool,
+    },
     /// Review and save private configuration; never starts a sandbox or uploads files.
     Init {
         #[arg(long, help = "private config directory (default: the project binding)")]
         directory: Option<PathBuf>,
         #[arg(long, default_value = ".", help = "host project directory")]
         project: PathBuf,
-        #[arg(long, value_enum, default_value = "copy")]
+        #[arg(long, value_enum, default_value = "live")]
         project_transfer: ProjectTransfer,
         #[arg(long, help = "sandbox name (default: generated from the project path)")]
         name: Option<String>,
@@ -106,10 +123,16 @@ enum Commands {
     },
     /// Create a sandbox without the initial project upload (advanced).
     Create,
-    /// Create and initially copy the project, or resume without re-uploading.
+    /// Create or resume the sandbox; live mounts directly, copy uploads once.
     Up,
     /// Stop the sandbox, preserving guest files, sessions and authentication.
     Down,
+    /// Delete a stopped bound sandbox and retire its runtime state; keep project configuration.
+    Destroy {
+        /// Approve deletion without the interactive name confirmation.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Inspect the bound sandbox and pending initial-upload state.
     Status,
     /// Start an existing sandbox without uploading (also available during recovery).
@@ -136,6 +159,8 @@ enum Commands {
         #[arg(long, help = "host loopback port (defaults to --port)")]
         local_port: Option<NonZeroU16>,
     },
+    /// Start a guest OpenCode service and attach the host OpenCode UI (foreground).
+    Attach,
     /// Explicitly refresh the guest project; may overwrite guest edits (copy mode).
     Upload {
         #[arg(long)]
@@ -193,6 +218,28 @@ fn dispatch(cli: Cli) -> Result<i32> {
     } = cli;
 
     match command {
+        Some(Commands::List { all }) => {
+            if config.is_some() || project.is_some() {
+                return Err(Error::new(
+                    "list reads private project bindings; it accepts no PROJECT or --config",
+                ));
+            }
+            let entries = if all {
+                binding::list()?
+            } else {
+                binding::list_scoped(&env::current_dir()?.canonicalize()?)?
+            };
+            println!("{}", serde_json::to_string_pretty(&entries)?);
+            Ok(0)
+        }
+        Some(Commands::Versions { check }) => {
+            if project.is_some() {
+                return Err(Error::new(
+                    "versions accepts --config or the current project binding, not PROJECT",
+                ));
+            }
+            versions(check, config.as_deref())
+        }
         Some(Commands::Doctor { json }) => {
             if project.is_some() {
                 return Err(Error::new(
@@ -203,6 +250,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
         }
         Some(Commands::Setup {
             enable_live,
+            copy_only,
             dry_run,
         }) => {
             if project.is_some() {
@@ -210,7 +258,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     "PROJECT is only accepted for direct launch; setup has no project binding",
                 ));
             }
-            crate::openshell::setup(enable_live, dry_run)
+            crate::openshell::setup(enable_live || !copy_only, dry_run)
         }
         Some(Commands::Init {
             directory,
@@ -253,7 +301,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     "run config from the project directory or use --config",
                 ));
             }
-            let config = resolve_environment(config, None, false)?;
+            let config = resolve_environment(config, None, false, None)?;
             if path {
                 println!("{}", config.path.display());
             } else {
@@ -275,11 +323,11 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     "PROJECT is only accepted for direct launch; run plan from that directory or use --config",
                 ));
             }
-            let config = resolve_environment(config, None, false)?;
+            let config = resolve_environment(config, None, false, None)?;
             print_plan(&config)
         }
         None => {
-            let config = resolve_environment(config, project.as_deref(), true)?;
+            let config = resolve_environment(config, project.as_deref(), true, None)?;
             launch_default(&config)
         }
         Some(command) => {
@@ -288,8 +336,15 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     "PROJECT is only accepted for direct launch; run the subcommand from that directory or use --config",
                 ));
             }
-            let create_binding = matches!(&command, Commands::Create | Commands::Up);
-            let config = resolve_environment(config, None, create_binding)?;
+            let create_binding = matches!(
+                &command,
+                Commands::Create | Commands::Up | Commands::Run { .. } | Commands::Attach
+            );
+            let first_agent = match &command {
+                Commands::Run { agent, .. } => *agent,
+                _ => None,
+            };
+            let config = resolve_environment(config, None, create_binding, first_agent)?;
             run_command(&config, command)
         }
     }
@@ -299,6 +354,7 @@ fn resolve_environment(
     explicit: Option<PathBuf>,
     project: Option<&Path>,
     create_if_missing: bool,
+    first_agent: Option<Agent>,
 ) -> Result<Config> {
     if let Some(path) = explicit {
         if project.is_some() {
@@ -319,10 +375,10 @@ fn resolve_environment(
             project.display()
         )));
     }
-    create_project_binding(&project)
+    create_project_binding(&project, first_agent.unwrap_or(Agent::Opencode))
 }
 
-fn create_project_binding(project: &Path) -> Result<Config> {
+fn create_project_binding(project: &Path, agent: Agent) -> Result<Config> {
     let path = binding::config_path(project)?;
     let directory = path.parent().expect("binding config parent").to_path_buf();
     let values = ConfigDoc {
@@ -331,9 +387,9 @@ fn create_project_binding(project: &Path) -> Result<Config> {
         gateway: "dungeon-local".into(),
         workspace: "default".into(),
         project: project.to_path_buf(),
-        project_transfer: ProjectTransfer::Copy,
+        project_transfer: ProjectTransfer::Live,
         image: DEFAULT_IMAGE.into(),
-        agent: Agent::Opencode,
+        agent,
         providers: vec![],
         imports: vec![],
     };
@@ -387,7 +443,13 @@ fn print_plan(config: &Config) -> Result<i32> {
 
 fn launch_default(config: &Config) -> Result<i32> {
     crate::imports::verify(config)?;
+    if config.values.agent == Agent::Opencode {
+        require_attach_terminal()?;
+    }
     let runtime = Runtime::new(config)?;
+    if config.values.agent == Agent::Opencode {
+        return attach_opencode(&runtime);
+    }
     let code = runtime.up()?;
     if code != 0 {
         return Ok(code);
@@ -405,7 +467,10 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
     {
         return crate::imports::stage(config, yes);
     }
-    if !matches!(&command, Commands::Down | Commands::Stop | Commands::Status) {
+    if !matches!(
+        &command,
+        Commands::Down | Commands::Stop | Commands::Status | Commands::Destroy { .. }
+    ) {
         crate::imports::verify(config)?;
     }
     if config.values.project_transfer == ProjectTransfer::Live {
@@ -428,12 +493,45 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
             "review project contents, including secrets and symlinks, then repeat upload --yes",
         ));
     }
+    if matches!(&command, Commands::Attach) {
+        require_attach_terminal()?;
+    }
 
     let runtime = Runtime::new(config)?;
     match command {
         Commands::Create => runtime.create(),
         Commands::Up => runtime.up(),
         Commands::Down | Commands::Stop => runtime.down(),
+        Commands::Destroy { yes } => {
+            let remote = runtime.inspect_for_destroy()?;
+            if remote["phase"] != "Stopped" {
+                return Err(Error::new(
+                    "stop the bound sandbox with `dungeon down` before destroy",
+                ));
+            }
+            let name = &config.values.name;
+            println!(
+                "Delete stopped sandbox {name} ({}) on gateway {} / workspace {}? Guest files, auth and sessions will be lost. Private configuration is retained.",
+                remote["id"].as_str().unwrap_or("unknown"),
+                config.values.gateway,
+                config.values.workspace
+            );
+            if !yes {
+                if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+                    return Err(Error::new(
+                        "destroy requires a terminal or explicit --yes; nothing deleted",
+                    ));
+                }
+                print!("Type the sandbox name `{name}` to confirm: ");
+                io::stdout().flush()?;
+                let mut answer = String::new();
+                io::stdin().read_line(&mut answer)?;
+                if answer.trim_end_matches(['\r', '\n']) != name {
+                    return Err(Error::new("destroy cancelled; nothing deleted"));
+                }
+            }
+            runtime.destroy()
+        }
         Commands::Status => {
             let remote = runtime.inspect_bound()?;
             println!(
@@ -472,6 +570,9 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         }
         Commands::Run { agent, arguments } => {
             let selected = agent.unwrap_or(config.values.agent);
+            if !config.state_path().exists() {
+                runtime.up()?;
+            }
             let mut command = vec![selected.as_str().to_owned()];
             command.extend(arguments);
             runtime.run_agent(
@@ -495,15 +596,140 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         Commands::SshConfig => runtime.ssh_config(),
         Commands::Ssh { arguments, .. } => runtime.ssh_owned(&arguments),
         Commands::Forward { port, local_port } => runtime.forward_service(port, local_port),
+        Commands::Attach => attach_opencode(&runtime),
         Commands::Start => runtime.start(),
         Commands::Init { .. }
         | Commands::Config { .. }
         | Commands::Setup { .. }
         | Commands::Doctor { .. }
+        | Commands::List { .. }
+        | Commands::Versions { .. }
         | Commands::Imports { .. }
         | Commands::Plan
         | Commands::Upload { yes: false } => unreachable!(),
     }
+}
+
+fn attach_opencode(runtime: &Runtime<'_>) -> Result<i32> {
+    require_attach_terminal()?;
+    #[cfg(target_os = "linux")]
+    {
+        if runtime.up()? != 0 {
+            return Err(Error::new("sandbox did not become Ready"));
+        }
+        crate::openshell::attach_opencode(runtime)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = runtime;
+        Err(Error::new("OpenCode attachment currently requires Linux"))
+    }
+}
+
+fn require_attach_terminal() -> Result<()> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() || !io::stderr().is_terminal() {
+        return Err(Error::new(
+            "OpenCode attachment requires a terminal; use `dungeon run opencode` for guest CLI execution",
+        ));
+    }
+    Ok(())
+}
+
+fn stable_version(text: &str) -> Option<[u64; 3]> {
+    let mut parts = text.split('.');
+    let parse = |part: Option<&str>| {
+        let part = part?;
+        (!part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+            .then(|| part.parse::<u64>().ok())
+            .flatten()
+    };
+    let version = [
+        parse(parts.next())?,
+        parse(parts.next())?,
+        parse(parts.next())?,
+    ];
+    parts.next().is_none().then_some(version)
+}
+
+fn versions(check: bool, config: Option<&Path>) -> Result<i32> {
+    let manifest: serde_json::Value =
+        serde_json::from_str(include_str!("../images/agent/package.json"))?;
+    let reviewed = manifest["dependencies"]["@opencode/cli"]
+        .as_str()
+        .ok_or_else(|| Error::new("reviewed image has no OpenCode version"))?;
+    let reviewed_number = stable_version(reviewed)
+        .ok_or_else(|| Error::new("reviewed image has an invalid OpenCode version"))?;
+    let project = env::current_dir()?.canonicalize()?;
+    let environment = crate::openshell::host_environment(Some(&project))?;
+    let path = environment.get(std::ffi::OsStr::new("PATH"));
+
+    let host = crate::openshell::find_executable("opencode", path)
+        .and_then(|binary| {
+            Command::new(binary)
+                .arg("--version")
+                .env_clear()
+                .envs(&environment)
+                .output()
+                .ok()
+        })
+        .filter(|output| output.status.success() && output.stdout.len() <= 128)
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|text| text.trim().strip_prefix("opencode v").map(str::to_owned))
+        .filter(|version| stable_version(version).is_some());
+    let latest = if check {
+        let binary = crate::openshell::find_executable("curl", path).ok_or_else(|| {
+            Error::new("curl is required for the explicit registry version check")
+        })?;
+        let output = Command::new(binary)
+            .args([
+                "--disable",
+                "--fail",
+                "--silent",
+                "--show-error",
+                "--max-time",
+                "5",
+                "--max-filesize",
+                "65536",
+                OPENCODE_TAGS,
+            ])
+            .env_clear()
+            .envs(&environment)
+            .output()
+            .map_err(|error| {
+                Error::new(format!("cannot check stable OpenCode release: {error}"))
+            })?;
+        if !output.status.success() || output.stdout.len() > 65536 {
+            return Err(Error::new(
+                "OpenCode release check failed; image and host unchanged",
+            ));
+        }
+        let tags: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        let latest = tags["latest"]
+            .as_str()
+            .filter(|value| stable_version(value).is_some())
+            .ok_or_else(|| Error::new("registry stable dist-tag is invalid"))?;
+        Some(latest.to_owned())
+    } else {
+        None
+    };
+    let selected = if let Some(path) = config {
+        Some(load_config(path)?.values.image)
+    } else {
+        binding::load(&project)?.map(|config| config.values.image)
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "host_opencode": host,
+            "reviewed_guest_opencode": reviewed,
+            "reviewed_local_image": DEFAULT_IMAGE,
+            "selected_project_image": selected,
+            "registry_stable": latest,
+            "reviewed_update_available": latest.as_deref().and_then(stable_version).is_some_and(|version| version > reviewed_number),
+            "selection": "new bindings use the reviewed versioned local image; existing bindings unchanged; no automatic pull, install or migration",
+        }))?
+    );
+    Ok(0)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -547,6 +773,11 @@ fn initialize(
 
     println!("Configuration: {:?}", config.path);
     println!("No runtime was started. Review policy.json and named providers before first up.");
+    if config.values.image == DEFAULT_IMAGE {
+        println!(
+            "Build the reviewed local image before first up (images/agent/README.md). `dungeon versions --check` shows upstream stable updates; nothing is downloaded automatically."
+        );
+    }
     if project_binding {
         println!("From the project directory: dungeon plan, then dungeon up.");
     } else {
@@ -569,10 +800,12 @@ fn approve_environment(directory: &Path, values: &ConfigDoc, yes: bool) -> Resul
             "Copy mode: first up uploads the project; guest changes reach the host only through reviewed export. No writable host mounts."
         ),
         ProjectTransfer::Live => println!(
-            "EXPERIMENTAL live mode: the guest can write directly to the host project. Requires an explicitly bind-enabled gateway; no upload/export."
+            "Live mode: the guest can read and WRITE the selected host project immediately at /sandbox/project. Only this project is mounted; no upload/export. Requires a bind-enabled gateway. Choose --project-transfer copy for reviewed return of changes."
         ),
     }
-    println!("Review project contents before first up; transfer is not a secret scanner.");
+    println!(
+        "Review project contents before first up; all files within a live project become guest-visible, including secrets. Transfer is not a secret scanner."
+    );
     if !yes {
         if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
             return Err(Error::new(
@@ -670,6 +903,27 @@ mod tests {
     }
 
     #[test]
+    fn first_run_selects_an_agent_without_accepting_unreviewed_options() {
+        let parsed = Cli::try_parse_from(["dungeon", "run", "claude"]).unwrap();
+        assert!(matches!(
+            parsed.command,
+            Some(Commands::Run {
+                agent: Some(Agent::Claude),
+                ..
+            })
+        ));
+        let parsed = Cli::try_parse_from(["dungeon", "run", "codex"]).unwrap();
+        assert!(matches!(
+            parsed.command,
+            Some(Commands::Run {
+                agent: Some(Agent::Codex),
+                ..
+            })
+        ));
+        assert!(Cli::try_parse_from(["dungeon", "run", "--project-transfer", "live"]).is_err());
+    }
+
+    #[test]
     fn explicit_config_resolution_is_authoritative() {
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("project");
@@ -696,13 +950,14 @@ mod tests {
         )
         .unwrap();
 
-        let resolved = resolve_environment(Some(path.clone()), None, false).unwrap();
+        let resolved = resolve_environment(Some(path.clone()), None, false, None).unwrap();
         assert_eq!(resolved.path, path);
         assert_eq!(resolved.values.project, project);
 
-        let error = resolve_environment(Some(resolved.path.clone()), Some(root.path()), false)
-            .unwrap_err()
-            .to_string();
+        let error =
+            resolve_environment(Some(resolved.path.clone()), Some(root.path()), false, None)
+                .unwrap_err()
+                .to_string();
         assert!(
             error.contains("explicit config is authoritative"),
             "{error}"
@@ -811,6 +1066,17 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn version_report_accepts_only_stable_triplets_and_pinned_candidate() {
+        assert_eq!(stable_version("2.1.2"), Some([2, 1, 2]));
+        for invalid in ["2.1", "2.1.2-beta", "2.1.2.3", "2.1.02x", ""] {
+            assert_eq!(stable_version(invalid), None);
+        }
+        assert!(DEFAULT_IMAGE.ends_with("opencode-2.1.2"));
+        assert!(Cli::try_parse_from(["dungeon", "versions", "--check"]).is_ok());
+        assert!(Cli::try_parse_from(["dungeon", "versions", "--install"]).is_err());
     }
 
     #[test]

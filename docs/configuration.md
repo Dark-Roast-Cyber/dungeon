@@ -119,16 +119,15 @@ upload files. Override values with flags before confirming:
 | `--gateway NAME` | `dungeon-local` |
 | `--workspace NAME` | `default` |
 | `--agent opencode\|claude\|codex` | `opencode` |
-| `--image OCI_REFERENCE` | `ghcr.io/nvidia/openshell-community/sandboxes/base:latest` |
-| `--project-transfer copy\|live` | `copy` |
+| `--image OCI_REFERENCE` | `localhost/dungeon-agent:0.0.3-opencode-2.1.2` (build first) |
+| `--project-transfer copy\|live` | `live` for new human CLI bindings |
 | `--provider NAME` (repeatable) | No providers; names refer to existing OpenShell providers |
 | `--yes` | Off; explicitly approve saving without a terminal |
 
-`--non-interactive` is an alias for `--yes`. The default community image is a
-mutable tag, not a reviewed tool-version pin. Select
-`--image localhost/dungeon-agent:0.0.3-dev` only after building the
-[local reviewed image](../images/agent/README.md); it is not selected automatically.
-No tool installer or policy expansion is implied by image selection.
+`--non-interactive` is an alias for `--yes`. The versioned default image is a
+[reviewed local build](../images/agent/README.md), not a published image; build
+it before the first `up`. `dungeon versions --check` checks the official stable
+tag read-only. There is no automatic image pull, tool installer or policy expansion.
 
 Without `--directory`, `init --project PATH` creates the same binding that later
 commands resolve from that project. An explicit directory is never scanned or
@@ -153,11 +152,11 @@ different authority, rather than editing `runtime.json` to bypass those checks.
 
 ### Local setup modes
 
-| State | `setup` | `setup --enable-live` |
+| State | `setup` (or explicit `--enable-live`) | `setup --copy-only` |
 | --- | --- | --- |
-| Fresh, prerequisites established | Create copy-capable gateway | Create experimental live-capable gateway |
-| Exact running copy gateway | Verify unchanged | Refuse; safe migration is blocked |
-| Exact running live gateway | Verify unchanged, no downgrade | Verify unchanged |
+| Fresh, prerequisites established | Create bind-capable gateway | Create copy-only gateway |
+| Exact running copy gateway | Refuse; no automatic migration | Verify unchanged |
+| Exact running live gateway | Verify unchanged | Verify unchanged, no downgrade |
 | Stopped, unknown, foreign, partial or legacy layout | Refuse, no start/repair/adoption | Refuse, no start/repair/adoption |
 
 Add `--dry-run` for bounded read-only preflight and the capability diff. Missing
@@ -175,10 +174,10 @@ userns = "keep-id:uid=998,gid=998"
 ```
 
 Gateway/certificate generation retains plain `keep-id`; sandbox mapping is a
-separate setting. This enables a trusted driver ceiling only. A project still
-needs explicit `project_transfer: live` in private configuration. Setup creates
-no project mount, changes no policy and converts no binding. Generated/default
-transfer remains copy.
+separate setting. This enables a trusted driver ceiling only. A new CLI binding
+selects `project_transfer: live` after review; legacy omitted fields still mean
+copy. Setup creates no project mount, changes no policy and converts no binding.
+Explicit `--project-transfer copy` remains available.
 
 Setup recognizes only its exact generated copy/live configuration and pinned
 image, effective environment (including image defaults), gateway user/mappings,
@@ -202,13 +201,14 @@ Copy-to-live migration needs separately proven maintenance/concurrency and
 interruption recovery preserving registration, TLS, database, driver data,
 sandbox IDs and volumes. A Dungeon lock cannot exclude other OpenShell clients.
 This slice does not enumerate/drain workloads or stop/restart/remove an existing
-gateway. Do not remove existing state merely to make `--enable-live` succeed.
+gateway. Do not remove existing state merely to make plain `setup` succeed.
 
 The fresh plain/flagged CLI and verification paths have synthetic coverage and
 one separate disposable Fedora CoreOS 44/Podman 5.8.4 native record, including
 gateway health, native certificate/database access and UID 998 workspace writes.
 See [the exact setup gate](validation.md#issue-24-experimental-fresh-setup).
-This is not migration, live-default promotion or broader platform attestation.
+This is not migration or broader platform attestation. The new default still
+needs validation on the actual host/image/agent combination.
 
 `dungeon.json` schema 2:
 
@@ -219,8 +219,8 @@ This is not migration, live-default promotion or broader platform attestation.
   "gateway": "dungeon-local",
   "workspace": "default",
   "project": "/home/user/projects/demo",
-  "project_transfer": "copy",
-  "image": "ghcr.io/nvidia/openshell-community/sandboxes/base:latest",
+  "project_transfer": "live",
+  "image": "localhost/dungeon-agent:0.0.3-opencode-2.1.2",
   "agent": "opencode",
   "providers": []
 }
@@ -391,6 +391,29 @@ binding. The positional project path is intentionally the direct-launch surface;
 for a subcommand against another project, run it from that directory or use the
 explicit config.
 
+`dungeon list` reads only the deterministic private project-binding directory,
+scoped to the current directory and its descendants (path components, not a
+string prefix). `dungeon list -a` or `--all` shows all private bindings regardless
+of directory. Both emit JSON with `configured`, `bound` (recorded sandbox ID),
+or `invalid` entries and never contact OpenShell, start a gateway, or prove a
+sandbox's current phase. They do not discover OpenShell sandboxes without
+bindings or explicit custom config directories. Missing projects remain visible
+by recorded path when in scope or with `-a`; invalid entries without a recorded
+project appear in `-a` (or when their key matches the current directory) for
+manual inspection, not automatic adoption.
+
+`dungeon destroy` (or `--config PATH destroy`) is the separate, irreversible
+disposal operation for a bound, **Stopped** sandbox. It checks the recorded ID,
+configuration label and workspace with OpenShell, asks for the exact sandbox name
+or requires `--yes`, then holds the environment transfer lock and checks again
+just before deleting by name. It then removes only `runtime.json` and `baseline.json`,
+keeping private configuration, policy, approved imports, and lock files. Export
+guest edits first in copy mode. A delete failure keeps the binding; an
+interruption after OpenShell deletion but before local retirement may leave a
+stale binding requiring manual inspection. No automatic orphan cleanup, gateway
+removal, or rollback is attempted. External OpenShell clients are outside
+Dungeon's local lock: name-based deletion cannot exclude their replacement race.
+
 
 Run `up` before using arbitrary tools: `exec -- COMMAND ARG...` executes at
 `/sandbox/project` in an already Ready sandbox; `shell` opens Bash there.
@@ -439,7 +462,10 @@ locking; changed authority requires an explicit retry. Create/up acquire the
 environment admission lock before deciding whether creation is needed. Fresh
 copy `up` adds project locking and preflight before creation and holds both
 through upload/baseline completion; reuse never uploads and needs no host project.
-Import stage/create locks remain separate; this is not general lifecycle coordination.
+Explicit `start` and `destroy` share the environment lock with `up`/create so a
+Dungeon start cannot race the final stopped check before deletion. Import
+stage/create locks remain separate; other work, stop, and external OpenShell
+clients are not generally serialized by this lock.
 
 Prepared `dungeon-recovery-*` material is kept before the first host mutation,
 including on unwind or INT/TERM. Both upload and export refuse matching
@@ -463,7 +489,7 @@ transfers (including a transport surviving an interrupted uploader). Copy transf
 requires Unix private-file protections; native Windows refuses it. Linux process/filesystem
 tests do not establish macOS durability or other-platform runtime support.
 
-`live` is an explicit experimental candidate, validated only on the recorded
+`live` is the reviewed default for new CLI bindings, validated only on the recorded
 Linux/OpenShell/Podman combinations. First `up` derives one
 Podman bind request from the canonical configured project to
 `/sandbox/project`, read-write, with the OpenShell 0.0.116
@@ -476,10 +502,11 @@ The live candidate requires trusted gateway configuration with
 `enable_bind_mounts = true` and
 `userns = "keep-id:uid=998,gid=998"`. Those are Podman driver settings, not
 `policy.json` capability. The 2026-10-01 Fedora/OpenShell/Podman record is in
-[validation](validation.md); it does not make live the generated default.
-Existing/default `dungeon init` remains `copy`. The current `dungeon-local`
-setup is not migrated automatically, and no host chmod/chown workaround is
-part of the design.
+[validation](validation.md); it does not certify the new default on other hosts.
+Existing configs without an explicit transfer field remain `copy`. A copy-only
+`dungeon-local` is not migrated automatically, and no host chmod/chown workaround
+is part of the design. Use `init --project-transfer copy` there or explicitly
+provision a fresh bind-capable gateway after resolving its old state.
 
 The three-way baseline is `baseline.json` in the private config directory,
 bound to the config fingerprint and sandbox ID. It stores only pre-upload host
@@ -495,7 +522,7 @@ baseline. Dungeon does not guess or synthesize the missing baseline.
 
 Keep UI/editor configuration on the host; run the agent, tools, credentials,
 and sessions in the guest. A host editor can watch the configured checkout
-directly when `project_transfer` is explicitly `live` on the validated local
+directly when the reviewed project binding selects `live` on the validated local
 Podman gateway. This is a local bind, not cross-machine file synchronization:
 the source must exist on the gateway's Podman host. A remote gateway does not
 make a laptop checkout live automatically. Copy mode remains available with
@@ -508,6 +535,20 @@ mode or Claude Desktop. Editor configuration need not be imported just to use
 these paths. Guest-installed extensions and tools still execute inside isolation.
 
 For HTTP clients, `forward` uses OpenShell 0.0.116's gRPC service forwarding:
+
+For OpenCode 2.1.2, the simple foreground path is now `dungeon` from a bound
+project (or `dungeon attach`): it starts/resumes the sandbox, verifies matching
+host/guest OpenCode versions, starts the guest's authenticated loopback server,
+forwards to an available host-loopback port, checks unauthenticated denial and
+authenticated guest version, then opens the host OpenCode UI. The generated
+password is process-memory only and is never printed or placed on an argv. Exit
+or Ctrl-C stops the owned service through its PTY and closes the forward while
+preserving the sandbox. If shutdown cannot be verified, choose from a plain
+text prompt to confirm stopping the sandbox or leave it running; no broad
+process kill or project deletion. A crash or SIGKILL cannot guarantee cleanup:
+inspect `dungeon status` and use `dungeon down` to stop the sandbox if needed.
+`dungeon run opencode` still runs the guest TUI. The following manual steps
+remain available for other clients and troubleshooting:
 
 ```sh
 dungeon --config "$CONFIG" up
@@ -593,7 +634,7 @@ Creation requires the exact recognized existing local Dungeon gateway with bind 
 
 Source edits/deletion/new symlinks do not change the selected digest, fingerprint or active mount. `plan` reports drift/unavailable-or-unsafe without refreshing. Stage refuses any existing `runtime.json`, even stopped or invalid: initialize a separate environment for refresh. Missing/tampered snapshots block new work/start/attachment; identity-checked status, stop and owned-command cleanup remain artifact-independent. Do not edit config/runtime identity to bypass drift. Neovim state/data/cache remain guest-private under HOME `/sandbox`.
 
-The live read-write workspace transfer candidate is implemented separately from imports. It is narrowly guarded to the canonical configured project and is not the generated/default path; it does not change the import model or remove the copied upload/export automation path. The recorded OpenShell 0.0.116, rootless Podman 5.8.4, Fedora/SELinux gate is in [validation](validation.md). Promotion remains a separate decision.
+The live read-write workspace transfer is implemented separately from imports. It is narrowly guarded to the canonical configured project and is the reviewed default for new CLI bindings; it does not change the import model or remove the copied upload/export automation path. The recorded OpenShell 0.0.116, rootless Podman 5.8.4, Fedora/SELinux gate is in [validation](validation.md). The default change is not general platform attestation.
 
 The accepted capability model continues to extend this single authoritative configuration, not a parallel plugin configuration. General declarative fields for the remaining request categories are not added in this first slice (the Neovim requirement/state paths shown in plan are derived, and existing `providers` remains the named provider binding):
 

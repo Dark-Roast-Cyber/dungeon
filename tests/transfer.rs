@@ -54,6 +54,8 @@ fn native_cli_transfer_locks_use_shared_private_authority_not_project_bindings()
             "local",
             "--image",
             "localhost/test:1",
+            "--project-transfer",
+            "copy",
             "--non-interactive",
         ]);
         assert!(

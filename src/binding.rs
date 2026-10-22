@@ -1,7 +1,8 @@
 use crate::config::{Config, digest, load_config, sandbox_name};
 use crate::{Error, Result};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::env;
+use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 fn private_config_root() -> Result<PathBuf> {
@@ -27,6 +28,89 @@ fn private_config_root() -> Result<PathBuf> {
         root
     };
     Ok(root.join("dungeon/projects"))
+}
+
+pub(crate) fn list() -> Result<Vec<Value>> {
+    let root = private_config_root()?;
+    match fs::symlink_metadata(&root) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+        Ok(meta) if meta.file_type().is_dir() => {}
+        Ok(_) => {
+            return Err(Error::new(
+                "private Dungeon project root is not a directory",
+            ));
+        }
+    }
+    let mut entries = Vec::new();
+    for item in fs::read_dir(root)? {
+        if entries.len() >= 4096 {
+            return Err(Error::new("too many private project bindings to list"));
+        }
+        let item = item?;
+        let path = item.path();
+        let key = item.file_name();
+        if !item.file_type()?.is_dir() {
+            entries.push(json!({"key": key.to_string_lossy(), "binding": {"state": "invalid"}}));
+            continue;
+        }
+        let config_path = path.join("dungeon.json");
+        let policy_path = path.join("policy.json");
+        if ![&config_path, &policy_path]
+            .iter()
+            .all(|p| fs::symlink_metadata(p).is_ok_and(|meta| meta.file_type().is_file()))
+        {
+            entries.push(json!({"key": key.to_string_lossy(), "binding": {"state": "invalid"}}));
+            continue;
+        }
+        let config = match load_config(&config_path) {
+            Ok(config) if project_key(&config.values.project)? == key.to_string_lossy() => config,
+            _ => {
+                entries
+                    .push(json!({"key": key.to_string_lossy(), "binding": {"state": "invalid"}}));
+                continue;
+            }
+        };
+        let state = match fs::symlink_metadata(config.state_path()) {
+            Ok(meta) if !meta.file_type().is_file() => json!({"state":"invalid"}),
+            Ok(_) => match crate::config::read_runtime_state(&config.state_path()) {
+                Ok(runtime) if runtime.schema == 1 && runtime.config == config.fingerprint => {
+                    json!({"state":"bound", "sandbox_id": runtime.id})
+                }
+                _ => json!({"state":"invalid"}),
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                json!({"state":"configured"})
+            }
+            Err(_) => json!({"state":"invalid"}),
+        };
+        entries.push(json!({
+            "key": key.to_string_lossy(),
+            "project": config.values.project,
+            "project_available": config.values.project.is_dir(),
+            "config": config.path,
+            "name": config.values.name,
+            "gateway": config.values.gateway,
+            "workspace": config.values.workspace,
+            "transfer": config.values.project_transfer,
+            "binding": state,
+        }));
+    }
+    entries.sort_by(|a, b| a["key"].as_str().cmp(&b["key"].as_str()));
+    Ok(entries)
+}
+
+pub(crate) fn list_scoped(directory: &Path) -> Result<Vec<Value>> {
+    let key = project_key(directory)?;
+    Ok(list()?
+        .into_iter()
+        .filter(|entry| {
+            entry["key"].as_str() == Some(key.as_str())
+                || entry["project"]
+                    .as_str()
+                    .is_some_and(|project| Path::new(project).starts_with(directory))
+        })
+        .collect())
 }
 
 fn project_key(project: &Path) -> Result<String> {

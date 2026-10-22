@@ -47,8 +47,8 @@ impl Fixture {
 #[test]
 fn default_init_binds_current_project_and_offline_commands_do_not_need_openshell() {
     let f = Fixture::new();
-    // Repository content cannot select live transfer, an image or a provider.
-    fs::write(f.project.join("dungeon.json"), json!({"project_transfer":"live","image":"localhost/untrusted:1","providers":["untrusted"]}).to_string()).unwrap();
+    // Repository content cannot change the selected transfer, image or provider.
+    fs::write(f.project.join("dungeon.json"), json!({"project_transfer":"copy","image":"localhost/untrusted:1","providers":["untrusted"]}).to_string()).unwrap();
     let out = f.run(&["init", "--yes"]);
     assert!(out.status.success(), "{:?}", out);
     let config = f.config();
@@ -63,9 +63,10 @@ fn default_init_binds_current_project_and_offline_commands_do_not_need_openshell
     assert_eq!(values["providers"], json!([]));
     assert_eq!(
         values["image"],
-        "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
+        "localhost/dungeon-agent:0.0.3-opencode-2.1.2"
     );
-    assert_eq!(config["project_transfer"], "copy");
+    assert_eq!(config["project_transfer"], "live");
+    assert_eq!(values["project_transfer"], "live");
     assert!(values["name"].as_str().unwrap().len() <= 19);
     let path = PathBuf::from(config["config"].as_str().unwrap());
     assert!(
@@ -118,6 +119,53 @@ fn default_init_binds_current_project_and_offline_commands_do_not_need_openshell
 }
 
 #[test]
+fn explicit_copy_stays_available_for_new_bindings() {
+    let f = Fixture::new();
+    let out = f.run(&["init", "--yes", "--project-transfer", "copy"]);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(f.config()["project_transfer"], "copy");
+    assert!(f.config()["values"]["project_transfer"].is_null());
+}
+
+#[test]
+fn versions_is_read_only_and_uses_the_reviewed_image_pin() {
+    let f = Fixture::new();
+    let out = f.run(&["versions"]);
+    assert!(out.status.success(), "{out:?}");
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["reviewed_guest_opencode"], "2.1.2");
+    assert_eq!(
+        report["reviewed_local_image"],
+        "localhost/dungeon-agent:0.0.3-opencode-2.1.2"
+    );
+    assert!(report["registry_stable"].is_null());
+    assert_eq!(report["reviewed_update_available"], false);
+    assert!(report["selected_project_image"].is_null());
+    assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
+    assert!(f.run(&["init", "--yes"]).status.success());
+    let bound: serde_json::Value = serde_json::from_slice(&f.run(&["versions"]).stdout).unwrap();
+    assert_eq!(
+        bound["selected_project_image"],
+        report["reviewed_local_image"]
+    );
+}
+
+#[test]
+fn attach_requires_terminal_before_starting_a_sandbox() {
+    let f = Fixture::new();
+    assert!(f.run(&["init", "--yes"]).status.success());
+    let result = f.run(&["attach"]);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("requires a terminal"));
+    let selected = f.config()["config"].as_str().unwrap().to_owned();
+    assert!(
+        !PathBuf::from(selected)
+            .with_file_name("runtime.json")
+            .exists()
+    );
+}
+
+#[test]
 fn missing_binding_and_unapproved_init_leave_private_storage_empty() {
     let f = Fixture::new();
     for args in [
@@ -126,6 +174,7 @@ fn missing_binding_and_unapproved_init_leave_private_storage_empty() {
         vec!["config", "--path"],
         vec!["init"],
         vec![],
+        vec!["run", "claude"],
     ] {
         let out = f.run(&args);
         assert!(!out.status.success(), "{args:?}");
@@ -169,7 +218,7 @@ fn init_overrides_are_explicit_and_custom_directories_are_not_adopted() {
         "live",
     ]);
     assert!(out.status.success(), "{:?}", out);
-    assert!(String::from_utf8_lossy(&out.stdout).contains("guest can write directly"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("WRITE the selected host project"));
     assert!(!f.run(&["config"]).status.success());
     let path = private.join("dungeon.json");
     let out = f.run(&["--config", path.to_str().unwrap(), "config"]);

@@ -12,6 +12,9 @@ Neither is an audited isolation product.
 
 ## Quick start
 
+For the short installation/adoption sequence, including an existing stopped
+gateway and copy/live choices, use the [adoption cheat sheet](docs/adoption.md).
+
 ### 1. Build the CLI
 
 For the supported Linux path, install Git, a Rust toolchain manager providing
@@ -28,6 +31,10 @@ dungeon --help
 
 The PATH export applies to this shell. Native Rust release archives and the npm
 launcher are **not published yet**. See [distribution](docs/distribution.md).
+For a user-local install from this checkout, run
+`./scripts/install-local.sh --dry-run` and then `./scripts/install-local.sh`;
+an existing different `~/.local/bin/dungeon` requires explicit `--replace`.
+The helper installs only the Rust binary, not OpenShell or a gateway.
 
 ### 2. Set up the local gateway
 
@@ -36,7 +43,7 @@ Start the user Podman API socket and pull the pinned gateway image explicitly:
 ```sh
 systemctl --user enable --now podman.socket
 podman pull ghcr.io/nvidia/openshell/gateway@sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645
-dungeon setup
+dungeon setup               # fresh bind-capable gateway; no project mounted yet
 dungeon doctor
 ```
 
@@ -49,11 +56,19 @@ also be used before setup to identify missing prerequisites.
 ### 3. Review a project, then start it
 
 Tools must be installed in the selected sandbox image; Dungeon does not use your
-host's tools. The default community `base:latest` image is a mutable tag, not a
-reviewed version pin. To use pinned OpenCode, Claude Code, Codex, Neovim and Rust,
-build the [local reviewed image](images/agent/README.md) first and replace plain
-`init` below with `dungeon init --image localhost/dungeon-agent:0.0.3-dev`.
-That image is not published or selected automatically.
+host's tools. New CLI bindings select the versioned local image candidate with
+reviewed OpenCode 2.1.2. **Build it explicitly before `up`** using the
+[image procedure](images/agent/README.md); setup does not download or build it.
+`dungeon versions --check` reads the upstream stable tag and reports if a newer
+release needs review. Existing bindings and their image choices are unchanged.
+
+```sh
+podman build --pull=never -t localhost/dungeon-agent:0.0.3-opencode-2.1.2 \
+  -f images/agent/Containerfile images/agent
+```
+
+Pull the image's exact base digest first if it is not already cached; see the
+image procedure for the digest and offline verification.
 
 ```sh
 cd my-project
@@ -64,11 +79,12 @@ dungeon shell
 ```
 
 `init` uses the current project, a generated name, private config storage and
-copy transfer. It shows the scope and asks once before writing configuration;
+one live read/write project mount. It shows the exact scope and asks once before writing configuration;
 it starts nothing. `plan` lets you review the policy without runtime contact.
-First `up` creates the sandbox and copies the project to `/sandbox/project`;
-`shell` opens Bash there. **Review project contents and policy before `up`;
-transfer is not a secret scanner.**
+First `up` creates the sandbox with the selected host project at `/sandbox/project`;
+`shell` opens Bash there. Guest writes appear on the host immediately. Choose
+`dungeon init --project-transfer copy` for a sandbox copy and reviewed export.
+**Review project contents and policy before `up`; transfer is not a secret scanner.**
 
 ## Everyday use
 
@@ -84,15 +100,44 @@ From the project directory, choose the interface you need:
 | Inspect sandbox state | `dungeon status` |
 | Review and return guest edits | `dungeon export` |
 | Stop, preserving guest state | `dungeon down` |
+| See bindings in/under this directory | `dungeon list` |
+| See all private project bindings | `dungeon list -a` |
+| Delete a finished sandbox | `dungeon down`, then `dungeon destroy` |
 
-No repeated config path is needed. `dungeon` initializes/resumes and launches the
-default agent; `dungeon ../other-project` selects another project. Agents may
+No repeated config path is needed. In a terminal, `dungeon` initializes/resumes
+and attaches the **host OpenCode UI** to an authenticated guest OpenCode server
+through a temporary loopback forward. Host and guest versions must match. On
+normal exit or Ctrl-C, Dungeon stops the service and forward and keeps the
+sandbox. If it cannot confirm cleanup, a plain text prompt offers to stop the
+sandbox (preserving data) or leave it running. `dungeon run opencode` still runs
+the guest TUI; Claude and Codex run their guest CLIs. `dungeon ../other-project`
+selects another project. Agents may
 require [guest authentication](#authentication) before use.
+
+On a new project, `dungeon run claude` (or `codex`) also requests the one-time
+binding review, records that agent as the default, then creates and launches the
+environment. An existing binding keeps its configured default; `run` selects an
+agent for this invocation. A first `run` against an initialized but not-yet-up
+environment performs the initial copy. Neither path grants new mounts or policy.
 
 - `up` resumes the same sandbox without another upload; already Ready is a no-op.
 - `run` can start a stopped bound sandbox, also without uploading. `exec`,
   `shell` and attachment commands require it already Ready.
 - `down` preserves guest files, sessions and authentication.
+
+`list` is an offline JSON inventory of private project bindings, not a query of
+OpenShell or Podman. A `bound` row contains the recorded sandbox ID, not its
+current phase; `configured` means no recorded sandbox. It cannot find sandbox
+orphans, external gateways, or explicit `--directory` configs outside the
+project-binding root. Use `status` for one binding's live state.
+
+When finished with a bound environment, run `down` and then `destroy`.
+`destroy` rechecks the stopped sandbox's identity, asks you to type its name
+(or accepts explicit `--yes`), and requests OpenShell deletion. **Guest files,
+sessions and authentication are lost.** Private `dungeon.json`, policy and
+approved imports remain; the next `up` makes a fresh sandbox and initial copy.
+Review/export copy-mode guest edits first. This is not a container prune or a
+gateway teardown; if deletion or local cleanup fails, inspect before retrying.
 
 ### Returning changes in copy mode
 
@@ -125,8 +170,8 @@ dungeon config --path           # just the dungeon.json path
 | Config directory | Private project binding | `--directory PATH` |
 | Environment name | Generated from the project path | `--name NAME` |
 | Agent | OpenCode | `--agent opencode\|claude\|codex` |
-| Image | Community `base:latest` | `--image OCI_REFERENCE` |
-| Transfer | Copy, no writable host mounts | `--project-transfer copy\|live` |
+| Image | Reviewed local `dungeon-agent:0.0.3-opencode-2.1.2` (build first) | `--image OCI_REFERENCE` |
+| Transfer | Live, one reviewed writable project mount | `--project-transfer copy\|live` |
 | Gateway | `dungeon-local` | `--gateway NAME` |
 | Workspace | `default` | `--workspace NAME` |
 | Providers | None | `--provider NAME` (repeatable; existing providers, not secrets) |
@@ -149,11 +194,12 @@ to a bound configuration fail identity checks; Dungeon does not silently rebuild
 or widen policy. Use `--directory PATH` for a separately managed environment and
 `dungeon --config PATH COMMAND` to select it explicitly.
 
-Experimental live transfer exposes the selected host project read-write and
-requires a recognized bind-enabled gateway plus explicit
-`init --project-transfer live`. Fresh `setup --enable-live` can create such a
-gateway. It is not the default; existing copy gateways cannot be migrated
-automatically. See [setup modes and limits](docs/configuration.md#local-setup-modes).
+Live transfer exposes only the selected host project read-write and requires
+a recognized bind-enabled gateway. Fresh `setup` creates that capability by
+default, but never mounts a project by itself. `setup --copy-only` and
+`init --project-transfer copy` keep the isolated copy/review workflow. Existing
+copy gateways cannot be migrated automatically; existing bindings keep their
+recorded mode. See [setup modes and limits](docs/configuration.md#local-setup-modes).
 
 ## Authentication
 

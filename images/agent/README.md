@@ -1,6 +1,6 @@
 # Local reviewed agent image
 
-Issue #6's Linux image candidate, extended by Issue #17 with reviewed image-owned Neovim and Rust capabilities. The [Issue #17 local Linux amd64 validation](../../docs/validation.md#issue-17-local-image-tooling-2026-09-26) passed under the unchanged OpenShell hard policy. This is **not published and not Dungeon's default**; publication readiness is a separate gate.
+Issue #6's Linux image candidate, extended by Issue #17 with reviewed image-owned Neovim and Rust capabilities. The [Issue #17 local Linux amd64 validation](../../docs/validation.md#issue-17-local-image-tooling-2026-09-26) passed under the unchanged OpenShell hard policy. New human CLI bindings select the versioned local candidate; it is **not published or automatically built**. Build it before first `up` or choose another image explicitly.
 
 ## Inputs and ownership
 
@@ -8,7 +8,7 @@ Issue #6's Linux image candidate, extended by Issue #17 with reviewed image-owne
 - `package.json` owns the exact agent versions, build-only pnpm version, Neovim/Rust versions, Rust distribution coordinates, and reviewed SHA-256 artifact hashes. `pnpm-lock.yaml` locks official npm registry packages, including platform binaries, with SHA-512 integrity metadata. Read the manifest for selected versions and hashes rather than maintaining a second version list.
 - Neovim comes from the official Linux x86_64 release archive. Rust uses the official `rustc`, `cargo`, and `rust-std` standalone component archives for the bounded x86_64 GNU/Linux toolchain, without rustup or runtime toolchain resolution.
 - This glibc Linux image excludes OpenCode's two redundant x64 musl optional binary packages through pnpm's lock-aware `ignoredOptionalDependencies`. The glibc x64 baseline fallback stays installed for CPUs without AVX2.
-- OpenCode uses the reviewed pinned V2 `@opencode/cli` distribution, not the legacy `opencode-ai` package. Claude's pinned version was selected from Anthropic's **stable** channel (not its faster `latest` channel); Codex's pinned version was selected from the non-prerelease `latest` distribution. Channel names are consulted during review only; builds never resolve a channel.
+- OpenCode uses the reviewed pinned V2 `@opencode/cli` distribution, not the legacy `opencode-ai` package. The current 2.1.2 pin matched the official registry's stable `latest` tag during review on 2026-10-21; tags are never resolved at build/start time. Claude's pinned version was selected from Anthropic's **stable** channel (not its faster `latest` channel); Codex's pinned version was selected from the non-prerelease `latest` distribution.
 - Node 22.22.1 comes from the digest-pinned base and satisfies the installers' Node requirements (Claude requires Node >=22; Codex >=16). No extra Node distribution or distro upgrade is installed.
 
 Agent/base sources reviewed on 2026-09-23 UTC:
@@ -29,11 +29,11 @@ Issue #17 sources reviewed on 2026-09-25 UTC:
 From the repository root, using rootless Podman:
 
 ```sh
-podman build --pull=never -t localhost/dungeon-agent:0.0.3-dev \
+podman build --pull=never -t localhost/dungeon-agent:0.0.3-opencode-2.1.2 \
   -f images/agent/Containerfile images/agent
 podman run --rm --network none --entrypoint node \
-  localhost/dungeon-agent:0.0.3-dev /usr/lib/node_modules/dungeon-agent/verify.cjs --path
-podman history --no-trunc localhost/dungeon-agent:0.0.3-dev
+  localhost/dungeon-agent:0.0.3-opencode-2.1.2 /usr/lib/node_modules/dungeon-agent/verify.cjs --path
+podman history --no-trunc localhost/dungeon-agent:0.0.3-opencode-2.1.2
 ```
 
 Pull the exact `FROM` digest first if it is not cached. No registry publication is needed. `verify.cjs` compares all three agent CLI outputs against the manifest, then, from the final non-root runtime PATH, checks Neovim, rustc, and Cargo versions, exact image-owned paths, root ownership, non-writability, and `HOME=/sandbox`. The final check removes its transient guest cache, Cargo state, logs, and helper paths; it does not leave a Codex session or auth state in the image. Runtime agent links target vendor-declared binaries directly, not pnpm's location-dependent shell shims.
@@ -78,4 +78,4 @@ persistence are [NOT TESTABLE until Issue #11](https://github.com/Dark-Roast-Cyb
 - Official registry integrity pins bytes, not vendor trust or absence of vulnerabilities. This build does not independently verify registry provenance attestations or reproduce vendor native binaries from source.
 - OpenCode's installer selects its CPU-specific binary at build time. The local build does not establish portability to older CPUs.
 - Guest users can download their own tools into writable state; the image's root-owned install is a reproducible starting contract, not a prohibition on guest execution.
-- Do not change `dungeon init` defaults until GHCR naming, signing/provenance, release tags, immutable digest handling, and CI publication permissions are separately approved.
+- The local source-only `init` default is not a published distribution contract. Do not publish or promote the image as a cross-platform default until GHCR naming, signing/provenance, release tags, immutable digest handling, base security review, and CI publication permissions are separately approved.

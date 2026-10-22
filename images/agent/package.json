@@ -4,7 +4,7 @@
   "packageManager": "pnpm@10.33.0",
   "dependencies": {
     "@anthropic-ai/claude-code": "2.1.267",
-    "@opencode/cli": "2.0.14",
+    "@opencode/cli": "2.1.2",
     "@openai/codex": "0.156.1"
   },
   "imageTools": {

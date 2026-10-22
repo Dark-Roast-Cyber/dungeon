@@ -280,7 +280,7 @@ mod private {
         file.try_lock().map_err(|_| {
             Error::refusal(
                 crate::ErrorCode::Busy,
-                "another upload/export owns the transfer lock; retry explicitly",
+                "another environment operation owns the transfer lock; retry explicitly",
             )
         })?;
         Ok(file)

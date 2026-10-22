@@ -1057,7 +1057,7 @@ fn selected_config(enable_live: bool) -> &'static str {
 fn existing_mode(text: &str, enable_live: bool) -> Result<bool> {
     match text {
         CONFIG if enable_live => Err(Error::new(
-            "existing copy gateway cannot be enabled by setup: safe migration is blocked pending maintenance/concurrency and recovery validation. Keep copy mode; inspect the migration gate in docs/configuration.md. No gateway restart or state change was attempted",
+            "existing copy-only gateway cannot be enabled by setup. Use `dungeon setup --copy-only` to verify it and `dungeon init --project-transfer copy` for new projects, or provision a fresh bind-capable gateway after explicit cleanup. No gateway restart or state change was attempted",
         )),
         CONFIG => Ok(false),
         LIVE_CONFIG => Ok(true),
@@ -1353,7 +1353,7 @@ fn configure_with_output(
         tools.podman_version
     );
     println!(
-        "Next: review a private project configuration; generated/default project transfer remains copy."
+        "Next: review a private project configuration; new projects default to a single live read/write project mount. Use init --project-transfer copy to opt out."
     );
     Ok(0)
 }
@@ -1374,8 +1374,13 @@ fn print_capability(live: bool, dry_run: bool, existing: bool) {
         }
     );
     println!(
-        "Gateway capability ceiling only; no project mounts, sandbox creation, upload, policy widening or project configuration changes. Copy remains the generated default. Live is experimental."
+        "Gateway capability ceiling only; no project mounts, sandbox creation, upload, policy widening or project configuration changes. New projects default to a reviewed single-project live mount; existing private bindings are unchanged."
     );
+    if !live {
+        println!(
+            "This copy-only gateway cannot create new default-live projects; initialize them with --project-transfer copy or explicitly provision a fresh bind-capable gateway."
+        );
+    }
 }
 
 fn verify_health(tools: &Tools, attempts: usize) -> Result<()> {
@@ -1642,7 +1647,7 @@ esac
                 f.run(true, dry)
                     .unwrap_err()
                     .to_string()
-                    .contains("safe migration is blocked")
+                    .contains("copy-only gateway cannot be enabled")
             );
         }
         assert_eq!(paths.each_ref().map(|p| fs::read(p).unwrap()), before);

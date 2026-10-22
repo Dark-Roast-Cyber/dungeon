@@ -624,7 +624,7 @@ mod linux {
         let compatible =
             local && bind.is_some_and(|b| b.enabled && b.mapping) && healthy && socket_ok;
         report.add("keep_id_mapping", if !local || mapping.is_none() { "unknown" } else if mapping == Some(true) { "healthy" } else { "incompatible" }, live && mapping != Some(true), "Live requires Podman driver userns=keep-id:uid=998,gid=998; the gateway container's own user namespace is not this setting.", "Review the dedicated live gateway recipe in docs/live-validation.md. Doctor never changes user namespaces.");
-        report.add("live_bind", bind_state(live, compatible, bind.is_some_and(|b| !b.enabled), healthy), live && !compatible, "Recognized local gateway configuration observation only; no bind, writeability or containment test is performed.", "Copy remains the generated default. Live needs explicit reviewed gateway capability and mapping; remote settings are unknown, not inferred. No automatic migration.");
+        report.add("live_bind", bind_state(live, compatible, bind.is_some_and(|b| !b.enabled), healthy), live && !compatible, "Recognized local gateway configuration observation only; no bind, writeability or containment test is performed.", "New projects default to a reviewed live mount on a compatible gateway. Choose --project-transfer copy for a copy-only gateway; no automatic migration or remote inference.");
     }
 
     fn safe_root(path: &Path, excluded: &[&Path]) -> bool {

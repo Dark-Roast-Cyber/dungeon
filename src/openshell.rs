@@ -21,6 +21,13 @@ pub(crate) use diagnostics::run as doctor;
 mod owned;
 
 #[cfg(target_os = "linux")]
+#[path = "remote.rs"]
+mod remote;
+
+#[cfg(target_os = "linux")]
+pub(crate) use remote::attach_opencode;
+
+#[cfg(target_os = "linux")]
 #[path = "setup.rs"]
 mod local_setup;
 
@@ -194,7 +201,7 @@ impl<'a> Runtime<'a> {
                     ))?,
                 },
                 Phase::Stopped => {
-                    self.start()?;
+                    self.start_locked()?;
                     self.output.message(format_args!(
                         "Environment Ready; existing environment resumed (no upload)."
                     ))?;
@@ -214,6 +221,12 @@ impl<'a> Runtime<'a> {
 
     pub(crate) fn start(&self) -> Result<i32> {
         crate::imports::verify(self.config)?;
+        let transfer = export::TransferGuard::environment(self.config)?;
+        transfer.verify_environment(self.config)?;
+        self.start_locked()
+    }
+
+    fn start_locked(&self) -> Result<i32> {
         match Self::phase(&self.checked(false, true)?)? {
             Phase::Ready => Ok(0),
             Phase::Stopped => {
@@ -253,6 +266,65 @@ impl<'a> Runtime<'a> {
         }
         Ok(0)
     }
+
+    pub(crate) fn inspect_for_destroy(&self) -> Result<Value> {
+        self.checked(false, false)
+    }
+
+    pub(crate) fn destroy(&self) -> Result<i32> {
+        let transfer = export::TransferGuard::environment(self.config)?;
+        let _imports = crate::imports::cleanup_lock(self.config)?;
+        transfer.verify_environment(self.config)?;
+        let state_path = self.config.state_path();
+        let baseline_path = self.config.baseline_path();
+        let mut baseline_present = false;
+        for path in [&state_path, &baseline_path] {
+            match fs::symlink_metadata(path) {
+                Ok(meta) if meta.file_type().is_file() => {
+                    if path == &baseline_path {
+                        baseline_present = true;
+                    }
+                }
+                Ok(_) => {
+                    return Err(Error::new(
+                        "private runtime or baseline path is not a regular file; inspect before deletion",
+                    ));
+                }
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::NotFound && path == &baseline_path => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let remote = self.checked(false, false)?;
+        if Self::phase(&remote)? != Phase::Stopped {
+            return Err(Error::new(
+                "sandbox is no longer Stopped; refusing deletion",
+            ));
+        }
+        transfer.verify_environment(self.config)?;
+        let code = self.lifecycle_command("delete")?;
+        if code != 0 {
+            return Err(Error::new(format!(
+                "sandbox delete failed (exit {code}); runtime binding retained; inspect the gateway"
+            )));
+        }
+        if baseline_present {
+            fs::remove_file(&baseline_path).map_err(|error| {
+                Error::new(format!(
+                    "sandbox deleted but baseline removal failed: {error}; inspect private state"
+                ))
+            })?;
+        }
+        fs::remove_file(&state_path).map_err(|error| {
+            Error::new(format!(
+                "sandbox deleted but runtime binding removal failed: {error}; inspect private state"
+            ))
+        })?;
+        #[cfg(unix)]
+        fs::File::open(self.config.path.parent().unwrap())?.sync_all()?;
+        self.output.message(format_args!("Sandbox deleted. Private project configuration retained; next up creates a new environment."))?;
+        Ok(0)
+    }
     pub(crate) fn new(config: &'a Config) -> Result<Self> {
         let env = host_environment(Some(&config.values.project))?;
         let binary =
@@ -285,16 +357,20 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn get(&self) -> Result<Value> {
-        let value = crate::config::read_json_text(&self.capture(
-            &[
-                "sandbox".into(),
-                "get".into(),
-                self.config.values.name.clone(),
-                "--output".into(),
-                "json".into(),
-            ],
-            true,
-        )?)?;
+        let value = crate::config::read_json_text(
+            &self
+                .capture(
+                    &[
+                        "sandbox".into(),
+                        "get".into(),
+                        self.config.values.name.clone(),
+                        "--output".into(),
+                        "json".into(),
+                    ],
+                    true,
+                )
+                .map_err(|error| self.gateway_hint(error))?,
+        )?;
         if !value.is_object() {
             return Err(Error::new("unexpected OpenShell sandbox response"));
         }
@@ -333,7 +409,8 @@ impl<'a> Runtime<'a> {
         write_new(&policy_path, &self.config.policy)?;
 
         self.output.mutating();
-        self.capture(&create_arguments(self.config, &policy_path), true)?;
+        self.capture(&create_arguments(self.config, &policy_path), true)
+            .map_err(|error| self.gateway_hint(error))?;
 
         let remote = self.get()?;
         self.check_identity(&remote)?;
@@ -374,7 +451,7 @@ impl<'a> Runtime<'a> {
                 self.config.values.name
             ))?,
             ProjectTransfer::Live => self.output.message(format_args!(
-                "Created {} with the configured live project mount request. Live transfer has recorded Fedora/OpenShell 0.0.116/rootless-Podman validation only; default-mode promotion remains explicit.",
+                "Created {} with the configured live project mount request. Guest writes reach the selected host project immediately; runtime validation is combination-specific.",
                 self.config.values.name
             ))?,
         }
@@ -599,6 +676,21 @@ impl<'a> Runtime<'a> {
         }
         String::from_utf8(output.stdout)
             .map_err(|_| Error::new("OpenShell returned non-UTF-8 structured output"))
+    }
+
+    fn gateway_hint(&self, error: Error) -> Error {
+        if self.config.values.gateway == "dungeon-local" {
+            if self.config.values.project_transfer == ProjectTransfer::Live {
+                return Error::new(format!(
+                    "{error}; a live project requires a fresh bind-capable dungeon-local gateway. Run `dungeon doctor` and `dungeon setup --dry-run`; an existing copy-only gateway cannot be migrated automatically"
+                ));
+            }
+            Error::new(format!(
+                "{error}; run `dungeon doctor` to check the local gateway (doctor never starts it)"
+            ))
+        } else {
+            error
+        }
     }
 
     fn status(&self, args: &[String]) -> Result<i32> {
@@ -996,6 +1088,21 @@ esac
                 .filter(|line| line.contains(&format!("sandbox {action} ")))
                 .count()
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_local_failure_points_to_capability_without_migrating_gateway() {
+        let mut fixture = Fixture::new();
+        fixture.config.values.gateway = "dungeon-local".into();
+        fixture.config.values.project_transfer = ProjectTransfer::Live;
+        let hint = fixture
+            .runtime()
+            .gateway_hint(Error::new("OpenShell failed (exit 1)"))
+            .to_string();
+        assert!(hint.contains("bind-capable dungeon-local gateway"));
+        assert!(hint.contains("cannot be migrated automatically"));
+        assert!(!fixture.root.path().join("calls").exists());
     }
 
     #[cfg(unix)]

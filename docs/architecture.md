@@ -94,9 +94,10 @@ Dungeon must not silently install privileged dependencies, overwrite incompatibl
 
 Setup health is not containment attestation.
 
-Fresh `setup --enable-live` is an experimental explicit gateway-capability opt-in,
-not project mount authority or default promotion. Plain setup creates copy or
-verifies an exact existing copy/live mode without changing it. Migration is
+Fresh plain `setup` creates a bind-capable gateway; `--copy-only` explicitly
+chooses a gateway without project bind capability. Neither is project mount
+authority. Plain setup verifies an exact existing live mode without changing it;
+an exact existing copy-only gateway requires `--copy-only` verification. Migration is
 blocked; setup never restarts an existing gateway. Fresh creators serialize with
 a private setup file lock, not a runtime daemon or cross-client maintenance lease.
 Dry-run creates neither state nor lock and queries only established default
@@ -121,9 +122,16 @@ credential/auth inspection or dynamic integration/containment testing occurs.
 Service attachment reuses OpenShell's foreground gRPC forwarding, not a new
 Dungeon server or proxy. `forward` checks the existing Ready binding and policy
 before opening host loopback to a guest-loopback service. It neither starts the
-service nor manages its authentication. This first slice has no automatic
-serve/attach process manager; the full native-client workflow must pass before
-hiding that lifecycle.
+service nor manages its authentication. For the reviewed OpenCode path, a
+foreground `dungeon attach` (also the interactive default for configured
+OpenCode) starts the guest service, holds its generated password only in memory,
+forwards guest loopback to an available host-loopback port, verifies 401 without
+authentication and matching authenticated server version, then runs the native
+host UI. On exit it sends Ctrl-C through the service PTY and checks shutdown
+before closing the forward. If cleanup is unconfirmed, a simple prompt offers
+an explicitly confirmed sandbox stop or leaves it running; no automatic
+gateway/project deletion. `run opencode` remains the guest TUI. There is no
+daemon, password store, or cross-vendor remote abstraction.
 
 Explicit `exec --owned` owns only one foreground guest process group. It uses
 fixed guest Node code with a live group guardian and an outer status/cleanup
@@ -158,7 +166,7 @@ Initialization does not execute project code or contact a runtime. Creation snap
 
 Reuse verifies identity and policy drift. These checks are not kernel/image attestation and do not prove provider content stayed unchanged.
 
-The lifecycle remains `up`, `run`, and `down` with one explicit config and one Runtime. In `copy` mode, first `up` creates the bound sandbox and uploads the project; resumed `up` starts it without upload, and is a no-op when it is already Ready. In the explicit experimental `live` candidate, creation derives exactly one read-write bind request from the canonical configured project to `/sandbox/project`; first and resumed `up` never upload. `run` starts a stopped bound sandbox when needed without upload in either mode. `down` stops it and retains environment state.
+The lifecycle remains `up`, `run`, and `down` with one explicit config and one Runtime. New CLI bindings select `live` after operator review: creation derives exactly one read-write bind request from the canonical configured project to `/sandbox/project`; first and resumed `up` never upload. Explicit `copy` mode creates the bound sandbox and uploads the project once; resumed `up` starts it without upload, and is a no-op when already Ready. Existing configs omitting the transfer field retain copy semantics. `run` starts a stopped bound sandbox without upload in either mode. `down` stops it and retains environment state.
 
 `upload --yes` and `export` remain copy-mode operations. Upload is the operator's overwrite-capable refresh/recovery action. Export is a Ready-only operation for the bound sandbox on OpenShell 0.0.116: it downloads and stages the guest project, then presents a deterministic three-way diff against the last successful upload baseline and current host project. It applies only after interactive typed `yes` or explicit `--yes`. Both commands refuse in live mode before contacting OpenShell.
 
@@ -168,7 +176,7 @@ Low-friction project binding may remove repeated `--config` ceremony, but it mus
 
 | Data | Owner |
 | --- | --- |
-| Host project | User-owned; copy is the generated default with reviewed upload/export; live is an explicit experimental read-write workspace mount |
+| Host project | User-owned; new CLI bindings default to a reviewed single-project live mount; explicit/legacy copy uses upload/export |
 | Guest project | Backend-owned explicit copy in the copy mode; the live workspace mount replaces it in the live mode |
 | Agent sessions | Guest agent-owned |
 | Config/runtime binding | Private host directory |
@@ -277,7 +285,7 @@ The contract protects mounted **contents**, not their guest pathname. Native pro
 
 The selected digest enters existing config/runtime identity; source contents never enter identity dynamically. `plan` observes drift without refreshing. Staging refuses any existing runtime binding, including stopped or invalid state; refreshing an active environment requires a separately initialized environment. Stage/create share a narrow native file lock and reread authority. This is not general lifecycle serialization or crash/power-loss durability. Missing/tampered artifacts block work launch, not identity/policy checks used for status, stop and owned cleanup.
 
-Separately, the live read-write workspace transfer is implemented as an explicit experimental candidate. It derives one bind mount from the canonical private-config project path to `/sandbox/project`; users cannot supply raw driver JSON or arbitrary mount lists. The workspace remains the only requested writable host path, imports remain a separate read-only snapshot lifecycle, and credentials, SSH keys, and engine sockets are never implicitly mounted. The copied upload/export path remains supported. Validation is limited to the recorded OpenShell 0.0.116/rootless-Podman/Fedora combinations; live still does not become the generated/default mode without an explicit promotion decision.
+Separately, live read-write workspace transfer derives one bind mount from the canonical private-config project path to `/sandbox/project`; users cannot supply raw driver JSON or arbitrary mount lists. New CLI bindings request it only after operator review; legacy omitted fields stay copy. The workspace remains the only requested writable host path, imports remain a separate read-only snapshot lifecycle, and credentials, SSH keys, and engine sockets are never implicitly mounted. The copied upload/export path remains supported. Validation is limited to the recorded OpenShell 0.0.116/rootless-Podman/Fedora combinations; default promotion does not broaden that evidence.
 
 - The host source path is selected explicitly from private Dungeon configuration.
 - Snapshot preflight rejects special files, symlinks, hardlinks, unsafe ownership/permissions and known credential/native-state names; limits bound depth, entries and bytes.
