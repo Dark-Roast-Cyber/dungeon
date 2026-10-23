@@ -303,6 +303,165 @@ no new native claim follows from the staged-only source run. Use a feature PR,
 wait for hosted CI, merge without bypassing checks, then remove only the task
 branch/staged export and preserve unrelated working files/evidence/services.
 
+### User smoke-test follow-up: provider authentication (2026-10-22)
+
+User installed merged PR #41 from a clean worktree and built the corrected image.
+Their transcript shows approved copy capture (including legacy auth.json and
+OpenCode JSON config), successful sandbox creation/upload and attached host UI,
+but the model picker reports no available items. This is user-observed behavior,
+not independent provider/discovery validation. File capture/startup did not meet
+the original signed-in-provider reuse goal. OpenShell `providers: []` is a
+separate mechanism, not proof about OpenCode account discovery. Do not inspect
+the user's real config, credential snapshots or native databases to diagnose it.
+
+Pinned upstream 2.1.2 exposes native credential list/create/activate APIs. Proposed
+next contract: an explicit, reviewed one-way import into guest-owned credentials,
+not database/session copying or ongoing synchronization. Develop against synthetic
+credentials first. Metadata review must precede secret access; the credential
+list endpoint returns **all secret values**, so transfer selection is not a
+promise of selected-only host access. Do not invoke it against real host state
+without separate approval. Resolve API-key, OAuth refresh/rotation and external
+credential-reference semantics separately; external references are not portable
+secrets. Never overwrite guest credentials or host state implicitly, log secrets,
+send them on argv, or widen network policy. Credential-inclusive default intent
+remains; selecting a safe native handoff contract needs review before implementation.
+Sources: pinned `packages/protocol/src/groups/credential.ts`,
+`packages/schema/src/credential.ts` and `packages/server/src/handlers/credential.ts`
+in anomalyco/opencode v2.1.2. No host credential API or running sandbox was touched.
+
+### Future requirement: one-command update
+
+User requests `dungeon update` as the future single-command update path; it is
+not implemented by this follow-up. It should review/update the CLI and compatible
+reviewed agent image together, detect matching host-client requirements, verify
+artifact versions/integrity, and preserve a rollback path. Source installs must
+not build unrelated dirty checkout content. No implicit database migration,
+credential transfer, gateway restart, running-sandbox replacement or bound-config
+rewriting. Existing guest sessions/data must remain intact. Define update versus
+explicit environment replacement before adding runtime behavior. OpenCode's UI
+`/update` updates the vendor tool, not Dungeon's CLI/image contract; it must not
+be presented as the solution for coordinated Dungeon upgrades.
+
+### Accepted direction: sign in once, independent project environments
+
+User approved development of user-scoped sign-in after reconsidering credential
+import. The shared identity must survive project `up`/`down` and deletion, work
+across directories for the selected compatible harness/account, renew OAuth
+without routine prompts when safe, and remain restrictable for organizations.
+Bare `dungeon` should approach native-harness convenience after initial enrollment.
+This supersedes the proposed host-account import as the primary path, not the
+existing binding/import contract. Configuration imports and authentication remain
+separate; do not silently alter current bindings or widen their credentials.
+
+Development authority does not include reading real credentials, native host
+databases, altering existing services/sandboxes, installation or publication.
+Preserve the ten unrelated dirty machine/socket paths. HEAD is merged `f19499e`.
+User requested independent read-only design challenges: Claude adapter
+`ses_e99579d29ffeDllDKFqytq20bC` (completed), adversarial
+`ses_e99575217ffeiEDAP3EZJauoHh` (completed). No child edits authorized.
+
+Source investigation of pinned OpenShell0.0.116 finds gateway refresh state,
+rotated-secret persistence/recovery and endpoint-scoped placeholder resolution.
+However `e2e/rust/tests/credential_gating.rs` explicitly refuses credentialed L4
+and `tls: skip` endpoints unless an uninspected-credentials escape hatch is used.
+Current Dungeon starter endpoints are L4; attaching a provider alone cannot be
+treated as a secure functional broker. Any explicit REST inspection contract
+must disclose gateway access to request contents and remain policy-reviewed;
+never enable uninspected credentials to hide this incompatibility.
+
+Native subscription adapters are another gate: pinned OpenCode's OpenAI plugin
+switches endpoint, account headers, model eligibility and refresh behavior based
+on a typed OAuth credential. An API-key/environment placeholder alone does not
+prove ChatGPT subscription compatibility. OpenShell's generic refresh support is
+not a native enrollment flow, and no real endpoint/provider API has been invoked.
+
+Adversarial review challenges accepted for investigation: no cloned refresh
+tokens/shared writable auth trees, no enrollment-only org policy checks, no
+mutable default-account retargeting of existing bindings, no implicit provider
+attachment to legacy or machine configs, no renewal version in sandbox fingerprint,
+no claim that masking tokens prevents account spend/abuse. Its claim that a
+hostile repository directly supplies private dungeon.json is outside the current
+authority model; repository config remains non-authoritative. Same-user host
+compromise is outside the container isolation claim, not solved by local brokers.
+
+Next development gate: prove a real pinned OpenCode model request using only a
+synthetic environment credential marker before adding user-facing shared-login
+commands or automatic grants. Separate this harness-compatibility probe from
+native OpenShell substitution/rotation/revocation acceptance. Do not label a
+mock proxy or metadata-only provider registration as shared sign-in completion.
+
+Claude review (native external session `ffcb2e68-291f-4882-9ae6-2dd7ef4eb6ba`,
+requested Opus5.5/xhigh; reported canonical Opus5.5) also recommends reusing the
+gateway, not adding a Dungeon broker. It challenges credential-inclusive legacy
+auth imports as a poor default for a fresh-login architecture; do not change the
+approved default silently. It recommends proving opaque bearer-token support
+first; Claude subscription setup-token is a candidate, not a validated path.
+Both reviews reject claiming generic OAuth sharing from provider registration.
+They differ on when to build an organization ceiling: the parent will not add
+speculative enterprise machinery before proving the credential path, and will
+not ship automatic shared-account grants until enforceable restrictions exist.
+
+Implementation started with `scripts/probe-opencode-identity.cjs`: actual pinned
+OpenCode, network-disabled throwaway image, loopback synthetic model endpoint,
+two independent guest HOME/state roots and a synthetic environment credential
+marker only. Three native runs must return the model proof and discover the env
+connection. This is a compatibility probe, not a second broker or production
+credential storage. No shared-login CLI/options are introduced prematurely.
+
+Completed synthetic gateway gate: a fresh disposable FCOS QEMU/KVM fixture used
+only trusted CLI binaries, the user-built
+reviewed-image variant `3947cf4ee2026ad960f3b641656046439708827160527382417dda10581f9dbd`,
+synthetic local model/token fixtures, independent HOME/Podman store/loopback and a
+fresh gateway. Scripts/logs `/tmp/opencode/dungeon-shared-auth-*`; protected host
+baseline `/tmp/opencode/dungeon-shared-auth-host-before.txt`. No real credentials
+or runtime inputs. Goal: measure actual OpenShell substitution and single-owner
+refresh before production account management, not infer it from the mock probe.
+Four fixture sandboxes, synthetic provider/profile, model/token containers,
+gateway/network, QEMU/listener and owned disks/keys/archive are removed. Protected
+service IDs/states/start times matched; the user's host image/bindings and ten
+unrelated dirty paths are preserved. Evidence:
+`/tmp/opencode/dungeon-shared-auth-evidence-20261022`.
+
+Measured: native two-project model calls with opaque markers; two gateway-owned
+manual rotations consuming replacement refresh material; existing long-lived
+OpenCode service still worked; same-ID down/up and deletion/new-project reuse;
+opted-out sandbox guessed marker denied; bounded guest-readable file scan found
+no exact synthetic tokens (skips explicitly recorded). Attached provider delete
+refused; explicit detach-all then delete prevented subsequent model calls, with
+observed 61-second command completion, not instantaneous revocation proof.
+
+Final adversarial evidence review accepted post-rotation resolution after reading
+the fixture's strict latest-generation predicate: old access values are rejected
+even before their declared expiry. This is not scheduled/vendor OAuth renewal.
+The resume record is limited to successful down/up commands and identical Ready
+identity; a separate intermediate Stopped observation was not retained. Fixture
+sources, native lifecycle script/log and these limits are in the evidence manifest.
+
+Failures retained: wrong token fixture namespace initially; static-to-refresh
+live conversion had transient denied calls before supervisor propagation;
+scan-prefix false positive in its own test code; initial probe scan bound too
+small for vendor temporary binaries. Corrected assertions passed, not erased.
+179 Rust/eight Node tests, fmt and Clippy passed on the combined tree. No new
+production shared-signin command, credential storage, auto grants or org ceiling.
+
+Next implementation boundaries, not implied existing features:
+1. Complete inspected HTTPS/CA-trust and endpoint/body mismatch probes before
+   offering shared opaque bearer/API-key enrollment. Finish refresh configuration
+   before giving a sandbox its stable handles; verify automatic worker renewal,
+   concurrency and crash/revocation semantics separately.
+2. Native subscription OAuth needs provider-specific protocol/adapter evidence;
+   OpenCode typed OAuth affects endpoints/models/headers. Do not duplicate refresh
+   grants or quietly require subscription users to use API keys instead.
+3. Implement explicit enrollment/account binding first, with per-project opt-out
+   and immutable account identity; reserve automatic default grants until a real
+   admin-controlled organization ceiling covers create/reuse/human/machine paths.
+   A same-user editable file cannot enforce policy against that host user or
+   clients calling OpenShell directly. No speculative broker/framework added.
+4. Preserve credential-inclusive config behavior until its default is explicitly
+   revisited; fresh identity architecture does not silently migrate existing
+   imports. No install, commit, push, image publication or existing-service
+   mutation is part of this development grant.
+
 OpenCode containment was inspected as inspiration for XDG paths and read-only
 configuration, not reused for its auth/session database seeding or host hooks.
 Version-matched OpenCode 2.1.2 source places current credentials in its database;

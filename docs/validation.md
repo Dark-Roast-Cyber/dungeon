@@ -153,6 +153,74 @@ commit's source-check evidence; the native records above remain tied to their
 combined-checkout binary/source hashes, not a fresh staged-only native run.
 Logs: `/tmp/opencode/dungeon-harness-staged-{fmt,clippy,test,node}.log`.
 
+## Shared identity compatibility (2026-10-22, development gate)
+
+**Not a shipped sign-in feature.** Development adds a reproducible native OpenCode
+environment-marker probe and guard tests, plus a proposed user-scoped identity
+contract in architecture/PLAN. No production credential owner, enrollment UI,
+automatic account grants or organization ceiling has been added. Claude and
+adversarial reviews challenged the design and probe; fixes added an opted-out
+native run, revisioned marker, isolated TMPDIR, bounded persistence scanning and
+sanitized failure codes. Legacy credential-import defaults were not changed.
+
+`scripts/probe-opencode-identity.cjs` passed against actual OpenCode2.1.2 in a
+network-disabled throwaway image. Native model calls for projects A/B/A used
+independent synthetic HOME roots and an opaque environment marker with no stored
+credential. An opted-out run could not replay it; the synthetic HOME/project/TMPDIR
+tree did not retain the marker. This uses a loopback fake model, not a real
+provider or OpenShell substitution. Initial scan bounds excluded the vendor's
+large temporary runtime; the final scan streams bounded files with a 1GiB total
+cap rather than dropping that region or claiming the failed check passed.
+
+A separate disposable FCOS44.20260913.3.2 VM (kernel7.2.5-200.fc44.x86_64,
+Enforcing SELinux, rootless Podman5.8.4, OpenShell0.0.116) exercised the actual
+Dungeon/OpenShell boundary. It loaded the user's reviewed-image build
+`3947cf4ee2026ad960f3b641656046439708827160527382417dda10581f9dbd`
+without modifying the host image or active gateway. Native binary/tool hashes
+are retained with the records below. One explicitly created synthetic provider
+and reviewed **test-only inspected HTTP endpoint** were used, not an automatic
+policy change to ordinary projects.
+
+| Synthetic native gate | Observation |
+| --- | --- |
+| Two project sandboxes | Actual OpenCode model calls succeeded through gateway credential substitution; guest environment held only opaque markers |
+| Refresh ownership | Two manually triggered gateway rotations consumed replacement refresh material; a long-lived OpenCode server made a model call after the second rotation. The fixture accepts only the latest access-token generation, irrespective of declared expiry |
+| Lifecycle | `down`/`up` commands completed with the same Ready identity; no separate Stopped observation is retained for this cycle. Deleting project B and creating C reused the gateway identity without another enrollment |
+| Opt-out | A sandbox without the provider had no credential environment and could not authenticate with a guessed marker |
+| Guest-readable material | Bounded scans of readable regular files in `/sandbox`, `/tmp`, `/etc` found no exact synthetic token values; roughly 51 MB checked per guest, with 2142 skipped symlink/large/unreadable entries explicitly recorded |
+| Revoke | Deleting an attached provider refused; explicit detach from both sandboxes then provider deletion prevented later model calls. The observed 61-second result includes native command delay, not instantaneous revocation |
+
+Important failures/limits retained:
+
+- The first token URL incorrectly addressed gateway-container loopback instead
+  of the fixture host. Rotation failed; a separate disposable loopback token
+  relay in the gateway namespace corrected the fixture. No relaxed production
+  TLS rule or real token endpoint was used.
+- Moving an already-attached static provider into refresh-managed state produced
+  failed calls until supervisor state propagation settled. Do not promise
+  seamless live conversion. Enrollment must finish refresh setup before grants
+  are advertised. Steady-state scheduled refresh/concurrent crash recovery remain
+  separate gates from manually requested rotations.
+- The first file scan matched a synthetic token-prefix string in its own test
+  source. The corrected scan checks exact synthetic values; the false-positive
+  attempt is not counted as credential leakage or a passed gate.
+- HTTPS inspection/CA trust, endpoint-mismatch/body-rewrite denial, real-provider
+  login/inference, subscription OAuth adapters, browser callback routing,
+  account switching and organization-enforced ceilings remain unvalidated. No
+  host native auth/session state or real provider credentials were read.
+- Gateway detachment/deletion is not upstream provider revocation or proof that
+  every previously opened stream is terminated. Placeholder opacity prevents
+  token extraction on the tested route, not account abuse/spend through it.
+
+All four test sandboxes, synthetic provider/profile, model/token fixtures and
+the disposable gateway/network were removed. Native server absence was checked;
+QEMU exited/reaped, SSH closed, and keys/disks/archive were removed. Protected
+host service IDs/states/start times matched before/after; unrelated changes and
+the user's test image/bindings stayed untouched. Formatting, locked all-target
+warnings-denied Clippy, 179 combined-tree locked Rust tests and eight focused Node
+tests passed; guard tests are registered in CI but no hosted run is claimed.
+Evidence: `/tmp/opencode/dungeon-shared-auth-evidence-20261022`.
+
 ## Version policy
 
 - Rust is pinned in `rust-toolchain.toml` to 1.98.1.
