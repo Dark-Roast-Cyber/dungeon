@@ -2,6 +2,157 @@
 
 CI checks formatting, Clippy, locked Rust tests, release compilation, CLI version execution, npm launcher behavior, distribution version synchronization, native archive creation, and full npm package assembly on explicit supported runners.
 
+## OpenCode harness configuration (source-only development, 2026-10-21)
+
+Synthetic actual-CLI fixtures exercise read-only native file selection,
+credential-inclusive scope warnings, conservative provider-auth exclusions,
+skipping forbidden inputs before opening, link/special-file/permission refusal,
+copy approval/private storage, snapshot integrity and frozen source drift,
+unbound reload, bound-refresh refusal and unchanged legacy behavior. Large valid
+inventories must refuse before approval/capture at the combined 48 KiB mount
+request cap, rather than failing at subprocess launch with `E2BIG`.
+The existing Neovim stage path also checks its candidate digest against the
+combined cap before approval/publication, preserving a loadable configuration
+when a near-budget harness selection leaves insufficient space.
+
+On the combined working tree, formatting, all-target warnings-denied Clippy,
+**177 locked Rust tests** (128 unit + 49 integration), three npm launcher tests
+and `git diff --check` passed. Tests used checkout-local `TMPDIR`; launcher tests
+used host Node 22.22.2, not the supported Node 24 gate. Independent source review
+found no remaining source-level blocker after two mount-budget corrections;
+that is not native acceptance. Final logs and the parent-verified runtime/test
+source hash manifest are under `/tmp/opencode/dungeon-harness-*`. Unrelated
+machine/socket edits remain in this working tree; these are not clean-commit
+or published-artifact results. Other platform builds/runtime were not tested.
+
+Those synthetic checks do not establish native acceptance. The separately
+authorized gate below found blockers. Codex and Claude Code configuration sharing
+remain next, not implemented capabilities.
+
+### Authorized native gate (2026-10-22): blocked
+
+The test used an isolated QEMU/KVM **validation host**, not another Dungeon
+backend: Fedora CoreOS 44.20260913.3.2, kernel 7.2.5-200.fc44.x86_64, SELinux
+Enforcing, rootless Podman 5.8.4 and OpenShell 0.0.116. Its fresh gateway, HOME,
+store and credentials were disposable/synthetic. Release binary SHA-256:
+`a7e4628990178e8a5e9cb5a6b3c6794125632363c5c794509a6826524be24d79`.
+The reviewed OpenCode 2.1.2 image was the unchanged `bd446d0373bc…` candidate
+recorded above. No real host configuration or credentials were inputs.
+
+| Image / harness mode | Mounted file access | OpenCode result |
+| --- | --- | --- |
+| Reviewed image / original-source read-only | Reads `EACCES`; mounts `ro`, chmod `EROFS`; original labels unchanged | Cannot create guest log/state paths |
+| Reviewed image / copy | Files readable; writes/chmod refused; original labels unchanged | Same guest-state failure |
+| Disposable path-ready image / copy | Readable read-only contents; guest data/state/cache writable | Config loaded and local plugin executed; provider auth reuse not established |
+
+Two blockers were independently reviewed:
+
+- Original sources retained ordinary `config_home_t` / `data_home_t` labels and
+  were inaccessible from `container_t`. SELinux incompatibility is strongly
+  indicated; the retained logs do not include an AVC proving the precise denial.
+  No original-source relabeling, disabled enforcement or automatic copy fallback
+  was used. This does **not** validate the proposed read-only-original default.
+- Leaf mounts created missing guest `.config` / `.local` parents as UID0 mode0755.
+  OpenCode failed `mkdir /sandbox/.local/share/opencode/log`. The production image
+  recipe removes these directories after verification. A separate offline image
+  variant precreated native config/data/state/cache directories as UID998 mode0700:
+  `7b9de051b19f01e5b5a6ce946795aae85f7e57d6d9e01b6d1b5e3e074839f144`.
+  It was a diagnostic prototype, not an amended production image or new default.
+
+With that variant and explicitly reviewed copy mode, a leased native server
+returned 401 without its in-memory password, loaded the fixture config, reported
+the local plugin **active**, and wrote its guest proof marker. All five imported
+file mounts were `ro`; native private state was writable. A deliberate source edit
+did not refresh the snapshot; bound `reload` refused without changing config.
+Same-ID stop/start preserved a guest marker. The controlled source edit was
+restored; final original hashes, ownership/modes and labels matched the baseline.
+The checked `/var/tmp` write remained denied and engine-socket paths were absent.
+
+Provider authentication is a **separate unresolved gate**: the synthetic legacy
+`auth.json` was readable, but a fresh guest's credential endpoint returned 200
+with an empty list even after model readiness and plugin activation. File
+visibility is not proof of usable authentication. Current host database auth was
+never read/shared; OAuth refresh, model inference and native theme/UI behavior
+were not tested. Initial one-shot plugin queries returned before activation;
+only the later long-lived server establishes plugin execution. Doctor initially
+refused HOME-as-cwd roots; from the fixture project it reported healthy while
+the reviewed image still could not launch OpenCode. Health is not usability proof.
+
+All four fixture sandboxes were observed Stopped and destroyed; their gateway
+and network were removed. The leased service exited and a later guest process
+check found zero remaining `opencode serve` processes. QEMU exited/reaped, its
+SSH listener closed, and synthetic keys, disks and image archive were removed.
+The protected real host gateway/project container IDs, states and start times
+matched before/after. No host installation, production image/default change,
+policy widening, commit or publication occurred. Parent-asserted sanitized
+records, hashes, prototype recipe and cleanup proof:
+`/tmp/opencode/dungeon-harness-native-evidence-20261022`.
+
+### Blocker corrections (2026-10-22, source checkout)
+
+The recipe now creates empty UID/GID998 mode0700 OpenCode directories/parents
+after tool-verification cleanup. A separate verifier checks the final layout
+without starting a harness. Nonempty original-source work now refuses enforcing
+SELinux before Runtime construction; unreadable/malformed enforcement state also
+refuses. This deliberately rejects custom compatible labels too. Copy remains
+explicit; no original relabeling, enforcement change or automatic fallback.
+Empty/copy/disabled selections and identity-checked status/stop/cleanup retain
+their independent paths. Saving/reloading selections and offline plans still work.
+The CLI warning no longer implies proven legacy-auth migration.
+
+Formatting, warnings-denied all-target locked Clippy, **179 locked Rust tests**
+(129 unit + 50 integration), three launcher tests and three synthetic image-layout
+tests passed in the combined dirty checkout. An initial Clippy run caught the
+test module's placement; it was moved, then the final check passed. Rust fixtures
+used checkout-local `TMPDIR`; launcher/layout tests used Node22, not the supported
+Node24 release gate. Independent incremental review found no source defect;
+native corrected-image evidence is separately tracked below. The image-layout
+regressions are also registered in the Linux CI quality job; no remote CI run is
+claimed.
+
+The actual recipe built a distinct, unpromoted local test image
+`localhost/dungeon-agent:harness-correction-20261022`, ID
+`b2ac1628e85d8757d932e1fb9c72e66d9d7608df3f6db9ae77fd08b81d2f3005`.
+Its network-disabled tool check and post-cleanup layout check passed during build.
+Fresh disposable native validation passed on the same pinned FCOS/kernel,
+Enforcing SELinux, rootless Podman5.8.4 and OpenShell0.0.116 combination as the
+first gate. It used the actual rebuilt image above and release binary SHA-256
+`8a7ea52ba868264b7777d02ab231d73796313d9acede90bf335b5c44d9107ef4`,
+not the earlier diagnostic prototype.
+
+- Human `up`/`start`/`create` and machine `up` refused original-source access
+  before even an instrumented OpenShell version lookup; config stayed unchanged
+  and no runtime binding appeared. This is enforcement-based refusal, not proof
+  of guest readability on a non-enforcing host.
+- Explicit copy mode reached Ready through native OpenShell. Mounted leaves
+  were readable and read-only; native config/data/state/cache roots were
+  UID/GID998 mode0700 and writable. Original hashes/modes/labels stayed unchanged.
+- A leased OpenCode server returned unauthenticated401, loaded config, reported
+  the local plugin active and wrote its proof marker. All five imports were `ro`.
+  `/var/tmp` writes were denied; checked guest engine-socket paths were absent.
+- Same-ID stop/start preserved private state; bound `reload` refused. The leased
+  service exited normally and a later process check found no remaining server.
+- The fixture sandbox was observed Stopped then destroyed; its gateway/network
+  were removed. QEMU exited/reaped, SSH closed, and synthetic keys/disks/archive
+  were removed. Protected real-host container IDs/states/start times matched.
+
+**Full harness acceptance remains incomplete.** The synthetic legacy file was
+readable but provider credentials were still an empty native list. Original-source
+runtime on non-enforcing hosts, provider inference/refresh and theme/UI behavior
+remain unvalidated. No real host config/auth/database was read. The ordinary image
+tag, installed Dungeon, existing bindings and running services were not changed;
+no commit, publication, policy widening or fallback occurred.
+Sanitized asserted records, raw check logs, source hashes and cleanup proof:
+`/tmp/opencode/dungeon-harness-correction-evidence-20261022`.
+
+Before publication, an index-exported snapshot excluding unrelated machine/socket
+edits passed formatting, all-target warnings-denied locked Clippy, **175 locked
+Rust tests** (128 unit + 47 integration), and all **20 Node tests** covering
+launcher, packaging, owned execution and image layout. This is the selected
+commit's source-check evidence; the native records above remain tied to their
+combined-checkout binary/source hashes, not a fresh staged-only native run.
+Logs: `/tmp/opencode/dungeon-harness-staged-{fmt,clippy,test,node}.log`.
+
 ## Version policy
 
 - Rust is pinned in `rust-toolchain.toml` to 1.98.1.

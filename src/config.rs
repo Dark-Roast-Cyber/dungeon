@@ -62,6 +62,34 @@ pub(crate) struct ConfigDoc {
     pub(crate) providers: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) imports: Vec<Import>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) harness: Option<HarnessConfig>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, clap::ValueEnum, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[value(rename_all = "kebab-case")]
+pub(crate) enum HarnessMode {
+    ReadOnly,
+    Copy,
+    Disabled,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HarnessConfig {
+    pub(crate) agent: Agent,
+    pub(crate) mode: HarnessMode,
+    pub(crate) source: PathBuf,
+    pub(crate) legacy_auth: PathBuf,
+    #[serde(default)]
+    pub(crate) exclude_provider_auth: bool,
+    #[serde(default)]
+    pub(crate) exclude: Vec<String>,
+    #[serde(default)]
+    pub(crate) files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) snapshot: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -232,6 +260,9 @@ pub(crate) fn load_config_data(
             ));
         }
     }
+    if let Some(harness) = &values.harness {
+        crate::imports::harness::validate(harness, &values.project, &path)?;
+    }
     if !valid_image(&values.image) {
         return Err(Error::new(
             "use a registry-qualified OCI image, not a local build path or unqualified name",
@@ -253,13 +284,15 @@ pub(crate) fn load_config_data(
         "policy": policy.clone()
     }))?;
 
-    Ok(Config {
+    let config = Config {
         path,
         values,
         policy,
         policy_path,
         fingerprint,
-    })
+    };
+    crate::openshell::validate_mount_request(&config)?;
+    Ok(config)
 }
 
 fn validate_import(source: &Path) -> Result<()> {
@@ -316,6 +349,7 @@ pub(crate) fn reserved_import_name(name: &std::ffi::OsStr) -> bool {
             | "id_ed25519"
     ) || name == ".env"
         || name.starts_with(".env.")
+        || name.ends_with(".env")
         || name.ends_with(".pem")
         || name.ends_with(".key")
         || name.ends_with(".sqlite")

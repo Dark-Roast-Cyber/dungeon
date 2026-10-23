@@ -6,7 +6,7 @@ Trust the host administrator, Dungeon binary/configuration, OpenShell CLI/gatewa
 
 OpenShell owns filesystem/process/network enforcement. Dungeon requires Landlock `hard_requirement` in accepted policy and refuses inspected audit-only endpoints, but policy readback is not kernel attestation.
 
-Dungeon clears the inherited environment before invoking OpenShell and restores only an explicit allowlist. It does not automatically mount/copy host homes, engine sockets, native agent databases, private keys, or provider secrets.
+Dungeon clears the inherited environment before invoking OpenShell and restores only an explicit allowlist. It does not automatically mount/copy host homes, engine sockets, native agent databases or private keys. Reviewed OpenCode configuration access can expose provider secrets as described below.
 
 `forward` exposes an explicitly selected guest-loopback service on host
 `127.0.0.1` through OpenShell's authenticated transport, after checking bound
@@ -81,6 +81,40 @@ they do not add containment or guarantee final event delivery. See the
 [machine contract](docs/machine.md).
 
 OpenShell providers can grant authority even when raw secrets are brokered. `dungeon auth` starts vendor-owned login inside the guest. Resulting OAuth credentials live in guest-controlled state. Dungeon does not inspect, copy, refresh, escrow, or synchronize them.
+
+New human OpenCode bindings propose read-only access to selected native config
+files, plugins/themes and legacy `auth.json` in their initialization review.
+Existing bindings and machine initialization do not gain access automatically.
+Read-only prevents guest writes to mounted contents, **not reading, using or
+exfiltrating credentials**. Plugins/configuration execute inside the guest with
+its authority. Neither mode scans arbitrary content for secrets.
+
+The source-only first slice derives individual file mounts, never a host home,
+config parent or data-directory mount. Live sources are not relabeled; SELinux
+denial is not permission to disable enforcement. Copy mode captures private
+files after explicit `reload` approval and may relabel only those private copies.
+Excluded and known credential/native-state paths, including all `.env` names,
+are skipped before content reads. Auth exclusion conservatively omits whole
+OpenCode JSON config files that could mix credentials with ordinary settings;
+it cannot sanitize secrets embedded in arbitrary plugin code or other content.
+
+Nonempty original-source imports conservatively refuse enforcing SELinux and
+unknown/unreadable enforcement state before runtime contact; custom labels are
+not an exception. No automatic copy fallback or host relabeling occurs. Empty,
+copy and disabled selections do not require that check. Status/stop/owned cleanup
+remain import-independent; image-owned native parents stay guest-private/writable.
+
+OpenCode 2.1.2 stores current credentials in its native database. That database
+is never mounted, copied, queried or synchronized by this feature. Legacy
+`auth.json` visibility is not current-account sharing or ongoing refresh: the
+fresh native fixture returned an empty credential list despite a readable file.
+Do not infer authentication from a file mount. Read-only auth may
+prevent login refresh, and snapshots may become stale. Live file replacement
+may leave an older inode mounted. `reload` only reselects unbound configuration;
+it refuses any runtime binding and does not restart services, rotate guest
+tokens or write back to the host. Writable guest ancestors still allow pathname
+replacement; this is not trusted-execution control. Native enforcement,
+guest-state writability and authentication remain separate validation gates.
 
 ## Remaining risks
 

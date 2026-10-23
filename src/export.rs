@@ -1121,6 +1121,7 @@ mod tests {
                 agent: Agent::Opencode,
                 providers: vec![],
                 imports: vec![],
+                harness: None,
             },
             policy: starter_policy(),
             fingerprint: "fingerprint".into(),

@@ -52,6 +52,24 @@ Do not update Dungeon, OpenShell, the image, or agent binaries midway through on
 
 ## 2. Create a synthetic project
 
+### Harness-import gate
+
+The [2026-10-22 gate](validation.md#authorized-native-gate-2026-10-22-blocked)
+is blocked; do not repeat its source-only claims as native acceptance.
+
+- Validate the actual selected image's empty config/data/state/cache directories
+  and UID998 ownership after leaf mounts, before claiming native harness startup.
+- Check original-source access and SELinux labels separately from copy-mode
+  access. Never relabel originals, disable enforcement or substitute copy silently.
+- For OpenCode plugin proof, keep one leased server alive, await model metadata
+  readiness, then check active inventory and a guest proof marker. A one-shot
+  API response can arrive before plugin activation.
+- Separate server API password authentication from provider credential reuse.
+  Readable legacy auth files are not migration/refresh proof; use synthetic data
+  and vendor APIs, never real host database inspection or synchronization.
+- Upload trusted fixture scripts and execute files with null stdin; do not stream
+  the remaining script through a workload transport that consumes stdin.
+
 Use a small disposable repository outside the Dungeon configuration directory. Include:
 
 - one text file the agent may edit;

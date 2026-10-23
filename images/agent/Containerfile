@@ -70,8 +70,15 @@ RUN node -e 'const fs = require("node:fs"), path = require("node:path"); \
       for (const [command, binary] of Object.entries(pkg.bin)) \
         fs.symlinkSync(path.join(dir, binary), "/usr/local/bin/" + command); \
     }'
+COPY verify-layout.cjs /usr/lib/node_modules/dungeon-agent/verify-layout.cjs
 ENV HOME=/sandbox
 WORKDIR /sandbox
 USER sandbox
 RUN --network=none node /usr/lib/node_modules/dungeon-agent/verify.cjs --path \
     && rm -rf /sandbox/.cargo /sandbox/.codex /sandbox/.cache /sandbox/.config /sandbox/.local /tmp/opencode /tmp/.bun-*
+RUN --network=none install -d -m 0700 \
+      /sandbox/.config /sandbox/.config/opencode \
+      /sandbox/.local /sandbox/.local/share /sandbox/.local/share/opencode \
+      /sandbox/.local/state /sandbox/.local/state/opencode \
+      /sandbox/.cache /sandbox/.cache/opencode \
+    && node /usr/lib/node_modules/dungeon-agent/verify-layout.cjs

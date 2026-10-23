@@ -6,6 +6,8 @@ Keep one Rust implementation, one policy owner, and one OpenShell subprocess bou
 
 Treat project configuration, paths, logs, and tool output as untrusted. Never evaluate host shell snippets from them. No automatic host-home sharing, engine sockets, native auth/session database synchronization, or policy widening.
 
+Reviewed OpenCode harness imports may expose selected configuration and legacy auth.json read-only, or as an explicitly approved private copy. This is credential access, not credential isolation. Keep exclusions and guest-writable state separate; never extend it to native databases, host write-back, or arbitrary mounts. See docs/configuration.md for the bounded contract.
+
 Prefer deletion to compatibility layering. Update focused tests and authoritative docs with behavior changes. Use synthetic fixtures only.
 
 Validate with `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, and npm launcher tests. Mock/unit tests do not establish live runtime, desktop, EDR, or platform containment claims. Do not tag or publish without explicit authorization.

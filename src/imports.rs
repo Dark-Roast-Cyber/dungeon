@@ -2,6 +2,13 @@ use crate::config::Config;
 use crate::{Error, Result};
 use std::path::PathBuf;
 
+#[path = "harness.rs"]
+pub(crate) mod harness;
+
+pub(crate) fn configured(config: &Config) -> bool {
+    !config.values.imports.is_empty() || harness::enabled(config)
+}
+
 pub(crate) fn valid_digest(value: &str) -> bool {
     value.len() == 64
         && value
@@ -50,6 +57,7 @@ pub(crate) fn cleanup_lock(config: &Config) -> Result<Option<CreationLock>> {
 
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn verify(config: &Config) -> Result<()> {
+    harness::verify(config)?;
     if config.values.imports.is_empty() {
         Ok(())
     } else {
@@ -144,15 +152,15 @@ mod linux {
         paths: Tree,
     }
 
-    fn error() -> Error {
+    pub(super) fn error() -> Error {
         Error::new("unsafe, unavailable or changed import input/artifact")
     }
 
-    fn name(value: &OsStr) -> Result<CString> {
+    pub(super) fn name(value: &OsStr) -> Result<CString> {
         CString::new(value.as_bytes()).map_err(|_| error())
     }
 
-    fn open(dir: &File, child: &OsStr, flags: i32, mode: u32) -> Result<File> {
+    pub(super) fn open(dir: &File, child: &OsStr, flags: i32, mode: u32) -> Result<File> {
         let fd = unsafe {
             libc::openat(
                 dir.as_raw_fd(),
@@ -167,11 +175,11 @@ mod linux {
         Ok(unsafe { File::from_raw_fd(fd) })
     }
 
-    fn fd_path(file: &File) -> PathBuf {
+    pub(super) fn fd_path(file: &File) -> PathBuf {
         PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
     }
 
-    fn metadata(file: &File, directory: bool, private: bool) -> Result<()> {
+    pub(super) fn metadata(file: &File, directory: bool, private: bool) -> Result<()> {
         let m = file.metadata().map_err(|_| error())?;
         if (directory && !m.is_dir())
             || (!directory && (!m.is_file() || m.nlink() != 1))
@@ -183,7 +191,7 @@ mod linux {
         Ok(())
     }
 
-    fn directory(path: &Path, private: bool) -> Result<File> {
+    pub(super) fn directory(path: &Path, private: bool) -> Result<File> {
         if !path.is_absolute() {
             return Err(error());
         }
@@ -207,7 +215,7 @@ mod linux {
         Ok(dir)
     }
 
-    fn mkdir(dir: &File, child: &str) -> Result<File> {
+    pub(super) fn mkdir(dir: &File, child: &str) -> Result<File> {
         if unsafe { libc::mkdirat(dir.as_raw_fd(), name(OsStr::new(child))?.as_ptr(), 0o700) } != 0
         {
             return Err(error());
@@ -220,7 +228,7 @@ mod linux {
         )
     }
 
-    fn present(dir: &File, child: &str) -> Result<bool> {
+    pub(super) fn present(dir: &File, child: &str) -> Result<bool> {
         let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
         let rc = unsafe {
             libc::fstatat(
@@ -240,7 +248,7 @@ mod linux {
         }
     }
 
-    fn bytes(file: &mut File, limit: u64) -> Result<Vec<u8>> {
+    pub(super) fn bytes(file: &mut File, limit: u64) -> Result<Vec<u8>> {
         let mut data = Vec::new();
         file.take(limit + 1)
             .read_to_end(&mut data)
@@ -251,14 +259,14 @@ mod linux {
         Ok(data)
     }
 
-    fn private_bytes(dir: &File, child: &str, limit: u64) -> Result<(File, Vec<u8>)> {
+    pub(super) fn private_bytes(dir: &File, child: &str, limit: u64) -> Result<(File, Vec<u8>)> {
         let mut file = open(dir, OsStr::new(child), libc::O_RDONLY, 0)?;
         metadata(&file, false, true)?;
         let data = bytes(&mut file, limit)?;
         Ok((file, data))
     }
 
-    fn write(dir: &File, child: &OsStr, data: &[u8], mode: u32) -> Result<()> {
+    pub(super) fn write(dir: &File, child: &OsStr, data: &[u8], mode: u32) -> Result<()> {
         let mut file = open(
             dir,
             child,
@@ -271,7 +279,7 @@ mod linux {
         Ok(())
     }
 
-    fn hash(data: &[u8]) -> String {
+    pub(super) fn hash(data: &[u8]) -> String {
         HEXLOWER.encode(&Sha256::digest(data))
     }
 
@@ -405,13 +413,14 @@ mod linux {
     }
 
     pub(crate) fn verify(config: &Config) -> Result<()> {
+        harness::verify(config)?;
         if !config.values.imports.is_empty() {
             artifact(config)?;
         }
         Ok(())
     }
 
-    fn locked(config: &Config) -> Result<(File, CreationLock)> {
+    pub(super) fn locked(config: &Config) -> Result<(File, CreationLock)> {
         let parent = directory(config.path.parent().expect("config parent"), true)?;
         let lock = open(
             &parent,
@@ -427,7 +436,7 @@ mod linux {
         Ok((parent, lock))
     }
 
-    fn unchanged(config: &Config, parent: &File) -> Result<()> {
+    pub(super) fn unchanged(config: &Config, parent: &File) -> Result<()> {
         let current = directory(config.path.parent().expect("config parent"), true)?;
         let a = parent.metadata()?;
         let b = current.metadata()?;
@@ -463,7 +472,7 @@ mod linux {
     }
 
     pub(crate) fn creation_lock(config: &Config) -> Result<Option<CreationLock>> {
-        if config.values.imports.is_empty() {
+        if !configured(config) {
             return Ok(None);
         }
         let (_, lock) = locked(config)?;
@@ -472,7 +481,7 @@ mod linux {
     }
 
     pub(crate) fn cleanup_lock(config: &Config) -> Result<Option<CreationLock>> {
-        if config.values.imports.is_empty() {
+        if !configured(config) {
             return Ok(None);
         }
         let (_, lock) = locked(config)?;
@@ -534,6 +543,9 @@ mod linux {
         let captured = manifest(import, inventory(&source, Some(&nvim), false)?);
         let data = encoded(&captured)?;
         let digest = hash(&data);
+        let mut candidate = config.clone();
+        candidate.values.imports[0].snapshot = Some(digest.clone());
+        crate::openshell::validate_mount_request(&candidate)?;
         write(&staged, OsStr::new("manifest.json"), &data, 0o600)?;
         let previous = if import.snapshot.is_some() {
             Some(artifact(config)?)
@@ -881,6 +893,79 @@ mod linux {
             );
             assert_eq!(encoded(&a).unwrap(), encoded(&b).unwrap());
             assert_eq!(diff(Some(&a.paths), &b.paths), json!([]));
+        }
+
+        #[test]
+        fn staging_neovim_cannot_publish_a_selection_over_the_combined_mount_budget() {
+            use crate::config::{Agent, HarnessConfig, HarnessMode};
+            let mut f = fixture();
+            f.config.values.harness = Some(HarnessConfig {
+                agent: Agent::Opencode,
+                mode: HarnessMode::ReadOnly,
+                source: f._root.path().join("host-opencode"),
+                legacy_auth: f._root.path().join("data/opencode/auth.json"),
+                exclude_provider_auth: true,
+                exclude: vec![],
+                files: vec![],
+                snapshot: None,
+            });
+            for i in 0..4096 {
+                f.config
+                    .values
+                    .harness
+                    .as_mut()
+                    .unwrap()
+                    .files
+                    .push(format!("config/plugins/{i:04}-{}.js", "x".repeat(64)));
+                if crate::openshell::validate_mount_request(&f.config).is_err() {
+                    f.config.values.harness.as_mut().unwrap().files.pop();
+                    break;
+                }
+            }
+            // Fill the remaining serialized space, leaving at most one byte.
+            loop {
+                f.config
+                    .values
+                    .harness
+                    .as_mut()
+                    .unwrap()
+                    .files
+                    .last_mut()
+                    .unwrap()
+                    .push('x');
+                if crate::openshell::validate_mount_request(&f.config).is_err() {
+                    f.config
+                        .values
+                        .harness
+                        .as_mut()
+                        .unwrap()
+                        .files
+                        .last_mut()
+                        .unwrap()
+                        .pop();
+                    break;
+                }
+            }
+            fs::write(
+                &f.config.path,
+                serde_json::to_vec(&f.config.values).unwrap(),
+            )
+            .unwrap();
+            f.config = load_config(&f.config.path).unwrap();
+            let original = fs::read(&f.config.path).unwrap();
+            assert!(
+                stage(&f.config, true)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("exceeds 48 KiB")
+            );
+            assert_eq!(fs::read(&f.config.path).unwrap(), original);
+            assert!(!f.config.path.parent().unwrap().join("imports").exists());
+            assert!(
+                load_config(&f.config.path).unwrap().values.imports[0]
+                    .snapshot
+                    .is_none()
+            );
         }
 
         #[test]
