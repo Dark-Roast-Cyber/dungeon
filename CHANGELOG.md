@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Support Linux machine stdout connected Unix stream sockets without changing inherited descriptor flags; preserve FIFO backpressure and cleanup.
+- Expose additive machine `copy_baseline_valid` admission evidence and terminal `cleanup` / `primary_transport_verified` lifecycle evidence for external consumers such as Switchboard.
+- Verify owned primary exit before removing controls; preserve queued frame sequences and drain discarded output within the cleanup deadline after cancellation or output faults.
+
 ## Unreleased preview additions (0.0.2)
 
 - Simplify `init` with current-project, generated-name and private-binding defaults; one scope confirmation or `--yes`, with explicit customization flags. Add offline `config`/`config --path`, make `plan` non-initializing, improve command help, and open `shell` in the guest project. Validate initial configuration before writing files; no image/policy default change.

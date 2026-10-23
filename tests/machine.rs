@@ -5,6 +5,7 @@ use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::ops::{Deref, DerefMut};
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Output, Stdio};
@@ -133,9 +134,15 @@ assert.notEqual(translated,shim);
 translated=translated.replace("process.chdir('/sandbox/project');",'process.chdir('+JSON.stringify(project)+');');
 translated=translated.replace("process.send('ready');",'const fixtureFields=fs.readFileSync("/proc/self/stat","utf8").split(") ")[1].split(" ");fs.appendFileSync('+JSON.stringify(registry)+',JSON.stringify({{pid:process.pid,group:+fixtureFields[2],start:fixtureFields[19]}})+"\\n");process.send("ready");');
 if(mode==='machine-launch' && fs.existsSync({malformed}))process.stdout.write('{{"v":1,"seq":0,"seq":0,"event":"output","stream":"stdout","data":"QQ=="}}\n');
+if(mode==='machine-launch' && fs.existsSync({primary_failure}))process.once('beforeExit',()=>{{process.kill(process.ppid,'SIGTERM');process.exitCode=99}});
+if(mode==='machine-launch' && fs.existsSync({buffered_primary})){{
+  const write=process.stdout.write.bind(process.stdout),chunks=[];
+  process.stdout.write=(bytes,callback)=>{{chunks.push(Buffer.from(bytes));if(callback)setImmediate(callback);return true}};
+  process.once('beforeExit',()=>{{process.stdout.write=write;for(const bytes of chunks)write(bytes)}});
+}}
 eval(translated);
 "#,
-            shim=serde_json::to_string(include_str!("../src/owned.cjs")).unwrap(),controls=serde_json::to_string(&f.root.path().join("guest-controls")).unwrap(),project=serde_json::to_string(&f.root.path().join("guest-project")).unwrap(),registry=serde_json::to_string(&f.root.path().join("guest-processes.jsonl")).unwrap(),malformed=serde_json::to_string(&f.root.path().join("malformed-primary")).unwrap())).unwrap();
+            shim=serde_json::to_string(include_str!("../src/owned.cjs")).unwrap(),controls=serde_json::to_string(&f.root.path().join("guest-controls")).unwrap(),project=serde_json::to_string(&f.root.path().join("guest-project")).unwrap(),registry=serde_json::to_string(&f.root.path().join("guest-processes.jsonl")).unwrap(),malformed=serde_json::to_string(&f.root.path().join("malformed-primary")).unwrap(),primary_failure=serde_json::to_string(&f.root.path().join("primary-failure")).unwrap(),buffered_primary=serde_json::to_string(&f.root.path().join("buffered-primary")).unwrap())).unwrap();
         let stub = f.root.path().join("bin/openshell");
         fs::write(
             &stub,
@@ -222,6 +229,62 @@ impl Drop for Fixture {
         }
         // Temporary guest controls belong solely to this fixture's private tree.
     }
+}
+
+#[test]
+fn owned_exec_accepts_subprocess_stream_sockets_with_exact_bytes_and_exit() {
+    let f = Fixture::new();
+    let (reader, writer) = UnixStream::pair().unwrap();
+    let output = std::thread::spawn(move || {
+        let mut reader = BufReader::new(reader);
+        let mut events = Vec::new();
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).unwrap() == 0 {
+                break;
+            }
+            events.push(serde_json::from_str::<Value>(&line).unwrap());
+        }
+        events
+    });
+    use std::os::fd::OwnedFd;
+    let child = f.spawn(
+        f.machine()
+            .args([
+                "exec", "--owned", "--", "/usr/bin/node", "-e",
+                "process.stdout.write(Buffer.from([0,255,10]));process.stderr.write('note');process.exitCode=23",
+            ])
+            .stdout(Stdio::from(OwnedFd::from(writer)))
+            .stderr(Stdio::piped()),
+    );
+    let result = child.wait_with_output().unwrap();
+    let events = output.join().unwrap();
+    assert_eq!(result.status.code(), Some(23), "{events:?}");
+    assert!(result.stderr.is_empty());
+    assert_eq!(events[0]["event"], "started");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    for (seq, event) in events.iter().enumerate() {
+        assert_eq!(event["seq"], seq);
+        if event["event"] == "output" {
+            let bytes = data_encoding::BASE64
+                .decode(event["data"].as_str().unwrap().as_bytes())
+                .unwrap();
+            if event["stream"] == "stdout" {
+                stdout.extend(bytes);
+            } else {
+                stderr.extend(bytes);
+            }
+        }
+    }
+    assert_eq!(stdout, [0, 255, 10]);
+    assert_eq!(stderr, b"note");
+    let terminal = events.last().unwrap();
+    assert_eq!(terminal["event"], "finished");
+    assert_eq!(terminal["ok"], true);
+    assert_eq!(terminal["exit_code"], 23);
+    assert_eq!(terminal["cleanup"], "confirmed");
+    assert_eq!(terminal["primary_transport_verified"], true);
 }
 
 #[test]
@@ -396,7 +459,10 @@ fn streamed_unowned_exec_is_incremental_binary_exact_and_stdin_is_finite() {
     assert_eq!(child.wait().unwrap().code(), Some(23));
     assert_eq!(stdout, [0, 255, 226, 130, 172]);
     assert_eq!(stderr, b"first\ntail");
-    assert_eq!(final_event.unwrap()["exit_code"], 23);
+    let final_event = final_event.unwrap();
+    assert_eq!(final_event["exit_code"], 23);
+    assert_eq!(final_event["cleanup"], "not_owned");
+    assert_eq!(final_event["primary_transport_verified"], true);
     let mut child=f.spawn(f.machine().args(["exec","--stdin","--","/usr/bin/node","-e","process.stdin.on('data',b=>process.stdout.write(b));process.stdin.on('end',()=>process.exit(23))"]).stdin(Stdio::piped()).stdout(Stdio::piped()));
     child
         .stdin
@@ -501,12 +567,122 @@ fn malformed_primary_stream_cannot_be_overridden_by_a_clean_receipt() {
     assert_eq!(final_event["event"], "finished");
     assert_eq!(final_event["ok"], false);
     assert!(final_event["exit_code"].is_null());
+    assert_eq!(final_event["cleanup"], "confirmed");
+    assert_eq!(final_event["primary_transport_verified"], true);
     assert_eq!(
         fs::read_dir(f.root.path().join("guest-controls"))
             .unwrap()
             .count(),
         0
     );
+}
+
+#[test]
+fn owned_term_with_buffered_output_confirms_cleanup() {
+    for buffered in [false, true] {
+        let f = Fixture::new();
+        if buffered {
+            fs::write(f.root.path().join("buffered-primary"), b"1").unwrap();
+        }
+        let mut child = f.spawn(
+            f.machine()
+                .args([
+                    "exec",
+                    "--owned",
+                    "--",
+                    "/usr/bin/node",
+                    "-e",
+                    "process.stdout.write(Buffer.alloc(4*1024*1024));setInterval(()=>{},1000)",
+                ])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped()),
+        );
+        let mut reader = BufReader::new(child.stdout.take().unwrap());
+        let mut next_seq = 0;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let event: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(event["seq"], next_seq);
+            next_seq += 1;
+            if event["event"] == "started" {
+                break;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGTERM) }, 0);
+        let tail = std::thread::spawn(move || {
+            reader
+                .lines()
+                .map(|line| serde_json::from_str::<Value>(&line.unwrap()).unwrap())
+                .collect::<Vec<_>>()
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        loop {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "buffered TERM cleanup hung"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(child.wait().unwrap().code(), Some(1));
+        let events = tail.join().unwrap();
+        for event in &events {
+            assert_eq!(event["seq"], next_seq);
+            next_seq += 1;
+        }
+        let terminal = events.last().unwrap();
+        assert_eq!(terminal["event"], "finished");
+        assert_eq!(terminal["ok"], false);
+        assert_eq!(terminal["cleanup"], "confirmed");
+        assert_eq!(terminal["primary_transport_verified"], true);
+        assert_eq!(
+            fs::read_dir(f.root.path().join("guest-controls"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+}
+
+#[test]
+fn failed_primary_with_pending_signal_retains_unconfirmed_controls() {
+    let f = Fixture::new();
+    fs::write(f.root.path().join("primary-failure"), b"1").unwrap();
+    let out = f
+        .machine()
+        .args([
+            "exec",
+            "--owned",
+            "--",
+            "/usr/bin/node",
+            "-e",
+            "process.exitCode=0",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stderr.is_empty());
+    let events = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    let terminal = events.last().unwrap();
+    assert_eq!(terminal["event"], "finished");
+    assert_eq!(terminal["ok"], false);
+    assert!(terminal["exit_code"].is_null());
+    assert_eq!(terminal["cleanup"], "unconfirmed");
+    assert_eq!(terminal["primary_transport_verified"], false);
+    let controls = fs::read_dir(f.root.path().join("guest-controls"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(controls.len(), 1);
+    assert!(controls[0].join("result").is_file());
 }
 
 #[test]
@@ -549,6 +725,8 @@ fn guardian_death_with_retained_framed_pipes_is_bounded_cleanup_unconfirmed() {
     assert!(final_event["exit_code"].is_null());
     assert_eq!(final_event["error"]["code"], "cleanup_unconfirmed");
     assert_eq!(final_event["error"]["effects"], "unknown");
+    assert_eq!(final_event["cleanup"], "unconfirmed");
+    assert_eq!(final_event["primary_transport_verified"], false);
     let controls = fs::read_dir(f.root.path().join("guest-controls"))
         .unwrap()
         .map(|entry| entry.unwrap().path())

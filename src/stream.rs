@@ -14,6 +14,9 @@ const DRAIN: Duration = Duration::from_secs(2);
 
 pub(super) struct Stream {
     sink: File,
+    socket: bool,
+    pub(super) cleanup: &'static str,
+    pub(super) primary_verified: bool,
     input: Option<ChildStdout>,
     bytes: Vec<u8>,
     pending: Vec<u8>,
@@ -30,18 +33,63 @@ pub(super) struct Stream {
 impl Stream {
     fn new() -> Result<Self> {
         let stdout = File::from(std::io::stdout().as_fd().try_clone_to_owned()?);
-        if !stdout.metadata()?.file_type().is_fifo() {
+        Self::from_stdout(stdout)
+    }
+    fn from_stdout(stdout: File) -> Result<Self> {
+        let kind = stdout.metadata()?.file_type();
+        let socket = kind.is_socket();
+        if socket {
+            let mut domain = 0;
+            let mut kind = 0;
+            let mut length = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+            let mut peer: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+            let mut peer_length = std::mem::size_of_val(&peer) as libc::socklen_t;
+            let valid = unsafe {
+                libc::getsockopt(
+                    stdout.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    libc::SO_DOMAIN,
+                    (&mut domain as *mut libc::c_int).cast(),
+                    &mut length,
+                ) == 0
+                    && libc::getsockopt(
+                        stdout.as_raw_fd(),
+                        libc::SOL_SOCKET,
+                        libc::SO_TYPE,
+                        (&mut kind as *mut libc::c_int).cast(),
+                        &mut length,
+                    ) == 0
+                    && libc::getpeername(
+                        stdout.as_raw_fd(),
+                        (&mut peer as *mut libc::sockaddr_storage).cast(),
+                        &mut peer_length,
+                    ) == 0
+            };
+            if !valid || domain != libc::AF_UNIX || kind != libc::SOCK_STREAM {
+                return Err(Error::refusal(
+                    crate::ErrorCode::Unsupported,
+                    "Machine exec requires a connected Unix stream socket or FIFO.",
+                ));
+            }
+        } else if !kind.is_fifo() {
             return Err(Error::refusal(
                 crate::ErrorCode::Unsupported,
-                "Machine exec requires a Linux stdout FIFO.",
+                "Machine exec requires a Linux stdout FIFO or Unix stream socket.",
             ));
         }
-        let sink = OpenOptions::new()
-            .write(true)
-            .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
-            .open("/proc/self/fd/1")?;
+        let sink = if socket {
+            stdout
+        } else {
+            OpenOptions::new()
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
+                .open(format!("/proc/self/fd/{}", stdout.as_raw_fd()))?
+        };
         Ok(Self {
             sink,
+            socket,
+            cleanup: "not_started",
+            primary_verified: false,
             input: None,
             bytes: vec![],
             pending: vec![],
@@ -74,6 +122,9 @@ impl Stream {
     }
     pub(super) fn started(&mut self, input: Option<ChildStdout>) -> Result<()> {
         self.launched = true;
+        if self.cleanup != "not_owned" {
+            self.cleanup = "unconfirmed";
+        }
         #[cfg(test)]
         if self.fail_started {
             return Err(Error::new("Injected descriptor initialization failure."));
@@ -86,7 +137,24 @@ impl Stream {
         Ok(())
     }
     fn flush(&mut self) -> Result<()> {
-        match self.sink.write(&self.pending) {
+        let write = if self.socket {
+            let n = unsafe {
+                libc::send(
+                    self.sink.as_raw_fd(),
+                    self.pending.as_ptr().cast(),
+                    self.pending.len(),
+                    libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL,
+                )
+            };
+            if n < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(n as usize)
+            }
+        } else {
+            self.sink.write(&self.pending)
+        };
+        match write {
             Ok(n) => {
                 self.pending.drain(..n);
                 if n > 0 {
@@ -138,6 +206,21 @@ impl Stream {
     }
     pub(super) fn poll(&mut self, finished: bool) {
         if self.fault {
+            let _ = self.flush();
+            self.bytes.clear();
+            if let Some(input) = self.input.as_mut() {
+                for _ in 0..16 {
+                    let mut buffer = [0u8; 4096];
+                    match input.read(&mut buffer) {
+                        Ok(0) => {
+                            self.eof = true;
+                            break;
+                        }
+                        Ok(_) => {}
+                        Err(_) => break,
+                    }
+                }
+            }
             return;
         }
         // Bound work per cancellation tick without throttling every frame to one tick.
@@ -171,11 +254,8 @@ impl Stream {
             self.seq = 0;
         }
         let cancelled = SIGNAL.load(Ordering::SeqCst) != 0;
-        if self.fault {
-            self.pending.clear();
-        }
         let cancellation = Err(Error::new("Machine execution cancelled."));
-        let event = match if cancelled { &cancellation } else { result } {
+        let mut event = match if cancelled { &cancellation } else { result } {
             Ok(code) => json!({"event":"finished","ok":true,"exit_code":code,"error":null}),
             Err(error) => {
                 let mut v = machine::error_json("exec", error, Value::Null);
@@ -184,6 +264,8 @@ impl Stream {
                 v
             }
         };
+        event["cleanup"] = json!(self.cleanup);
+        event["primary_transport_verified"] = json!(self.primary_verified);
         self.enqueue(event)?;
         let mut written = false;
         let deadline = Instant::now() + DRAIN;
@@ -204,6 +286,8 @@ impl Stream {
                 );
                 event["event"] = json!("finished");
                 event["exit_code"] = Value::Null;
+                event["cleanup"] = json!(self.cleanup);
+                event["primary_transport_verified"] = json!(self.primary_verified);
                 // Replace, do not publish a second sequence number.
                 self.seq -= 1;
                 self.enqueue(event)?;
@@ -253,6 +337,9 @@ pub(in crate::openshell) fn run(
 ) -> Result<i32> {
     machine::validate_exec(argv, cwd)?;
     let mut output = Stream::new()?;
+    if !owned {
+        output.cleanup = "not_owned";
+    }
     let _lock = SIGNAL_LOCK
         .lock()
         .map_err(|_| Error::new("Signal owner unavailable."))?;
@@ -340,6 +427,7 @@ fn unowned(
                 command(runtime, "remove", &token, &[]),
                 Instant::now() + LIMIT,
             )?;
+            output.primary_verified = true;
             drop(child);
             if SIGNAL.load(Ordering::SeqCst) != 0 {
                 return Err(Error::new("Unowned transport interrupted."));
@@ -366,6 +454,9 @@ mod tests {
         (
             Stream {
                 sink,
+                socket: false,
+                cleanup: "not_started",
+                primary_verified: false,
                 input: None,
                 bytes: vec![],
                 pending: vec![],
@@ -380,6 +471,38 @@ mod tests {
             },
             reader,
         )
+    }
+
+    #[test]
+    fn socket_sink_preserves_flags_and_bounds_stalls_and_disconnects() {
+        use std::os::fd::OwnedFd;
+        use std::os::unix::net::{UnixDatagram, UnixStream};
+        let (reader, writer) = UnixStream::pair().unwrap();
+        let original = unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_GETFL) };
+        let observer = writer.try_clone().unwrap();
+        let mut stream = Stream::from_stdout(File::from(OwnedFd::from(writer))).unwrap();
+        assert_eq!(
+            unsafe { libc::fcntl(observer.as_raw_fd(), libc::F_GETFL) },
+            original
+        );
+        loop {
+            stream.pending = vec![1; QUEUE];
+            stream.flush().unwrap();
+            if stream.pending.len() == QUEUE {
+                break;
+            }
+        }
+        stream.stalled_since = Some(Instant::now() - DRAIN);
+        assert!(stream.flush().is_err());
+        assert_eq!(
+            unsafe { libc::fcntl(observer.as_raw_fd(), libc::F_GETFL) },
+            original
+        );
+        drop(reader);
+        assert!(stream.flush().is_err());
+        let (datagram, _peer) = UnixDatagram::pair().unwrap();
+        assert!(Stream::from_stdout(File::from(OwnedFd::from(datagram))).is_err());
+        assert!(Stream::from_stdout(tempfile::tempfile().unwrap()).is_err());
     }
 
     #[test]

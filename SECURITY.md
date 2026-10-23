@@ -75,7 +75,7 @@ empty or custom engine storage instead of initializing it.
 Machine schema 1 emits fixed diagnostics, not native stderr, policy/provider JSON
 or parser error text. Requested workload bytes are intentionally lossless and
 unredacted, including secrets and terminal control sequences; consumers must treat
-them as untrusted. Lexically checked guest cwd is not symlink confinement. FIFO
+them as untrusted. Lexically checked guest cwd is not symlink confinement. FIFO/socket
 backpressure/cancellation and independent owned receipts assist lifecycle only;
 they do not add containment or guarantee final event delivery. See the
 [machine contract](docs/machine.md).

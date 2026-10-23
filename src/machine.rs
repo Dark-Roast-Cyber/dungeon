@@ -220,7 +220,7 @@ fn capabilities_on(transfer: ProjectTransfer, platform: &str) -> Value {
         "unsupported"
     };
     json!({
-        "streamed_exec":capability(executable,Some("linux_fifo_guest_node_required")),
+        "streamed_exec":capability(executable,Some("linux_fifo_or_unix_stream_socket_guest_node_required")),
         "owned_interrupt":capability(executable,Some("guest_node_proc_required")),
         "unowned_interrupt":capability("degraded",Some("guest_cleanup_not_guaranteed")),
         "interactive":capability(executable,Some("linux_foreground_terminal_ssh_guest_node_required")),
@@ -245,6 +245,7 @@ fn result(config: &Config, remote: Option<&Value>, review: Value) -> Value {
         })
         .unwrap_or("uncreated");
     json!({"bound":true,"environment":environment(config,remote),"phase":phase,
+        "copy_baseline_valid":remote.map(|_| config.values.project_transfer == ProjectTransfer::Copy && crate::export::load_baseline(config).is_ok()).unwrap_or(false),
         "initial_upload_pending":remote.map(|v| v["initial_upload_pending"].clone()).unwrap_or(Value::Null),
         "identity":if remote.is_some(){"verified"}else{"configured"},
         "policy":if remote.is_some(){"verified"}else{"unknown"},"capabilities":capabilities(config),"review":review})
@@ -360,7 +361,7 @@ fn dispatch(explicit: Option<PathBuf>, operation: Operation) -> Response {
                 return Ok((
                     0,
                     Some(
-                        json!({"bound":false,"environment":null,"phase":"unbound","initial_upload_pending":null,"identity":"unknown","policy":"unknown","capabilities":null,"review":null}),
+                        json!({"bound":false,"environment":null,"phase":"unbound","initial_upload_pending":null,"copy_baseline_valid":false,"identity":"unknown","policy":"unknown","capabilities":null,"review":null}),
                     ),
                 ));
             }

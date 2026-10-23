@@ -387,7 +387,13 @@ fn run_with_output(
                 {
                     return Err(Error::new("Output still draining."));
                 }
-                if !output_failed && !exited(&child)? {
+                while output_failed && !exited(&child)? && Instant::now() < until {
+                    if let Some(output) = output.as_mut() {
+                        output.poll(false);
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                if !exited(&child)? {
                     return Err(Error::new("owned guest wrapper has not exited"));
                 }
                 let current = checked(runtime, until)?;
@@ -397,19 +403,19 @@ fn run_with_output(
                 {
                     return Err(Error::new("original owned sandbox binding changed"));
                 }
-                capture(command(runtime, "remove", &token, &[]), until)?;
-                let received = SIGNAL.load(Ordering::SeqCst);
-                if output_failed {
-                    transport_failed = true;
-                    return Err(Error::new("Owned cleanup confirmed; output incomplete."));
-                }
                 // A pending host signal never overrides a failed primary transport.
                 if !primary_succeeded(&child, receipt.code)? {
                     transport_failed = true;
                     return Err(Error::new(
-                        "owned cleanup confirmed but primary transport failed",
+                        "owned primary transport failed; cleanup unconfirmed",
                     ));
                 }
+                capture(command(runtime, "remove", &token, &[]), until)?;
+                if let Some(output) = output.as_mut() {
+                    output.primary_verified = true;
+                    output.cleanup = "confirmed";
+                }
+                let received = SIGNAL.load(Ordering::SeqCst);
                 if output_failed
                     || output
                         .as_ref()
@@ -435,9 +441,7 @@ fn run_with_output(
                 return Ok(if tail == 0 { code } else { 128 + tail });
             }
             if transport_failed {
-                return Err(Error::new(
-                    "owned cleanup confirmed but primary transport failed",
-                ));
+                return result;
             }
             if Instant::now() >= until {
                 return Err(Error::classified(

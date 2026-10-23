@@ -100,7 +100,7 @@ Capabilities each contain string `state` and nullable string `reason`. States ar
 `supported`, `unsupported`, `unknown` or `degraded`. Supported describes the contract,
 not observed prerequisite availability or containment attestation. Streaming/owned
 execution and interaction remain unknown until invoked with the required Linux,
-FIFO, guest Node/proc or foreground-terminal prerequisites. Unowned interruption
+FIFO/Unix-stream-socket, guest Node/proc or foreground-terminal prerequisites. Unowned interruption
 is degraded. Non-Linux streaming, owned execution, interactive and finite stdin
 are categorically unsupported; native Windows copy upload/export are unsupported
 because their private transfer locks require Unix. Live stdin, selective transfer, deletion and remote execution are
@@ -128,19 +128,21 @@ exits nonzero without dumping diagnostics to stderr.
 
 ## Execution bytes and completion
 
-Machine exec supports **Linux stdout FIFOs only**. Regular files, sockets, null
-devices and terminals are refused before workload launch; there is no blocking
-fallback. A consumer must drain incrementally. The host reopens the same FIFO
-nonblocking without changing the inherited stdout open-description flags. The
-host queue is capped at 64 KiB; guest reads pause behind bounded async chunk writes.
-A sink stalled for two seconds becomes a terminal output fault.
+Machine exec supports **Linux stdout FIFOs and connected Unix stream sockets**,
+including Node's `spawn(..., {stdio: ["ignore", "pipe", "pipe"]})` transport.
+Regular files, other sockets, null devices and terminals are refused before
+workload launch; there is no blocking fallback. A consumer must drain
+incrementally. FIFOs are reopened nonblocking; sockets use per-write
+`MSG_DONTWAIT | MSG_NOSIGNAL`. Neither changes inherited open-description flags.
+The host queue is capped at 64 KiB; guest reads pause behind bounded async chunk
+writes. A sink stalled for two seconds becomes a terminal output fault.
 
 Events have schema 1, operation `exec`, and monotonically increasing `seq`:
 
 ```json
 {"schema":1,"operation":"exec","seq":0,"event":"started","sandbox_id":"opaque"}
 {"schema":1,"operation":"exec","seq":1,"event":"output","stream":"stdout","encoding":"base64","data":"AP8="}
-{"schema":1,"operation":"exec","seq":2,"event":"finished","ok":true,"exit_code":23,"error":null}
+{"schema":1,"operation":"exec","seq":2,"event":"finished","ok":true,"exit_code":23,"error":null,"cleanup":"confirmed","primary_transport_verified":true}
 ```
 
 Started means the primary transport was spawned, not that the executable started.
@@ -169,12 +171,33 @@ event, and never sends a second finished event. Consumers must check both comple
 JSONL and the CLI exit; a final event alone is not a completion acknowledgement.
 A failed consumer may receive no final event; final delivery is bounded
 best effort, never a reason to block cleanup. Interrupted/broken streaming exits 1.
+After cancellation or an output fault, already queued valid frames retain their
+sequence numbers. Further primary bytes are drained and discarded within the
+cleanup deadline so buffered output cannot prevent observing primary exit.
 
 `--owned` reuses the existing private guardian/control/receipt owner. Group absence
 and control removal are checked independently of output draining. It supplies no
 stdin. Ordinary unowned execution has no guest-cleanup guarantee on interruption
 or lost transport. Neither mode strengthens containment or handles same-UID guest
 sabotage, group escape or host SIGKILL.
+
+`finished.cleanup` and `finished.primary_transport_verified` are additive schema-1
+lifecycle evidence. `confirmed` requires owned receipt verification, matching
+primary transport exit and invocation-control removal. It can accompany cancellation
+or output failure, but never failed primary transport. `unconfirmed` means owned
+work was launched but confirmation was not obtained; `not_started` means no primary
+transport spawned. Unowned execution uses `not_owned`. The verification boolean
+is true only after matching primary exit and control removal; it does not prove
+complete output or task success. Missing final output or disagreement with CLI exit
+cannot establish cleanup, even if a partial event says confirmed. This is not
+stronger containment or proof against guest sabotage/group escape.
+
+`status` and other inspected lifecycle results include `copy_baseline_valid`.
+True reuses the existing upload/export baseline validator: schema, project tree,
+config fingerprint and sandbox binding match private runtime state. False also
+covers absent/invalid baselines, unobserved runtime and live mode. It does not
+assert that every host file was uploaded or that current host/guest contents are
+synchronized. Pending initialization remains a separate admission check.
 
 Copy upload/export verify selected import snapshots in the shared Runtime before
 transfer locks, baseline changes or native transfer. Missing/unapproved/tampered

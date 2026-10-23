@@ -153,7 +153,7 @@ are sticky, and receipts cannot override primary transport or restoration errors
 The responsibility seam is `owned_ssh` under `owned`, not a second backend.
 
 Machine execution adds `stream` under that same owned boundary: a bounded strict
-frame parser and nonblocking Linux FIFO sink in the existing cleanup loop. The
+frame parser and nonblocking Linux FIFO/Unix-stream-socket sink in the existing cleanup loop. The
 guest outer status owner frames dedicated application descriptors outside the
 killed group. It never frames wrapper/native diagnostics. Ordinary machine
 lifecycle/export use quiet operation output, not global fd redirection or parsing

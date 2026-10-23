@@ -221,6 +221,7 @@ fn initial_copy_publication_blocks_new_work_until_the_only_upload_completes() {
     let status: Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(status["result"]["phase"], "ready");
     assert_eq!(status["result"]["initial_upload_pending"], true);
+    assert_eq!(status["result"]["copy_baseline_valid"], false);
     let human = f.run(&["status"]);
     assert!(human.status.success());
     let human: Value = serde_json::from_slice(&human.stdout).unwrap();
@@ -253,6 +254,9 @@ fn initial_copy_publication_blocks_new_work_until_the_only_upload_completes() {
     assert!(a.output().status.success());
     assert!(!f.pending());
     assert_eq!(f.calls("upload"), 1);
+    let status = f.run(&["machine", "--schema", "1", "status"]);
+    let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status["result"]["copy_baseline_valid"], true);
     assert!(f.run(&["exec", "--", "synthetic-edit"]).status.success());
     assert!(f.run(&["up"]).status.success());
     assert!(f.run(&["create"]).status.success());
@@ -348,6 +352,9 @@ fn explicit_create_without_baseline_never_requests_initial_copy() {
     assert!(f.run(&["create"]).status.success());
     assert!(!f.pending());
     assert!(!f.config.parent().unwrap().join("baseline.json").exists());
+    let status = f.run(&["machine", "--schema", "1", "status"]);
+    let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status["result"]["copy_baseline_valid"], false);
     assert!(f.run(&["exec", "--", "synthetic-edit"]).status.success());
     assert!(f.run(&["up"]).status.success());
     assert!(f.run(&["down"]).status.success());

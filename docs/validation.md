@@ -22,8 +22,9 @@ used host Node 22.22.2, not the supported Node 24 gate. Independent source revie
 found no remaining source-level blocker after two mount-budget corrections;
 that is not native acceptance. Final logs and the parent-verified runtime/test
 source hash manifest are under `/tmp/opencode/dungeon-harness-*`. Unrelated
-machine/socket edits remain in this working tree; these are not clean-commit
-or published-artifact results. Other platform builds/runtime were not tested.
+machine/socket edits were still present in that working tree; these are not
+clean-commit or published-artifact results. Other platform builds/runtime were
+not tested.
 
 Those synthetic checks do not establish native acceptance. The separately
 authorized gate below found blockers. Codex and Claude Code configuration sharing
@@ -442,6 +443,77 @@ and comparisons are under `review-*` in the same evidence root; no live mount or
 AI/owned-lifecycle matrix was repeated.
 
 ## Existing runtime and transfer evidence
+
+### Switchboard integration (2026-10-10 working tree)
+
+Linux socket transport, copy-baseline admission and terminal primary/cleanup
+evidence passed synthetic coverage. Formatting, all-target Clippy, **151 locked
+Rust tests**, **17 owned/distribution Node tests** and release compilation passed
+on Rust 1.98.1 / host Node 22.22.2; Node 24 and other platforms were not retested.
+Switchboard syntax/shell checks and **64 Node tests** passed separately.
+
+Disposable pinned-image Claude read/edit/test/denial/resume, normal cancellation,
+same-ID stop/start recall and guest-native OpenCode child read/patch/proof/test
+workflows passed. The independently observed guest identity matched; native proof
+and tests remained unchanged. Guest authentication was user-performed. Reviewed,
+user-approved export changed only the synthetic implementation; the host test and
+host-only OpenCode config were preserved and the host test passed.
+
+High-output cancellation found queued-frame deletion causing sequence gaps.
+Preserving queued frames fixed the synthetic sequence regression. A fresh live
+fixture then exposed buffered primary output delaying transport exit despite a
+clean receipt and absent guest workload. Bounded discarded-output draining while
+awaiting primary exit passes the synthetic buffered-transport regression. The
+first final live rerun was declined; the 2026-10-11 follow-up below records the
+later authorized pass. Earlier live results do not by themselves establish that
+correction.
+
+Both disposable sandboxes and their dedicated gateway were stopped and retained,
+with final stop completion, independently observed Stopped states, absent loopback
+listener and both admission records preserved. The earlier stop/start round had a
+45-second stop timeout followed by independently observed Stopped and successful
+start; that timeout is not a passed command. Existing services were not changed.
+Evidence: `/tmp/opencode/dungeon-integration-final-validation.log`,
+`switchboard-dungeon-final-check.log`, `dungeon-buffered-sequence-regression.log`,
+`dungeon-buffered-primary-corrected.log`, native-child/Claude lifecycle records,
+`dungeon-approved-export.json`, and `dungeon-stop-retain-results.json`.
+
+### Fresh cancellation and Antigravity follow-up (2026-10-11)
+
+The previously declined final live cancellation gate was separately authorized.
+Two fresh synthetic copy environments passed high-output cancellation, confirmed
+owned cleanup and clean relaunch against unchanged release SHA-256
+`3c2e772f63739bfd69bea052ba25191a1622870444b3ad30e4a12069a788d48f`.
+This establishes the tested buffered-output cancellation boundary, not broader
+containment, group-escape or platform guarantees.
+
+A pinned local image added Antigravity **1.3.3**, verified against its publisher's
+SHA-512 archive digest, with auto-update disabled. Guest authentication was
+user-performed. The first environment's network prerequisites omitted the required
+avatar host; it was stopped/retained. A separately approved replacement added
+exact Google login/model/feature/avatar endpoints before binding; no credentials
+or sessions were copied and no bound policy was rewritten.
+
+Guest executable discovery, authenticated inference, live Switchboard plugin
+edit and external-session resume passed using Gemini 3.8 Flash Medium / medium
+effort. The plugin integration invoked real Dungeon/vendor processes from a
+synthetic plugin context; this was not a new native OpenCode wrapper-agent round.
+Only the implementation changed; guest test/guidance and host fixture stayed
+byte-identical. **Antigravity's own test command failed** to create a PTY:
+`open /dev/ptmx: permission denied`. An independently launched guest
+`node test.cjs` passed. Vendor `SUCCESS` without `denied_actions` did not prove the
+required test ran. The full contained Antigravity edit/test gate remains blocked;
+PTY policy changes require separate review and authorization.
+
+The interactive login process remained open, so export/review was not exercised.
+Both new environments and their dedicated gateway were stopped/retained, with
+separate Stopped observations and no listener. Earlier admission records, host
+fixtures and preexisting container states were unchanged. Local formatting,
+all-target locked Clippy, **151 locked Rust tests**, **3 launcher Node tests** and
+Switchboard's **64 Node tests** passed again; host Node remained 22.22.2.
+Evidence: `/tmp/opencode/antigravity-retry-*.log`,
+`switchboard-antigravity-{pilot,retry}.json`, and
+`dungeon-antigravity-followup-check.log`.
 
 ### First-copy admission (synthetic regression)
 
