@@ -1,17 +1,19 @@
 # Contributing
 
-Start with the [source build](README.md#build) and
+Start with the [CLI build](README.md#1-build-the-cli) and
 [development checks](README.md#development). For ordinary bugs or feedback,
 use the [issue tracker](https://github.com/Dark-Roast-Cyber/dungeon/issues) with
 versions, reproduction steps and sanitized results. Do not post credentials,
 personal session stores or sensitive security details in public issues.
+Report suspected vulnerabilities through [SECURITY.md](SECURITY.md), not a public issue.
 
-Dungeon is a Rust binary. Validate changes with:
+Dungeon is a Rust binary. Install Node 24 on a trusted host PATH for the
+owned-execution Rust fixture and Node tests. The fixture translates the fixed
+guest `/usr/bin/node` path to that host test executable; it does not require
+Node at `/usr/bin/node` on the host. This is a test-only prerequisite, not a
+host Dungeon runtime dependency.
 
-Install Node 24 on a trusted host PATH for the owned-execution Rust fixture
-and Node tests. The fixture translates the fixed guest `/usr/bin/node` path to
-that host test executable; it does not require Node at `/usr/bin/node` on the
-host. This is a test-only prerequisite, not a host Dungeon runtime dependency.
+Validate changes with:
 
 ```sh
 cargo fmt --check
