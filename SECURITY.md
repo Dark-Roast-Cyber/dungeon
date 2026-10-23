@@ -2,7 +2,7 @@
 
 ## Reporting
 
-Do not disclose a suspected vulnerability in a public issue, pull request, or discussion. If the repository Security tab shows **Report a vulnerability**, use that private form. Otherwise send the report privately to `public@christiant.io`, the maintainer contact on the [Dark Roast Cyber profile](https://github.com/Dark-Roast-Cyber). Include a minimal synthetic reproduction, the affected commit or tag, and the impact. Do not send credentials, tokens, session stores, or live project data. No response deadline is promised. Fixes are evaluated for current `main` and the latest published release, when one exists.
+Do not disclose a suspected vulnerability in a public issue, pull request, or discussion. Use [private vulnerability reporting](https://github.com/Dark-Roast-Cyber/dungeon/security/advisories/new). If that form is unavailable, send the report privately to `public@christiant.io`, the maintainer contact on the [Dark Roast Cyber profile](https://github.com/Dark-Roast-Cyber). Include a minimal synthetic reproduction, the affected commit or tag, and the impact. Do not send credentials, tokens, session stores, or live project data. No response deadline is promised. Fixes are evaluated for current `main` and the latest published release, when one exists.
 
 Dungeon 0.0.x is an engineering preview and has not undergone an independent security audit. Issue #1 performed live synthetic validation of one OpenShell 0.0.116 + rootless Podman 5.8.4 combination; that evidence does not generalize to other drivers, platforms, images, desktop clients, or EDR products.
 
