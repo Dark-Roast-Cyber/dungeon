@@ -263,6 +263,42 @@ They do not grant capability. `policy.json` remains the enforcement authority.
 
 If organization policy is added later, it is a ceiling. Private host configuration, project requests, guided setup, invocation flags, or AI-proposed configuration may narrow or request within that ceiling but cannot weaken it.
 
+## Shared sign-in direction (development, not an existing capability)
+
+Sign-in should be user/account-scoped rather than owned by a project sandbox:
+one enrollment across compatible projects, persistent across `down`/`up` and
+project deletion. A single credential owner should serialize refresh and persist
+rotated grants. Project guests must not receive duplicated refresh tokens or a
+shared writable native authentication directory. Account selection is separate
+from imported themes/plugins/settings, which may themselves contain secrets.
+
+Prefer OpenShell's existing gateway provider store, refresh and endpoint-bound
+credential substitution over another Dungeon daemon. The pinned gateway requires
+inspected credentialed endpoints: adopting it needs an explicit network/inspection
+contract, not silent changes to the current pass-through starter policy. Generic
+OAuth support is not proof of native subscription compatibility. OpenCode OAuth
+can select different endpoints/headers/models from its API-key path; each native
+integration requires separate validation.
+
+After one enrollment review, intended ordinary use is bare `dungeon` in another
+directory without a second login. New bindings should pin a non-secret account
+identity, not follow mutable defaults or credential-generation hashes. Secret
+rotation must not rebuild sandboxes; account changes must not retarget existing
+ones silently. Stopping a sandbox stops execution, not authorization; sign-out
+and project deletion have different scopes. Revocation cannot retract completed
+requests or promise that every already-open stream is terminated.
+
+Before automatic grants ship, enforceable restrictions must cover human/machine
+launches and reuse as well as creation: explicit account selection, project-local
+or disabled auth, and organization restrictions that users/project configuration
+cannot widen. No current organization ceiling is claimed. Opaque credentials
+limit extraction, not account abuse or spend through allowed endpoints. Keep
+`--no-auto-providers` until native compatibility and these authority gates pass.
+
+The current implementation remains per-project guest login or explicit named
+OpenShell providers. `scripts/probe-opencode-identity.cjs` is a synthetic native
+harness compatibility gate only, not a credential broker or shared login.
+
 ## Declarative setup boundary
 
 Reusable editor/tool setup remains data, not a host plugin mechanism. Reviewed OCI images remain the authority for installed binaries and toolchains. Dungeon does not add a second package manager or execute arbitrary host configuration scripts to construct an environment.
