@@ -555,9 +555,11 @@ remain available for other clients and troubleshooting:
 
 Dungeon preserves guest conversation history, but `attach` does not choose the
 last conversation or reuse an independently running service. It starts its own
-foreground service and requires matching host/guest OpenCode versions. Host
-config/auth/plugins/themes are not automatically imported into that service;
-the reviewed Neovim snapshot import below is a separate, explicit capability.
+foreground service and requires matching host/guest OpenCode versions. New human
+bindings can select host OpenCode config/plugins/themes and legacy auth as
+described below; existing bindings are unchanged. Current database-backed host
+authentication is not imported. The reviewed Neovim snapshot remains a separate,
+explicit capability.
 
 ```sh
 dungeon --config "$CONFIG" up
@@ -611,6 +613,97 @@ Dungeon exec left the guest service running; interrupting `forward` stops only
 the forward. Interactive TUI message submission remains unverified, and this
 version pair is not a matched-version validation. See the
 [recorded evidence](validation.md#remote-first-service-forwarding).
+
+## Harness configuration (OpenCode first slice)
+
+New human OpenCode bindings propose read-only host configuration in the existing
+scope review. `init --yes` explicitly approves that displayed scope; it still
+creates no sandbox. Existing configs omitting `harness`, and machine initialization,
+retain no harness import. Codex and Claude Code sharing follow separately.
+
+| Choice | Behavior |
+| --- | --- |
+| `--harness-config read-only` (default) | Select individual existing native files; derive read-only original-source binds without relabeling |
+| `--harness-config copy` | Declare sources, then use `dungeon reload` to capture/review a private snapshot before first `up`; snapshot files are mounted read-only |
+| `--harness-config disabled` | No harness mounts or source inventory |
+| `--exclude-provider-auth` | Omit legacy auth and entire `opencode.json`, `opencode.jsonc`, `cli.json` files that may mix credentials with settings |
+| `--harness-exclude PATH` (repeatable) | Omit an exact config-relative file/subtree, not a glob; legacy auth is controlled separately |
+
+OpenCode sources use `${XDG_CONFIG_HOME:-$HOME/.config}/opencode` and legacy
+`${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json`. Absolute XDG roots are
+required. The private schema-2 `harness` declaration stores `agent: "opencode"`,
+`mode`, `source`, `legacy_auth`, exclusions, selected `files` and optional copy
+`snapshot`. These fields enter existing runtime identity; changing a bound config
+does not reconfigure its sandbox. No repository file grants import authority.
+
+Selected config roots: `opencode.json`, `opencode.jsonc`, `cli.json`, `AGENTS.md`,
+and `plugin(s)`, `themes`, `skill(s)`, `agent(s)`, `command(s)`, `tool(s)` subtrees.
+Directories themselves are never mounted. Symlinks, hardlinks, special files and
+unsafe ownership/permissions refuse selection. Exclusions and known secret/native
+state names are skipped before opening files, including `.env`, `.env.*` and
+names ending in `.env`. Limits: 32 directory levels, 8192 inventory entries,
+4096 selected files, 4 MiB per file; copy captures at most 32 MiB with a 1 MiB
+manifest. The combined serialized project/import mount request must also fit
+48 KiB, checked before approval/capture and again before creation; this can
+require fewer files than the inventory limit. Neither filenames nor these
+checks identify every possible secret.
+
+Guest config targets `/sandbox/.config/opencode`; legacy auth targets
+`/sandbox/.local/share/opencode/auth.json`. Writable database/session/cache/state
+remain guest-private. Host-only `file://` plugins, external skills, absolute paths,
+environment references and commands are not rewritten or auto-mounted. npm plugin
+resolution may need downloads under existing policy; Dungeon installs no plugins
+and does not import host caches, `node_modules` or other local checkouts.
+
+The selected image must precreate guest-owned writable config/data/state/cache
+parents. The local image recipe does so after tool-verification cleanup and
+checks UID/GID998, mode0700, empty native directories and actual writability.
+Dungeon does not repair other images with a privileged runtime command.
+
+**Credential-inclusive is not credential-isolated.** The guest can use/exfiltrate
+visible credentials and execute plugin/config code. Auth exclusion omits whole
+mixed JSON files rather than attempting to sanitize arbitrary JSONC or plugin
+code; other selected content can still contain secrets. OpenCode 2.1.2 current
+credentials live in its native database, which this feature never reads or shares.
+Legacy `auth.json` visibility is not proof of usable guest authentication: the
+fresh 2.1.2 native fixture returned an empty credential list despite a readable
+file. It is not a way to mirror current host accounts. See the upstream
+[migration](https://github.com/anomalyco/opencode/blob/v2.1.2/packages/core/src/database/migration/20260805200742_import_legacy_credentials.ts)
+and [native roots](https://github.com/anomalyco/opencode/blob/v2.1.2/packages/util/src/global-roots.ts).
+
+**Read-only auth may prevent login refresh, and snapshots may become stale.**
+`reload` (typed `yes`, or `--yes`) reselects live filenames or captures/reviews a
+new copy for an **unbound** environment. Any `runtime.json`, including stopped or
+invalid state, refuses refresh before capture. It neither contacts OpenShell nor
+restarts work, rotates guest tokens or writes host credentials. Active refresh
+remains an open design question. Live in-place host edits can change visible
+bytes; additions are not selected automatically, and atomic file replacement can
+leave an old inode mounted. `plan` displays saved scope without reading/hashing
+harness inputs, so it is not a live drift detector.
+
+Creation uses the existing exact recognized local bind-enabled UID998 gateway
+check and shared import lock. No gateway migration occurs. Original files are
+never SELinux-relabeled. Nonempty original-source selections conservatively
+refuse **all enforcing SELinux hosts** before OpenShell contact, even if an
+administrator has arranged custom compatible labels. Unreadable or malformed
+enforcement state also refuses; absent `/sys/fs/selinux/enforce` or value `0`
+allows the other preflight checks, not a claim of guest accessibility. The check
+is not kernel attestation or a lock against enforcement changes. Choose an
+explicit copy/disabled binding instead; there is no fallback or enforcement change.
+Empty selections do not need this gate. Saving/reloading a live selection and
+offline `plan` remain possible; starting new work is refused.
+Missing/unsafe live files or changed snapshot contents
+block new work, not identity-checked status/stop/owned cleanup. Read-only protects
+mounted contents only, not writable guest ancestor paths or subsequent execution
+identity. **Native acceptance remains incomplete:** the first native gate found
+unreadable original sources and root-owned guest parents in the old image.
+The corrected recipe/preflight passed a separate disposable native gate for
+enforcing-host refusal and copy-mode config/plugin/state/resume. This validates
+the rebuilt test image, not original-source runtime on a non-enforcing host.
+Provider-auth reuse is still unestablished.
+No existing image/binding is changed automatically. See the
+[native gate](validation.md#authorized-native-gate-2026-10-22-blocked); token refresh
+and host UI theme behavior remain unvalidated.
 
 ## Reviewed Neovim snapshots
 

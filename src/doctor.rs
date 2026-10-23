@@ -79,9 +79,9 @@ pub(crate) fn run(explicit: Option<std::path::PathBuf>, json: bool) -> Result<i3
                 "Selected private configuration and policy passed local validation.",
                 "Review dungeon plan before runtime operations.",
             );
-            if !config.values.imports.is_empty() {
+            if crate::imports::configured(&config) {
                 let valid = crate::imports::verify(&config).is_ok();
-                report.add("imports", if valid { "recorded-not-verified" } else { "blocked" }, !valid, "Imports require approved frozen contents and the exact bind-enabled local gateway; guest pathname is mutable.", "Use imports stage before first creation. Doctor does not mount or execute imports; see Issue #5.");
+                report.add("imports", if valid { "recorded-not-verified" } else { "blocked" }, !valid, "Imports require safe selected live files or approved snapshots and the exact bind-enabled local gateway; guest pathname is mutable.", "Review plan; use reload for unbound harness selection/capture and imports stage for Neovim. Doctor does not mount or execute imports.");
             }
             Some(config)
         }
@@ -619,7 +619,7 @@ mod linux {
         };
         let mapping = bind.map(|b| b.mapping);
         let live = config.is_some_and(|c| {
-            c.values.project_transfer == ProjectTransfer::Live || !c.values.imports.is_empty()
+            c.values.project_transfer == ProjectTransfer::Live || crate::imports::configured(c)
         });
         let compatible =
             local && bind.is_some_and(|b| b.enabled && b.mapping) && healthy && socket_ok;
@@ -773,6 +773,7 @@ mod linux {
                     agent: Agent::Opencode,
                     providers: vec![],
                     imports: vec![],
+                    harness: None,
                 },
             )
             .unwrap();
@@ -1333,6 +1334,7 @@ esac
                     agent: Agent::Opencode,
                     providers: vec![],
                     imports: vec![],
+                    harness: None,
                 },
                 policy: crate::policy::starter_policy(),
                 policy_path: home.join("private/policy.json"),

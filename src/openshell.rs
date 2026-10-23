@@ -43,6 +43,8 @@ pub(crate) fn setup(_enable_live: bool, _dry_run: bool) -> Result<i32> {
 
 const LABEL: &str = "agentarchaeology.ai/dungeon-config";
 pub(crate) const GUEST_PROJECT: &str = "/sandbox/project";
+// Stay below Linux's per-argument limit, including the combined project/import request.
+const MAX_MOUNT_REQUEST_BYTES: usize = 48 * 1024;
 
 #[derive(Clone, Debug, Serialize)]
 struct LiveProjectMount {
@@ -72,7 +74,17 @@ fn mount_driver_config(config: &Config) -> Option<String> {
     if let Some(source) = crate::imports::mount_source(config) {
         mounts.push(json!({"type":"bind", "source":source, "target":"/sandbox/.config/nvim", "read_only":true, "selinux_label":"private"}));
     }
+    mounts.extend(crate::imports::harness::mounts(config));
     (!mounts.is_empty()).then(|| json!({"podman": {"mounts": mounts}}).to_string())
+}
+
+pub(crate) fn validate_mount_request(config: &Config) -> Result<()> {
+    if mount_driver_config(config).is_some_and(|request| request.len() > MAX_MOUNT_REQUEST_BYTES) {
+        return Err(Error::new(
+            "derived mount request exceeds 48 KiB; select fewer harness files with exclusions before approval/creation",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn project_transfer_plan(config: &Config) -> Value {
@@ -390,7 +402,7 @@ impl<'a> Runtime<'a> {
         transfer: &export::TransferGuard,
         initial_upload_pending: bool,
     ) -> Result<bool> {
-        if !self.config.values.imports.is_empty() {
+        if crate::imports::configured(self.config) {
             #[cfg(target_os = "linux")]
             local_setup::verify_import_gateway(self.config, &self.output)?;
         }
@@ -408,6 +420,7 @@ impl<'a> Runtime<'a> {
         let policy_path = directory.path().join("policy.json");
         write_new(&policy_path, &self.config.policy)?;
 
+        validate_mount_request(self.config)?;
         self.output.mutating();
         self.capture(&create_arguments(self.config, &policy_path), true)
             .map_err(|error| self.gateway_hint(error))?;
@@ -1022,6 +1035,7 @@ mod tests {
                     agent: Agent::Opencode,
                     providers: vec![],
                     imports: vec![],
+                    harness: None,
                 },
                 policy: starter_policy(),
                 fingerprint: "fingerprint".into(),
@@ -1764,6 +1778,7 @@ esac
                 agent: Agent::Opencode,
                 providers: vec![],
                 imports: vec![],
+                harness: None,
             },
             policy: starter_policy(),
             policy_path: PathBuf::from("/tmp/policy.json"),

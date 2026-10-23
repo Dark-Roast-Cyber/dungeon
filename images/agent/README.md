@@ -34,6 +34,8 @@ podman build --pull=never -t localhost/dungeon-agent:0.0.3-opencode-2.1.2 \
   -f images/agent/Containerfile images/agent
 podman run --rm --network none --entrypoint node \
   localhost/dungeon-agent:0.0.3-opencode-2.1.2 /usr/lib/node_modules/dungeon-agent/verify.cjs --path
+podman run --rm --network none --entrypoint node \
+  localhost/dungeon-agent:0.0.3-opencode-2.1.2 /usr/lib/node_modules/dungeon-agent/verify-layout.cjs
 podman history --no-trunc localhost/dungeon-agent:0.0.3-opencode-2.1.2
 ```
 
@@ -42,6 +44,17 @@ Pull the exact `FROM` digest first if it is not cached. No registry publication 
 The pnpm bootstrap archive and all Neovim/Rust archives are SHA-256 checked before extraction or local installer execution. Package installation uses the frozen lock with scripts disabled; only the two reviewed npm vendor native-binary setup scripts run afterward, with network disabled. Rust component `install.sh` files are executed only after their containing official archives pass the reviewed hash check. No remote installer is piped to a shell, no rustup toolchain manager is added, and no mutable Rust or Neovim release channel is resolved. A missing binary cannot trigger an unlocked fallback download. The final stage copies only the installed agent packages and reviewed image-tool filesystem, not pnpm's bootstrap, package store, or downloaded archives. The build context allowlist excludes all other files.
 
 For an agent version update, edit the manifest, regenerate the lock with its pinned pnpm (`pnpm install --ignore-workspace --lockfile-only --ignore-scripts` in this directory), review upstream install scripts and integrity metadata, then rebuild and repeat live validation. `--ignore-workspace` prevents an unrelated parent workspace from taking over the image lock update. For a Neovim or Rust update, replace only the manifest version/distribution coordinates and reviewed artifact hashes, then repeat the same image and containment validation. A pnpm version update also requires reviewing and replacing its bootstrap checksum in the Containerfile.
+
+After cleanup, the recipe creates empty OpenCode config/data/state/cache directories
+and their parents under `/sandbox` as UID/GID998 mode0700. The separate
+`verify-layout.cjs` checks final ownership, permissions, emptiness and actual
+writability **without launching a harness**. This prevents leaf mounts from
+creating root-owned data/state parents. Run its synthetic regression tests with
+`node --test images/agent/verify-layout.test.cjs`. Other selected images must
+provide the same writable-parent contract; Dungeon does not repair them as root.
+The rebuilt recipe passed a separate [synthetic native copy-mode gate](../../docs/validation.md#blocker-corrections-2026-10-22-source-checkout),
+including config/plugin loading and private-state resume; provider-auth reuse
+remains unestablished. That test did not replace existing image tags or services.
 
 ## Containment contract
 

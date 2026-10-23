@@ -1,7 +1,7 @@
 use crate::binding;
 use crate::config::{
-    Agent, Config, ConfigDoc, ProjectTransfer, canonical_project, create_private_dir, load_config,
-    load_config_data, write_new,
+    Agent, Config, ConfigDoc, HarnessMode, ProjectTransfer, canonical_project, create_private_dir,
+    load_config, load_config_data, write_new,
 };
 use crate::openshell::{GUEST_PROJECT, Runtime, plan_create_arguments, project_transfer_plan};
 use crate::policy::starter_policy;
@@ -102,6 +102,15 @@ enum Commands {
             help = "existing OpenShell provider name; repeatable, never a secret"
         )]
         providers: Vec<String>,
+        /// OpenCode host configuration access; existing bindings are never changed.
+        #[arg(long, value_enum, default_value = "read-only")]
+        harness_config: HarnessMode,
+        /// Omit legacy auth and whole OpenCode JSON configs that can contain credentials.
+        #[arg(long)]
+        exclude_provider_auth: bool,
+        /// Exclude an exact config-relative path/subtree (repeatable, not a glob).
+        #[arg(long = "harness-exclude")]
+        harness_exclude: Vec<String>,
         #[arg(
             long,
             visible_alias = "non-interactive",
@@ -116,6 +125,11 @@ enum Commands {
     },
     /// Show the policy and creation plan without writing files or contacting OpenShell.
     Plan,
+    /// Review/reselect unbound harness files or capture a copy; never restarts active work.
+    Reload {
+        #[arg(long)]
+        yes: bool,
+    },
     /// Capture and approve the explicitly declared Neovim snapshot (no runtime changes).
     Imports {
         #[command(subcommand)]
@@ -270,6 +284,9 @@ fn dispatch(cli: Cli) -> Result<i32> {
             image,
             agent,
             providers,
+            harness_config,
+            exclude_provider_auth,
+            harness_exclude,
             yes,
         }) => {
             if config.is_some() {
@@ -292,6 +309,9 @@ fn dispatch(cli: Cli) -> Result<i32> {
                 image,
                 agent,
                 providers,
+                harness_config,
+                exclude_provider_auth,
+                harness_exclude,
                 yes,
             )
         }
@@ -392,6 +412,14 @@ fn create_project_binding(project: &Path, agent: Agent) -> Result<Config> {
         agent,
         providers: vec![],
         imports: vec![],
+        harness: crate::imports::harness::defaults(
+            agent,
+            HarnessMode::ReadOnly,
+            false,
+            vec![],
+            project,
+            &path,
+        )?,
     };
     approve_environment(&directory, &values, false)?;
     write_environment(directory, values)
@@ -402,6 +430,9 @@ fn print_plan(config: &Config) -> Result<i32> {
     let mut unsatisfied = Vec::new();
     if !config.values.imports.is_empty() {
         unsatisfied.push("imports require approved unchanged snapshot and exact local bind-enabled UID998 gateway; offline plan is not runtime verification");
+    }
+    if crate::imports::harness::enabled(config) {
+        unsatisfied.push("harness imports require Linux and the exact local bind-enabled UID998 gateway; OpenCode database authentication is not shared; copy requires reload approval before up");
     }
     if config.values.project_transfer == ProjectTransfer::Live {
         unsatisfied.push(
@@ -430,6 +461,7 @@ fn print_plan(config: &Config) -> Result<i32> {
             "command": command,
             "policy": config.policy,
             "imports": imports,
+            "harness": crate::imports::harness::plan(config),
             "tool_requirements": if config.values.imports.is_empty() { vec![] } else { vec!["nvim (reviewed image; not verified by plan)"] },
             "guest_private_state": if config.values.imports.is_empty() { vec![] } else { vec!["/sandbox/.local/share/nvim", "/sandbox/.local/state/nvim", "/sandbox/.cache/nvim"] },
             "provider_requests": config.values.providers,
@@ -461,6 +493,9 @@ fn launch_default(config: &Config) -> Result<i32> {
 }
 
 fn run_command(config: &Config, command: Commands) -> Result<i32> {
+    if let Commands::Reload { yes } = command {
+        return crate::imports::harness::reload(config, yes);
+    }
     if let Commands::Imports {
         command: ImportCommands::Stage { yes },
     } = command
@@ -605,6 +640,7 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         | Commands::List { .. }
         | Commands::Versions { .. }
         | Commands::Imports { .. }
+        | Commands::Reload { .. }
         | Commands::Plan
         | Commands::Upload { yes: false } => unreachable!(),
     }
@@ -743,6 +779,9 @@ fn initialize(
     image: String,
     agent: Agent,
     providers: Vec<String>,
+    harness_config: HarnessMode,
+    exclude_provider_auth: bool,
+    harness_exclude: Vec<String>,
     yes: bool,
 ) -> Result<i32> {
     let project = canonical_project(&project)?;
@@ -756,6 +795,14 @@ fn initialize(
     };
     let name = name.unwrap_or(binding::generated_name(&project)?);
     let gateway = gateway.unwrap_or_else(|| "dungeon-local".to_owned());
+    let harness = crate::imports::harness::defaults(
+        agent,
+        harness_config,
+        exclude_provider_auth,
+        harness_exclude,
+        &project,
+        &directory.join("dungeon.json"),
+    )?;
     let values = ConfigDoc {
         schema: 2,
         name,
@@ -767,6 +814,7 @@ fn initialize(
         agent,
         providers,
         imports: vec![],
+        harness,
     };
     approve_environment(&directory, &values, yes)?;
     let config = write_environment(directory, values)?;
@@ -787,6 +835,14 @@ fn initialize(
 }
 
 fn approve_environment(directory: &Path, values: &ConfigDoc, yes: bool) -> Result<()> {
+    let config_path = if directory.is_absolute() {
+        directory.join("dungeon.json")
+    } else {
+        env::current_dir()?.join(directory).join("dungeon.json")
+    };
+    load_config_data(config_path, serde_json::to_value(values)?, |path| {
+        Ok((path.to_path_buf(), starter_policy()))
+    })?;
     println!(
         "{}",
         crate::config::review_json(&json!({
@@ -800,12 +856,25 @@ fn approve_environment(directory: &Path, values: &ConfigDoc, yes: bool) -> Resul
             "Copy mode: first up uploads the project; guest changes reach the host only through reviewed export. No writable host mounts."
         ),
         ProjectTransfer::Live => println!(
-            "Live mode: the guest can read and WRITE the selected host project immediately at /sandbox/project. Only this project is mounted; no upload/export. Requires a bind-enabled gateway. Choose --project-transfer copy for reviewed return of changes."
+            "Live mode: the guest can read and WRITE the selected host project immediately at /sandbox/project. Only this project is writable; separately reviewed harness files may be read-only. No upload/export. Requires a bind-enabled gateway. Choose --project-transfer copy for reviewed return of changes."
         ),
     }
     println!(
         "Review project contents before first up; all files within a live project become guest-visible, including secrets. Transfer is not a secret scanner."
     );
+    if let Some(h) = &values.harness {
+        println!("{}", crate::imports::harness::WARNING);
+        if h.mode == HarnessMode::Copy {
+            println!(
+                "Copy mode: run dungeon reload to capture and approve the harness snapshot before first up."
+            );
+        }
+        if h.exclude_provider_auth {
+            println!(
+                "Auth exclusion omits legacy auth.json and entire opencode.json/jsonc/cli.json files. It is not a secret scanner for plugins or other content."
+            );
+        }
+    }
     if !yes {
         if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
             return Err(Error::new(
@@ -946,6 +1015,7 @@ mod tests {
                 agent: Agent::Opencode,
                 providers: vec![],
                 imports: vec![],
+                harness: None,
             },
         )
         .unwrap();
@@ -1126,6 +1196,7 @@ mod tests {
                 agent: Agent::Opencode,
                 providers: vec![],
                 imports: vec![],
+                harness: None,
             },
         )
         .unwrap();
@@ -1219,6 +1290,7 @@ mod tests {
             agent: Agent::Opencode,
             providers: vec![],
             imports: vec![],
+            harness: None,
         })
         .unwrap();
         doc["imports"] = json!([{"source": source, "destination": "/sandbox/.config/nvim"}]);

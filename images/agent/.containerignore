@@ -3,3 +3,4 @@
 !package.json
 !pnpm-lock.yaml
 !verify.cjs
+!verify-layout.cjs

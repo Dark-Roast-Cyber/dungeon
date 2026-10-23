@@ -335,6 +335,7 @@ fn dispatch(explicit: Option<PathBuf>, operation: Operation) -> Response {
                     agent: Agent::Opencode,
                     providers: vec![],
                     imports: vec![],
+                    harness: None,
                 },
             )?;
             return Ok((0, Some(result(&config, None, Value::Null))));

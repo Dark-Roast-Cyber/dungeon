@@ -235,6 +235,7 @@ mod tests {
                 agent: Agent::Opencode,
                 providers: vec![],
                 imports: vec![],
+                harness: None,
             },
         )
         .unwrap();

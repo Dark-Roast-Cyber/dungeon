@@ -182,10 +182,13 @@ Low-friction project binding may remove repeated `--config` ceremony, but it mus
 | Config/runtime binding | Private host directory |
 | Export baseline | Private config directory (`baseline.json`) |
 | Approved Neovim snapshot | Private config `imports/<digest>/nvim`; read-only guest bind, original source separate |
-| Credentials | OpenShell providers or vendor-owned guest login |
+| Credentials | OpenShell providers or vendor-owned guest login; reviewed OpenCode config/legacy auth can additionally expose host credentials |
 | Project capability requests | Untrusted request input, never authority |
 
-No host dotfiles, editor caches, agent databases, private SSH keys, engine sockets, or credential directories are copied automatically.
+No host home, editor caches, agent databases, private SSH keys, engine sockets,
+or whole credential directories are copied automatically. New human OpenCode
+bindings propose narrowly selected config/legacy auth access after scope review;
+old bindings and machine initialization do not inherit it.
 
 ## Low-friction adoption
 
@@ -278,6 +281,25 @@ The accepted request categories are:
 Unsupported or unsatisfied requests remain explicit. Missing authority never causes automatic policy widening.
 
 ### Snapshot imports
+
+The OpenCode harness slice extends the same private config, fingerprint and import
+lock, with file selection/capture in `imports::harness` (`src/harness.rs`). It does
+not generalize Neovim's arbitrary source selection into a raw mount API. Native
+OpenCode config/plugin/theme leaves and optional legacy `auth.json` become
+individual read-only binds; original live files are never relabeled, private
+copies may be. Exclusions precede file opens. Database auth/session state and
+writable caches remain guest-private. `reload` only reselects unbound inputs;
+active refresh and write-required authentication are unresolved, not automatic
+credential synchronization. See the [bounded contract](configuration.md#harness-configuration-opencode-first-slice).
+
+The first native gate found inaccessible original sources and missing guest-owned
+parents. New work now refuses nonempty original-source imports on enforcing
+SELinux hosts before runtime contact, without custom-label exceptions or an
+automatic copy fallback. The image recipe creates empty UID998 mode0700 native
+parents after tool-verification cleanup and separately verifies that final layout.
+Existing images/bindings are not repaired. The rebuilt test image passed native
+copy config/plugin/state/resume checks, but did not establish legacy auth reuse; see
+[validation](validation.md#authorized-native-gate-2026-10-22-blocked).
 
 The Neovim slice accepts zero or one explicit directory declaration in the authoritative private config. `imports stage` captures bounded descriptor-checked files, reviews the captured hashes/data diff and selects an approved digest. The manifest is an artifact, not another configuration registry. Creation derives one read-only bind from the private digest-addressed snapshot, never from its original source. Copy project upload and optional live project transfer remain separate. Imports require the exact existing Dungeon-owned local bind-enabled UID998 gateway; setup predicates, not the weaker aggregate diagnostic report, authorize creation.
 

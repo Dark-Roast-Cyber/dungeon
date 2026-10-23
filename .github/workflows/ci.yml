@@ -24,6 +24,7 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --locked
+      - run: node --test images/agent/verify-layout.test.cjs
 
   npm:
     runs-on: ubuntu-26.04

@@ -211,6 +211,154 @@ bounded gateway/drift/guardian faults. See
 [the recorded gate](docs/validation.md#owned-interactive-ssh-implementation).
 This does not promote live mode, install clients or authorize publication.
 
+## Harness configuration access (2026-10-21)
+
+Status: development approved, in priority order **OpenCode > Codex > Claude Code**.
+The OpenCode source-only first slice implements selected read-only file access,
+copy/disabled modes, exclusions and unbound `reload`; formatting, all-target
+Clippy, 177 locked Rust tests and three npm launcher tests passed on the combined
+working tree. Source review found no remaining source-level blocker after the
+mount-budget and Neovim-staging corrections, but the subsequently approved native
+gate is **blocked**. Those initial gates did not authorize real host configuration/
+credential reads, existing-host sandbox changes, installation or publication;
+the later scoped publication grant is recorded below.
+
+2026-10-22: user separately approved disposable synthetic native validation.
+The completed QEMU/KVM fixture had its own Fedora CoreOS 44.20260913.3.2,
+Podman 5.8.4 store, loopback namespace, HOME and fresh gateway, with Enforcing
+SELinux and OpenShell 0.0.116. The imported reviewed OpenCode image ID was
+`bd446d0373bcd22b6f3d5323944b268c9ab09d7bbd7dfc4ef085f25a975cc142`.
+Release binary SHA-256:
+`a7e4628990178e8a5e9cb5a6b3c6794125632363c5c794509a6826524be24d79`.
+No real host configuration/authentication was an input. All four sandboxes,
+the fixture gateway/network, QEMU child, SSH listener, synthetic keys/disks and
+exported image archive are removed. The protected real host gateway/project
+container IDs, states and start times matched before/after; source hashes still
+match. Sanitized asserted evidence and cleanup proof:
+`/tmp/opencode/dungeon-harness-native-evidence-20261022`.
+Gate scripts/logs remain `/tmp/opencode/dungeon-harness-native-*`. No broader
+policy, production image/default, host installation or publication was changed.
+Doctor initially refused HOME-as-cwd roots; from the fixture project it was
+healthy despite the native application failure. Truncated streamed-stdin fixture
+scripts were corrected to uploaded files with null stdin, not counted as passes.
+
+Native findings and decisions before continuing:
+
+1. Reviewed image + leaf mounts create root-owned guest parents and prevent
+   OpenCode log/state creation. A separate offline prototype with empty native
+   config/data/state/cache directories owned by UID998 mode0700 enabled copy-mode
+   config loading, an active local plugin, private writable state and same-ID
+   resume. It is not amended-image validation. The recipe now prepares empty
+   native directories/parents after verification cleanup and runs a separate
+   final-layout verifier; no privileged runtime repair or host-parent mount.
+2. Original-source reads failed with ordinary home labels under Enforcing SELinux;
+   copies were readable without relabeling originals. Keep original-source
+   relabeling and automatic fallback prohibited. Following user continuation,
+   preserve the approved original-source default and add conservative early
+   refusal on enforcing/unknown SELinux state for nonempty selections. Explicit
+   copy/disabled remain available; no custom-label exception or snapshot-default
+   substitution. Read-only selection/reload stays offline; new-work admission
+   checks compatibility. Status/stop/owned cleanup remain independent.
+3. Fresh 2.1.2 provider credential reuse was not established: a readable synthetic
+   legacy auth file still produced an empty native credential list after model
+   readiness. Current host auth/session databases remain unshared. A bounded
+   native credential-import contract needs separate review; neither file exposure
+   nor the server API's successful password authentication proves provider auth.
+   Actual OAuth refresh/model inference/theme behavior remain untested.
+
+Independent read-only native findings review: `ses_e9b4a23c9ffeE2hJILdlCMIABK`
+(completed; no edits/runtime operations). See docs/validation.md for exact limits.
+
+Correction continuation: source checks pass (179 Rust, three launcher, three
+layout tests, fmt, all-target Clippy). Incremental read-only review
+`ses_e9a419c6bffedn8NwOAptXzDwH` found no source defect. Corrected recipe built
+distinct test image `b2ac1628e85d8757d932e1fb9c72e66d9d7608df3f6db9ae77fd08b81d2f3005`;
+release SHA `8a7ea52ba868264b7777d02ab231d73796313d9acede90bf335b5c44d9107ef4`.
+Fresh synthetic native revalidation **passed the incremental correction gate**
+on the same FCOS/Podman/OpenShell/Enforcing combination. The actual corrected
+image (not the prototype) passed final layout/tools checks, original-source
+human/machine pre-runtime refusal, explicit copy config/plugin execution,
+readable read-only leaves, guest-owned writable roots, private-state same-ID
+resume, bounded denial and bound reload refusal. Original synthetic sources and
+labels stayed unchanged. Provider credentials remained an empty native list.
+The fixture sandbox/gateway/network/VM/listener/keys/disks/archive were removed;
+protected host IDs/states/start times matched, and runtime/image/test source
+hashes rechecked. The Linux CI quality job now runs the layout regressions.
+Sanitized evidence: `/tmp/opencode/dungeon-harness-correction-evidence-20261022`;
+scripts/logs/source hashes: `/tmp/opencode/dungeon-harness-correction-*`.
+No ordinary image-tag promotion, host installation, real host config/credential
+reads or existing-service change occurred. The user subsequently authorized
+commit, push, merge and task cleanup; publish only this harness slice, preserving
+unrelated machine/socket work and retained native evidence. No image release,
+host installation or existing-service cleanup is included in that authorization.
+Next unresolved boundary: separately review a bounded native provider-auth
+contract without host DB/session copying or real secret access; original-source
+non-enforcing runtime, OAuth refresh/inference/UI themes remain unvalidated.
+Do not start Codex/Claude slices by pretending these OpenCode gates passed.
+
+Publication gate: an index-exported snapshot excludes unrelated machine/socket
+edits and passes fmt, all-target locked Clippy, 175 locked Rust tests (128+47),
+and all 20 Node tests. Native results remain tied to their combined-tree hashes;
+no new native claim follows from the staged-only source run. Use a feature PR,
+wait for hosted CI, merge without bypassing checks, then remove only the task
+branch/staged export and preserve unrelated working files/evidence/services.
+
+OpenCode containment was inspected as inspiration for XDG paths and read-only
+configuration, not reused for its auth/session database seeding or host hooks.
+Version-matched OpenCode 2.1.2 source places current credentials in its database;
+that remains unshared. Legacy file visibility did not establish fresh-guest auth
+reuse in this native gate; it is not host-account synchronization. Read-only selection
+uses per-file binds (no original-source relabeling), avoiding directory exclusion
+leaks. Independent review identified Linux argument-size risk; the combined
+derived mount request is now capped at 48 KiB before approval/capture/creation.
+
+After the OpenCode decisions/gates above: Codex 0.156.1 uses `$CODEX_HOME/auth.json` with file/keyring/auto/ephemeral
+backends; file save truncates/writes the auth file. Do not infer keyring sharing
+or refresh compatibility from mounting that file. Native source:
+[auth storage](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/login/src/auth/storage.rs).
+Resolve config/plugin path and guest-writable auth behavior before extending the
+OpenCode-only declaration. Claude Code follows that slice.
+
+- New bindings should propose credential-inclusive, read-only access to the
+  selected harness's existing configuration in the scope-review prompt. Support
+  OpenCode, Codex and Claude Code, including provider configuration/authentication,
+  plugins and themes where their native behavior permits it. Existing bindings
+  must not silently gain access.
+- Provide reviewed snapshot/copy and disabled modes, plus explicit exclusions,
+  especially provider auth. A directory bind cannot subtract excluded files;
+  resolve narrow native paths or require a filtered snapshot rather than exposing
+  an excluded credential through its parent directory.
+- Read-only protects mounted contents from guest writes, not credential reading,
+  use or exfiltration. Plugins/configuration may execute guest code. Keep native
+  sessions/databases and writable caches guest-private; no whole-home/socket
+  mounts, host execution fallback, automatic credential synchronization, gateway
+  migration or policy widening.
+- Map version-matched upstream native paths, embedded credentials, host-only path
+  references, auth refresh and writable-state needs before implementation. Reuse
+  config/import/OpenShell owners; distinguish host OpenCode UI from guest-server
+  settings and verify original-source SELinux handling without blind relabeling.
+- Validate exclusions, path safety, plugin execution, drift and legacy bindings
+  with synthetic fixtures, then run repository-required checks. Live proof needs
+  separately authorized disposable resources, never the existing project sandbox.
+
+### Open question: authentication refresh and reload
+
+**Read-only auth may prevent login refresh, and snapshots may become stale.**
+Investigate an explicit `reload` command, not automatic synchronization. Separate
+refreshing a reviewed snapshot from a harness's need to write refreshed auth:
+reloading bytes alone does not solve write-required token rotation. Also verify
+whether a running harness rereads files and whether native atomic file replacement
+leaves a live file bind pointing at an old inode.
+
+Any reload design must preserve exclusions, review changed scope, respect bound
+runtime identity and existing snapshot refresh refusals, and report restart or
+replacement requirements without silently restarting active work. Do not add a
+writable host credential mount, host write-back or auth/session database sync as
+a workaround. Guest-native login/refresh or an explicit unsupported state remain
+options where safe read-only reuse cannot work. The first `reload` only supports
+unbound configuration selection/capture and refuses every runtime binding;
+active-sandbox refresh and guest token rotation semantics remain unsettled.
+
 ## Deferred
 
 Automate serve/forward/attach only after the relevant lifecycle/version gates

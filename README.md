@@ -192,6 +192,7 @@ dungeon config --path           # just the dungeon.json path
 | Gateway | `dungeon-local` | `--gateway NAME` |
 | Workspace | `default` | `--workspace NAME` |
 | Providers | None | `--provider NAME` (repeatable; existing providers, not secrets) |
+| OpenCode host configuration | Reviewed read-only selected files | `--harness-config read-only\|copy\|disabled` |
 
 For noninteractive configuration writing:
 
@@ -226,11 +227,32 @@ dungeon auth claude
 ```
 
 Run `up` first. Codex uses device login; Claude opens its guest CLI for `/login`.
-Credentials stay guest/vendor-owned. Dungeon never copies host credentials or
-native sessions. OpenShell named providers are the separate brokered API path;
-OpenCode login remains provider-specific. Read-only sharing of host harness
-configuration, auth, plugins and themes is **not implemented**; the current
-guest does not automatically inherit them.
+Guest login credentials stay guest/vendor-owned. OpenShell named providers are
+the separate brokered API path. Native host session/authentication databases are
+never shared.
+
+New human OpenCode bindings now propose selected host configuration,
+plugins/themes and legacy `auth.json` read-only during scope review. **Read-only
+does not prevent credential use or exfiltration.** Current OpenCode 2.1.2 database
+credentials are not imported; guest login may still be required. **This first
+slice is not ready for normal use:** the native gate found original-source
+access and guest-directory blockers in the old reviewed image. The recipe now
+precreates guest-owned directories; new work with original-source imports refuses
+enforcing SELinux before runtime contact. Copy remains an explicit choice, and
+provider-auth reuse is still unestablished. See the
+[native result](docs/validation.md#authorized-native-gate-2026-10-22-blocked).
+Existing bindings and Codex/Claude Code configuration sharing are unchanged.
+
+```sh
+dungeon init --exclude-provider-auth     # also omits whole mixed OpenCode JSON configs
+dungeon init --harness-exclude plugins/private
+dungeon init --harness-config copy       # then dungeon reload to capture/review
+dungeon init --harness-config disabled
+```
+
+**Read-only auth may prevent login refresh, and snapshots may become stale.**
+`reload` currently refreshes unbound selections only, not active sandboxes or
+guest tokens. See [harness configuration](docs/configuration.md#harness-configuration-opencode-first-slice).
 
 ## Optional attachment
 
@@ -257,8 +279,9 @@ and `/proc` are required. See [attachment](docs/configuration.md#remote-first-at
 - Runtime evidence covers specific Linux/OpenShell **0.0.116**/rootless-Podman
   combinations, not general desktop, EDR, macOS or native Windows containment.
   Setup health and tests are not security attestation.
-- No host home, engine socket, credentials or dotfiles are shared automatically.
-  Project files cannot authorize mounts or policy changes.
+- No host home, engine socket or native auth/session database is shared.
+  Selected OpenCode configuration/legacy auth requires binding scope approval;
+  project files cannot authorize mounts or policy changes.
 - Telltale integration remains deferred until its 0.7.0/Event4 contract stabilizes.
   It is not part of the active runtime.
 
