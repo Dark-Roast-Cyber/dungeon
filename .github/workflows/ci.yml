@@ -25,6 +25,7 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --locked
       - run: node --test images/agent/verify-layout.test.cjs
+      - run: node --test scripts/probe-opencode-identity.test.cjs
 
   npm:
     runs-on: ubuntu-26.04

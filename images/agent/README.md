@@ -64,6 +64,26 @@ With `HOME=/sandbox`, Neovim uses its standard HOME-derived data, state, and cac
 
 No model, provider, telemetry override, authentication bypass, or privileged runtime requirement is added. Vendor authentication happens only inside OpenShell. Dungeon still owns coordination, OpenShell enforcement, the image installed versions, and vendors auth/model/session formats.
 
+## Synthetic identity compatibility probe (development only)
+
+From the repository root, after explicitly building the reviewed image:
+
+```sh
+podman run --pull=never --rm -i --network none --entrypoint node \
+  --env DUNGEON_SYNTHETIC_PROBE=1 localhost/dungeon-agent:local-test \
+  - < scripts/probe-opencode-identity.cjs
+```
+
+This executes the actual pinned OpenCode against a loopback synthetic model
+fixture with independent temporary guest HOME/state roots and a synthetic
+revisioned credential marker. It checks opt-out with an actual native run and
+scans only its synthetic HOME/project/TMPDIR tree for retained markers. It mounts
+no host files, reads no real configuration/auth,
+and prints assertions rather than native output or credentials. It is **not**
+an OpenShell credential-substitution, real-provider, OAuth or shared-sign-in gate.
+Do not run the script directly on the host or treat a mock endpoint response as
+provider authentication evidence.
+
 ## Limitations
 
 For the local OpenShell 0.0.116 Podman validation gateway, use OpenShell's
