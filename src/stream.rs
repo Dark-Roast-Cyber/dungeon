@@ -253,7 +253,7 @@ impl Stream {
             self.pending.clear();
             self.seq = 0;
         }
-        let cancelled = SIGNAL.load(Ordering::SeqCst) != 0;
+        let mut cancelled = SIGNAL.load(Ordering::SeqCst) != 0;
         let cancellation = Err(Error::new("Machine execution cancelled."));
         let mut event = match if cancelled { &cancellation } else { result } {
             Ok(code) => json!({"event":"finished","ok":true,"exit_code":code,"error":null}),
@@ -266,6 +266,8 @@ impl Stream {
         };
         event["cleanup"] = json!(self.cleanup);
         event["primary_transport_verified"] = json!(self.primary_verified);
+        // Unpublished terminal bytes may be replaced. Earlier queued frames may not.
+        let terminal_at = self.pending.len();
         self.enqueue(event)?;
         let mut written = false;
         let deadline = Instant::now() + DRAIN;
@@ -278,7 +280,8 @@ impl Stream {
                 if written {
                     return Err(Error::new("Machine execution cancelled during delivery."));
                 }
-                self.pending.clear();
+                self.pending.truncate(terminal_at);
+                self.seq -= 1;
                 let mut event = machine::error_json(
                     "exec",
                     &Error::new("Machine execution cancelled."),
@@ -288,9 +291,8 @@ impl Stream {
                 event["exit_code"] = Value::Null;
                 event["cleanup"] = json!(self.cleanup);
                 event["primary_transport_verified"] = json!(self.primary_verified);
-                // Replace, do not publish a second sequence number.
-                self.seq -= 1;
                 self.enqueue(event)?;
+                cancelled = true;
             }
             let before = self.pending.len();
             self.flush()?;
@@ -566,6 +568,58 @@ mod tests {
             }
         }
         assert!(bytes.iter().all(|b| *b == 0));
+    }
+
+    #[test]
+    fn late_cancellation_before_final_write_preserves_queued_frames() {
+        let _lock = SIGNAL_LOCK.lock().unwrap();
+        let _signals = Signals::install().unwrap();
+        SIGNAL.store(0, Ordering::SeqCst);
+        let (mut stream, mut reader) = pipe_stream();
+        stream.launched = true;
+        stream.cleanup = "confirmed";
+        stream.primary_verified = true;
+        stream
+            .enqueue(json!({
+                "event": "output",
+                "stream": "stdout",
+                "encoding": "base64",
+                "data": "QQ=="
+            }))
+            .unwrap();
+        PHASE.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(|name| {
+                if name == "final_delivery" {
+                    assert_eq!(unsafe { libc::raise(libc::SIGTERM) }, 0);
+                }
+            }))
+        });
+        stream.finish(&Ok(23)).unwrap();
+        PHASE.with(|hook| *hook.borrow_mut() = None);
+        SIGNAL.store(0, Ordering::SeqCst);
+        let mut bytes = vec![];
+        let mut buffer = [0u8; 4096];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => bytes.extend_from_slice(&buffer[..n]),
+            }
+        }
+        let events = bytes
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_slice::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert_eq!(events[0]["seq"], 0);
+        assert_eq!(events[0]["event"], "output");
+        assert_eq!(events[0]["data"], "QQ==");
+        assert_eq!(events[1]["seq"], 1);
+        assert_eq!(events[1]["event"], "finished");
+        assert_eq!(events[1]["ok"], false);
+        assert!(events[1]["exit_code"].is_null());
+        assert_eq!(events[1]["cleanup"], "confirmed");
+        assert_eq!(events[1]["primary_transport_verified"], true);
     }
 
     #[test]

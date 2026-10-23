@@ -164,10 +164,12 @@ failure. Machine INT/TERM is sticky through teardown and final publication: it
 exits 1 with a failure event, never a synthetic successful exit 130/143. Human
 `exec --owned` retains its existing 130/143 signal semantics. No machine signal
 handler is removed before final delivery completes. The publication decision
-checks observed cancellation before the first final-frame write. If a later
-signal arrives after final bytes have begun writing, those bytes cannot be safely
-rewritten: the CLI exits 1, may leave an incomplete or already-published success
-event, and never sends a second finished event. Consumers must check both complete
+checks observed cancellation before the first final-frame write. If cancellation
+is observed before that write, only the unpublished terminal event is replaced;
+already queued frames keep their sequence numbers. If a later signal arrives
+after final bytes have begun writing, those bytes cannot be safely rewritten:
+the CLI exits 1, may leave an incomplete or already-published success event, and
+never sends a second finished event. Consumers must check both complete
 JSONL and the CLI exit; a final event alone is not a completion acknowledgement.
 A failed consumer may receive no final event; final delivery is bounded
 best effort, never a reason to block cleanup. Interrupted/broken streaming exits 1.

@@ -4,7 +4,7 @@
 
 - Support Linux machine stdout connected Unix stream sockets without changing inherited descriptor flags; preserve FIFO backpressure and cleanup.
 - Expose additive machine `copy_baseline_valid` admission evidence and terminal `cleanup` / `primary_transport_verified` lifecycle evidence for external consumers such as Switchboard.
-- Verify owned primary exit before removing controls; preserve queued frame sequences and drain discarded output within the cleanup deadline after cancellation or output faults.
+- Verify owned primary exit before removing controls; preserve queued frame sequences and drain discarded output within the cleanup deadline after cancellation or output faults. A cancellation observed before the terminal frame is written replaces only that unpublished frame.
 
 ## Unreleased preview additions (0.0.2)
 
