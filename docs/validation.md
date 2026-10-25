@@ -2,6 +2,65 @@
 
 CI checks formatting, Clippy, locked Rust tests, release compilation, CLI version execution, npm launcher behavior, distribution version synchronization, native archive creation, and full npm package assembly on explicit supported runners.
 
+## Harness-neutral onboarding (2026-10-24, source checkout)
+
+Human initialization now asks for a harness if none is explicit, then reviews
+scope once. The project binding stores that choice. Bare interactive `dungeon`
+shares the guest-CLI `run` path for all three harnesses; host OpenCode attachment
+is explicit `attach`. New bindings disable host configuration imports and do not
+derive or validate unused harness source paths. Existing bindings and machine
+initialization are not migrated.
+
+Actual-CLI synthetic PTY tests cover all harness choices, blank/invalid answers,
+EOF/Ctrl-C/scope cancellation, implicit initialization, saved-choice reuse,
+bare/explicit/default guest execution, native flags, invocation-only overrides,
+same-binding stop/resume and single initial copy upload. Noninteractive bare
+launch refuses before runtime work for every harness. Import tests cover explicit
+opt-in, disabled source non-inventory and project-contained XDG data paths.
+
+Formatting, warnings-denied all-target locked Clippy, **187 locked Rust tests**
+(130 unit + 57 integration), release compilation and three npm launcher tests
+passed. Rust tests used checkout-local `TMPDIR`; launcher tests used Node22.22.2,
+not the Node24 release gate. An earlier default-`/tmp` full-suite attempt failed
+with `ETXTBSY` in an existing owned-command fixture; it is not counted as a pass.
+No other-platform runtime or new containment acceptance is inferred.
+Evidence: `/tmp/opencode/dungeon-harness-neutral`.
+
+The final native smoke used Linux7.2.9-201.fc44.x86_64, rootless Podman5.8.7,
+OpenShell0.0.116 and existing local image `localhost/dungeon-agent:local-test`
+(`3947cf4ee202…`), not a rebuilt/promoted default image. Debug binary SHA-256:
+`369d1ee7fa4e978e151ab27bf348fb7efdf6ca9eaa2f85e82dbcaeb25bef1e89`.
+Interactive init selected Codex, retained the live default and created no runtime
+or host imports. Native `up` reached Ready; OpenCode2.1.2, Claude2.1.267 and
+Codex0.156.1 version commands succeeded without changing the saved choice.
+A guest write appeared immediately in the synthetic host project. Bare `dungeon`
+rendered Codex's welcome/login screen without another selection. After stopping,
+configured `run` resumed the same sandbox ID and retained the project marker.
+
+Two earlier terminal fixtures failed: plain-text matching missed ANSI-separated
+welcome text, then a single Ctrl-C with undrained output did not finish within
+20seconds. The successful fixture continuously drained output and sent a second
+Ctrl-C; this is not a single-interrupt guarantee. Every attempt's sandbox was
+observed Stopped and destroyed; matching host transports were absent afterward.
+Protected existing gateway/sandbox IDs, states and start times matched before/after.
+No host installation, image replacement, login, inference, credential import or
+new containment matrix was performed. Synthetic configs/logs remain in the
+evidence directory; successful assertions are in `native-summary-final.log`.
+
+GPT-6.1 Sol high adversarial review found that `run codex -- --version` leaked
+Dungeon's separator into guest argv. A real-parser regression failed before the
+correction; selection now consumes exactly one optional separator immediately
+after a named harness and preserves later native separators. Parser tests cover
+all three harnesses, multiword arguments, repeated separators and an empty tail;
+actual-CLI synthetic transport checks cover version flags and native subcommands.
+The same reviewer found no remaining source blockers after correction. Earlier
+native smoke evidence above remains tied to its binary, not a new native run of
+this parser correction.
+After correction, formatting, warnings-denied all-target locked Clippy, **188
+locked Rust tests** (131 unit + 57 integration), three launcher tests and release
+compilation passed again. Logs use the `separator-` prefix in the same evidence
+directory; Rust fixtures again used checkout-local `TMPDIR`.
+
 ## OpenCode harness configuration (source-only development, 2026-10-21)
 
 Synthetic actual-CLI fixtures exercise read-only native file selection,

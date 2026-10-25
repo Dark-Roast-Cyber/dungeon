@@ -51,41 +51,50 @@ needs an explicit disposal/reprovision decision. Doctor health is not proof of i
 ## 3. Choose a project and agent
 
 Build the [reviewed local Linux amd64 image](../images/agent/README.md) before
-the first launch. To use the host OpenCode UI, separately install a host client
+the first launch. It includes all three harnesses; its tag names the OpenCode pin,
+not a required harness choice. To use the optional host OpenCode UI, separately install a host client
 matching the guest pin (currently 2.1.2); use `dungeon versions` to compare them.
-`dungeon run opencode` uses only the guest CLI if no matching host client is
-available.
+Ordinary `dungeon` / `dungeon run` uses the guest CLI and needs no host harness client.
 
 ```sh
 cd /path/to/project
-dungeon                         # review project mount, attach host UI to guest OpenCode
+dungeon                         # choose a harness, approve project scope, launch guest CLI
 # OR, on a new project:
 dungeon run claude              # review binding, choose Claude as default
 dungeon run codex               # choose Codex for this invocation on an existing binding
 ```
 
+First use asks for OpenCode, Claude Code or Codex (no assumed choice), then scope
+approval. Later launches reuse that project's choice without prompting again.
 First use requires a terminal for review. `dungeon init` writes the private
 config without starting anything; use it **before** first launch to choose an
 image, transfer mode, gateway, or provider:
 
 ```sh
-dungeon init --agent claude       # other settings use reviewed defaults
+dungeon init                     # choose harness; other settings use reviewed defaults
 dungeon plan                     # inspect policy and requested mounts
 dungeon                           # first up, then the selected agent
 ```
 
 The image is not published or pulled by Dungeon. `dungeon versions --check`
 reads the registry stable tag but does not download or execute an update.
-Existing bindings keep their selected image. Do not rely on host tools or
-host auth/config/plugins/themes being available in the guest.
+Existing bindings keep their selected image. Host configuration imports are off
+by default; do not rely on host tools or host auth/config/plugins/themes in the guest.
 Claude/Codex login is guest-owned (`dungeon auth claude|codex` after `up`);
 OpenCode uses its own guest `/connect` flow. Changing image, policy, or scope
 after creation fails identity checks rather than rebuilding in place.
 
 ## 4. Daily use and deliberate disposal
 
-For a configured OpenCode project, interactive `dungeon` (or explicit
-`dungeon attach`) starts an authenticated guest service, opens a temporary
+For every configured harness, `dungeon` and `dungeon run` launch the same guest
+CLI, creating/resuming its sandbox when needed. Bare `dungeon` requires a terminal;
+explicit `dungeon run -- --help` accepts native flags without one. On an existing
+binding, `dungeon run claude|codex|opencode` overrides only that invocation.
+For automation, initialize explicitly with `dungeon init --yes --agent AGENT`;
+`--yes` never chooses a harness.
+
+Optional `dungeon attach` (not bare `dungeon`) starts an authenticated guest
+OpenCode service, opens a temporary
 host-loopback forward and attaches your installed host OpenCode UI. It checks
 that host and guest versions match; it does not install or replace either CLI.
 Dungeon pauses at `Press Enter to open OpenCode` so the startup and connection
@@ -94,8 +103,8 @@ cancels attachment and cleans up the service and forward.
 Exit the host UI or press Ctrl-C to stop the service and forward, keeping the
 sandbox. If cleanup cannot be confirmed, choose to stop the sandbox (preserves
 data; name confirmation required) or leave it running, then inspect it. A
-noninteractive invocation refuses attachment. `dungeon run opencode` remains
-the direct guest TUI; the [manual service/forward flow](configuration.md#remote-first-attachment)
+noninteractive invocation refuses attachment. Ordinary launch uses guest CLIs;
+the [manual service/forward flow](configuration.md#remote-first-attachment)
 remains available. Codex and Claude's vendor-specific remote modes need their
 own validation and still run as guest CLIs.
 

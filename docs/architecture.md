@@ -123,8 +123,7 @@ Service attachment reuses OpenShell's foreground gRPC forwarding, not a new
 Dungeon server or proxy. `forward` checks the existing Ready binding and policy
 before opening host loopback to a guest-loopback service. It neither starts the
 service nor manages its authentication. For the reviewed OpenCode path, a
-foreground `dungeon attach` (also the interactive default for configured
-OpenCode) starts the guest service, holds its generated password only in memory,
+foreground explicit `dungeon attach` starts the guest service, holds its generated password only in memory,
 forwards guest loopback to an available host-loopback port, verifies 401 without
 authentication and matching authenticated server version, then runs the native
 host UI. On exit it sends Ctrl-C through the service PTY and checks shutdown
@@ -186,8 +185,8 @@ Low-friction project binding may remove repeated `--config` ceremony, but it mus
 | Project capability requests | Untrusted request input, never authority |
 
 No host home, editor caches, agent databases, private SSH keys, engine sockets,
-or whole credential directories are copied automatically. New human OpenCode
-bindings propose narrowly selected config/legacy auth access after scope review;
+or whole credential directories are copied automatically. Explicit OpenCode
+imports propose narrowly selected config/legacy auth access after scope review;
 old bindings and machine initialization do not inherit it.
 
 ## Low-friction adoption
@@ -209,10 +208,19 @@ current directory's same private binding.
 
 `init` separates configuration review from runtime creation: project, name and
 private directory have deterministic defaults, with explicit flags for overrides.
-The human CLI asks once before saving; `init --yes` is explicit noninteractive
-approval. The same config writer and validator serve direct binding and machine
+The human CLI first asks for a harness if none was explicitly selected, then
+asks once before saving scope. No harness is assumed or inferred from host tools.
+The choice is stored in the project binding, without a global preference registry.
+`init --yes --agent AGENT` is explicit noninteractive approval and selection.
+Host harness imports are disabled by default; read-only/copy access is opt-in.
+The same config writer and validator serve direct binding and machine
 initialization. `config` exposes resolved values/paths without a new registry;
 `config` and `plan` never initialize missing bindings or contact OpenShell.
+
+Bare `dungeon` is interactive-only for every harness and reuses `run`'s guest-CLI
+launch path, with no host harness client requirement. Explicit `run` accepts
+noninteractive native arguments and invocation-only harness overrides. Host
+OpenCode attachment remains an explicit, vendor-specific `attach` operation.
 
 There is no mutable project-binding registry and no repository scan. The
 private config path is derived from the canonical project path under the user's

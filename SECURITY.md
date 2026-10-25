@@ -86,8 +86,9 @@ they do not add containment or guarantee final event delivery. See the
 
 OpenShell providers can grant authority even when raw secrets are brokered. `dungeon auth` starts vendor-owned login inside the guest. Resulting OAuth credentials live in guest-controlled state. Dungeon does not inspect, copy, refresh, escrow, or synchronize them.
 
-New human OpenCode bindings propose read-only access to selected native config
-files, plugins/themes and legacy `auth.json` in their initialization review.
+New bindings disable host harness imports. Explicit OpenCode
+`--harness-config read-only|copy` proposes access to selected native config
+files, plugins/themes and legacy `auth.json` in the initialization review.
 Existing bindings and machine initialization do not gain access automatically.
 Read-only prevents guest writes to mounted contents, **not reading, using or
 exfiltrating credentials**. Plugins/configuration execute inside the guest with

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ask for a harness on first human initialization instead of assuming OpenCode; persist the project choice and keep host configuration imports opt-in. Noninteractive initialization requires `--agent` as well as `--yes`.
+- Make interactive bare `dungeon` launch the same guest CLI as `dungeon run` for every harness. Host OpenCode attachment is now explicit `dungeon attach`; `run -- NATIVE_FLAGS` uses the configured harness without a host client.
 - Support Linux machine stdout connected Unix stream sockets without changing inherited descriptor flags; preserve FIFO backpressure and cleanup.
 - Expose additive machine `copy_baseline_valid` admission evidence and terminal `cleanup` / `primary_transport_verified` lifecycle evidence for external consumers such as Switchboard.
 - Verify owned primary exit before removing controls; preserve queued frame sequences and drain discarded output within the cleanup deadline after cancellation or output faults. A cancellation observed before the terminal frame is written replaces only that unpublished frame.

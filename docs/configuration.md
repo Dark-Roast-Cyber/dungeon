@@ -107,8 +107,10 @@ dungeon config
 dungeon plan
 ```
 
-`init` shows the resolved scope and asks for one confirmation, rather than
-prompting for each field. It writes only private configuration and the starter
+`init` asks for a harness (OpenCode, Claude Code or Codex) if `--agent` is omitted,
+then shows the resolved scope and asks for one confirmation, rather than
+prompting for each field. The choice is saved per project; there is no assumed
+harness or global preference registry. It writes only private configuration and the starter
 policy; it does not contact OpenShell, create/start a sandbox, stage imports or
 upload files. Override values with flags before confirming:
 
@@ -119,13 +121,15 @@ upload files. Override values with flags before confirming:
 | `--name NAME` | Project-derived name plus path hash, at most 19 characters |
 | `--gateway NAME` | `dungeon-local` |
 | `--workspace NAME` | `default` |
-| `--agent opencode\|claude\|codex` | `opencode` |
+| `--agent opencode\|claude\|codex` | Ask once for this project; required without a terminal |
 | `--image OCI_REFERENCE` | `localhost/dungeon-agent:0.0.3-opencode-2.1.2` (build first) |
 | `--project-transfer copy\|live` | `live` for new human CLI bindings |
 | `--provider NAME` (repeatable) | No providers; names refer to existing OpenShell providers |
+| `--harness-config read-only\|copy\|disabled` | `disabled`; host imports require explicit opt-in |
 | `--yes` | Off; explicitly approve saving without a terminal |
 
-`--non-interactive` is an alias for `--yes`. The versioned default image is a
+`--non-interactive` is an alias for `--yes`, not a harness choice. For automation,
+use `dungeon init --yes --agent opencode|claude|codex`. The versioned default image is a
 [reviewed local build](../images/agent/README.md), not a published image; build
 it before the first `up`. `dungeon versions --check` checks the official stable
 tag read-only. There is no automatic image pull, tool installer or policy expansion.
@@ -372,14 +376,31 @@ rejects filesystem root/home scope, derives a stable private project key, and
 resolves only the matching Dungeon-owned config directory. It does not scan the
 repository or other config directories.
 
-If no private binding exists, direct launch, `up`, or `create`
-may initialize one only in an interactive terminal. Before writing files,
+If no private binding exists, direct launch, `run`, `attach`, `up`, or `create`
+may initialize one only in an interactive terminal. An explicit `run AGENT`
+supplies the harness choice; `attach` supplies OpenCode. Otherwise Dungeon asks.
+Before writing files,
 Dungeon shows the canonical project, private config path, transfer mode,
 gateway, image, and default agent and requires one confirmation. Use `init`
-first to customize those defaults, or `init --yes` for explicit noninteractive
+first to customize those defaults, or `init --yes --agent AGENT` for explicit noninteractive
 configuration writing. `plan` and `config` never create a binding. The generated
-binding currently starts in `copy` mode; Issue #24's live candidate remains
-explicit pending a separate promotion decision.
+binding starts in reviewed `live` mode; choose `--project-transfer copy` for
+upload/export. Existing bindings and machine initialization keep their contracts.
+
+Bare `dungeon` is interactive-only for all three harnesses. It launches the same
+guest CLI as `dungeon run`, creating/resuming as needed; no host harness client
+is required. `dungeon run -- --help` passes native flags to the configured
+harness; `dungeon run codex --version` overrides the harness for this invocation
+without changing an existing binding's default. Use explicit `run` for
+noninteractive work. Host OpenCode attachment is only `dungeon attach`.
+
+Omitting the harness name accepts leading native flags only. For a native
+subcommand or positional argument, name the harness, for example
+`dungeon run codex exec PROMPT`. `--` stops Dungeon option parsing; it does not
+turn an unknown first positional value into a configured-harness argument.
+One optional `--` immediately after an explicit harness is also consumed by
+Dungeon: `dungeon run codex -- --version` passes `--version` to Codex. Later
+separators remain native arguments, as in `dungeon run codex -- exec -- VALUE`.
 
 A moved or renamed project gets a different private project key and is never
 silently rebound. The old explicit config remains usable through `--config`
@@ -537,8 +558,8 @@ these paths. Guest-installed extensions and tools still execute inside isolation
 
 For HTTP clients, `forward` uses OpenShell 0.0.116's gRPC service forwarding:
 
-For OpenCode 2.1.2, the simple foreground path is now `dungeon` from a bound
-project (or `dungeon attach`): it starts/resumes the sandbox, verifies matching
+For OpenCode 2.1.2, the optional foreground path is explicit `dungeon attach`
+from a bound project: it starts/resumes the sandbox, verifies matching
 host/guest OpenCode versions, starts the guest's authenticated loopback server,
 forwards to an available host-loopback port, checks unauthenticated denial and
 authenticated guest version, then pauses for Enter before opening the host UI
@@ -616,16 +637,18 @@ version pair is not a matched-version validation. See the
 
 ## Harness configuration (OpenCode first slice)
 
-New human OpenCode bindings propose read-only host configuration in the existing
-scope review. `init --yes` explicitly approves that displayed scope; it still
+New bindings disable host configuration imports. Explicit OpenCode
+`init --agent opencode --harness-config read-only|copy` proposes host configuration
+in the existing scope review. `init --yes --agent opencode` with that flag
+explicitly approves the displayed scope; it still
 creates no sandbox. Existing configs omitting `harness`, and machine initialization,
 retain no harness import. Codex and Claude Code sharing follow separately.
 
 | Choice | Behavior |
 | --- | --- |
-| `--harness-config read-only` (default) | Select individual existing native files; derive read-only original-source binds without relabeling |
+| `--harness-config read-only` | Select individual existing native files; derive read-only original-source binds without relabeling |
 | `--harness-config copy` | Declare sources, then use `dungeon reload` to capture/review a private snapshot before first `up`; snapshot files are mounted read-only |
-| `--harness-config disabled` | No harness mounts or source inventory |
+| `--harness-config disabled` (default) | No harness mounts or source inventory |
 | `--exclude-provider-auth` | Omit legacy auth and entire `opencode.json`, `opencode.jsonc`, `cli.json` files that may mix credentials with settings |
 | `--harness-exclude PATH` (repeatable) | Omit an exact config-relative file/subtree, not a glob; legacy auth is controlled separately |
 

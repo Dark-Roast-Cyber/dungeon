@@ -41,7 +41,7 @@ After the current 0.0.3 loop is stable, prioritize these slices in dependency or
 
 **Remote-first use with live local edits.** Keep the user's
 editor/client and configuration on the host; run agent tools and state inside
-isolation. The plain foreground `dungeon` / `attach` workflow now starts the
+isolation. The explicit foreground `dungeon attach` workflow starts the
 guest service, authenticates a loopback forward and opens a matching host
 OpenCode UI after an Enter prompt; normal exit and confirmed-stop recovery were
 tested with 2.1.2. The historical AI/session-restart gate is separate; a new-flow

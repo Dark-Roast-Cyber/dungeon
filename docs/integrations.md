@@ -15,7 +15,7 @@ not a requirement to use a particular agent protocol.
 | VS Code | `code` | NOT TESTABLE: client/Remote SSH extension/display unavailable in the recorded Issue #30 checkpoint. |
 | Guest terminal editor over native SSH | `ssh-config`, private OpenSSH config, guest `nvim` | Edit/save/test and saved-state reconnect/restart passed; SSH disconnect left editor processes alive (Issue #30 partial). |
 | Claude Desktop / ChatGPT remote projects | `ssh-config`, then client setup | Documented integration target, not live-certified. |
-| OpenCode remote client | Interactive `dungeon` / `attach`; manual `serve` + `forward` remains available | Matched 2.1.2 auth, host UI rendering, Enter/Ctrl-C and forward-failure recovery passed on the recorded Linux combination. The older matched 2.0.14 AI/session gate is separate evidence, not a new-flow AI task pass. |
+| OpenCode remote client | Explicit `attach`; manual `serve` + `forward` remains available | Matched 2.1.2 auth, host UI rendering, Enter/Ctrl-C and forward-failure recovery passed on the recorded Linux combination. The older matched 2.0.14 AI/session gate is separate evidence, not a new-flow AI task pass. |
 | Owned foreground service | `exec --owned -- COMMAND ARG...` | Explicit opt-in shutdown/live gates passed on the recorded Linux pair; not a daemon or containment guarantee. |
 | Owned interactive command | `ssh --owned -- COMMAND ARG...` | Native guest Neovim/resize/save/test, bounded invocation cleanup and failure gates passed on the recorded Linux pair; generic SSH disconnect semantics unchanged. |
 | Read-only diagnostics | `doctor [--json]` | Inventory/private-state safety checks passed; does not dynamically certify integrations. |
@@ -25,6 +25,12 @@ Dungeon. Windows users can run the manager in WSL2 or connect through a supporte
 remote execution arrangement. Actual host/runtime combinations need validation.
 
 ## Terminal use
+
+Interactive `dungeon` and `dungeon run` launch the same configured guest harness.
+First use selects a harness and approves project scope; later use reuses that
+binding. `run AGENT` overrides only this invocation. No host harness CLI is needed.
+Bare `dungeon` requires a terminal; explicit `run` also accepts noninteractive
+native flags, for example `dungeon run -- --version`.
 
 `run opencode --continue` passes flags to the installed guest agent. `exec --`
 preserves separate arguments without evaluating a host shell. PTY allocation
@@ -85,7 +91,7 @@ that every desktop feature or all its tools execute inside the boundary.
 
 ## Host OpenCode attachment
 
-For a configured OpenCode project, interactive `dungeon` (or `dungeon attach`)
+Explicit interactive `dungeon attach` (not bare `dungeon`)
 starts/resumes the sandbox, checks that host and guest versions match, starts
 the guest service and forwards to a temporary host-loopback port. It verifies
 unauthenticated denial and authenticated guest version, keeps the generated
