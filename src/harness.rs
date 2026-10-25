@@ -154,7 +154,7 @@ pub(crate) fn defaults(
     project: &Path,
     config: &Path,
 ) -> Result<Option<HarnessConfig>> {
-    if agent != Agent::Opencode {
+    if agent != Agent::Opencode || mode == HarnessMode::Disabled {
         return Ok(None);
     }
     let home = home()?;

@@ -57,7 +57,7 @@ also be used before setup to identify missing prerequisites.
 
 Tools must be installed in the selected sandbox image; Dungeon does not use your
 host's tools. New CLI bindings select the versioned local image candidate with
-reviewed OpenCode 2.1.2. **Build it explicitly before `up`** using the
+reviewed OpenCode, Claude Code and Codex CLIs. **Build it explicitly before `up`** using the
 [image procedure](images/agent/README.md); setup does not download or build it.
 `dungeon versions --check` reads the upstream stable tag and reports if a newer
 release needs review. Existing bindings and their image choices are unchanged.
@@ -70,22 +70,22 @@ podman build --pull=never -t localhost/dungeon-agent:0.0.3-opencode-2.1.2 \
 
 The reviewed image is a local Linux amd64 candidate, not a published or
 cross-platform default. See the image procedure for offline verification.
-For host OpenCode attachment, install the matching **OpenCode 2.1.2** host
-client separately. Dungeon checks the match; it does not install or upgrade it.
+Ordinary launch needs no host harness client. Optional `dungeon attach` requires
+a separately installed matching **OpenCode 2.1.2** host client.
 
 ```sh
 cd my-project
-dungeon init
+dungeon init                    # choose OpenCode, Claude Code or Codex; approve scope
 dungeon plan
-dungeon up
-dungeon                         # OpenCode: review connection details, press Enter
-# dungeon shell                 # Bash instead; no host OpenCode client needed
+dungeon                         # create/resume, then launch your chosen guest CLI
+# dungeon up; dungeon shell     # Bash instead
 ```
 
-`init` uses the current project, a generated name, private config storage and
-one live read/write project mount. It shows the exact scope and asks once before
-writing configuration; it starts nothing. `plan` reviews policy without runtime
-contact.
+`init` asks only for a harness choice and scope approval. It uses the current
+project, a generated name, private config storage and one live read/write project
+mount; it starts nothing. Host configuration imports are off by default.
+The choice is saved per project, not asked again on launch. `plan` reviews policy
+without runtime contact. You can also run `dungeon` directly for this first-use review.
 First `up` creates the sandbox with the selected host project at `/sandbox/project`;
 guest writes appear on the host immediately. Choose
 `dungeon init --project-transfer copy` for a sandbox copy and reviewed export.
@@ -98,6 +98,7 @@ From the project directory, choose the interface you need:
 | Task | Command |
 | --- | --- |
 | Launch the configured agent | `dungeon` |
+| Launch it with native flags | `dungeon run -- --help` |
 | Attach the host OpenCode UI explicitly | `dungeon attach` |
 | Choose an agent | `dungeon run opencode`, `dungeon run claude`, or `dungeon run codex` |
 | Compare host/reviewed guest versions and check upstream stable | `dungeon versions --check` |
@@ -111,21 +112,17 @@ From the project directory, choose the interface you need:
 | See all private project bindings | `dungeon list -a` |
 | Delete a finished sandbox | `dungeon down`, then `dungeon destroy` |
 
-No repeated config path is needed. With OpenCode configured, interactive
-`dungeon` initializes/resumes and attaches the **host OpenCode UI** to an
-authenticated guest OpenCode server through a temporary loopback forward.
-Host and guest versions must match. Dungeon pauses at **Press Enter to open
-OpenCode (Ctrl-C to cancel)** so its startup and connection details remain
-visible before the UI takes over the terminal. On normal exit or Ctrl-C,
-Dungeon stops the service and forward and keeps the sandbox. If it cannot
-confirm cleanup, a plain text prompt offers to stop the
-sandbox (preserving data) or leave it running. `dungeon run opencode` still runs
-the guest TUI; Claude and Codex run their guest CLIs. `dungeon ../other-project`
-selects another project. Agents may require [guest authentication](#authentication)
-before use. `dungeon` does not automatically select your last conversation or
-adopt an independently detached service; guest session history remains in the
-retained sandbox. A crash or SIGKILL can leave a service running: inspect the
-sandbox and use `dungeon down` if it needs to be stopped.
+No repeated config path or harness choice is needed. Interactive `dungeon` and
+`dungeon run` launch the same configured guest CLI for all three harnesses,
+creating/resuming the sandbox as needed. Bare `dungeon` requires a terminal;
+use explicit `run` with native flags for noninteractive work.
+`dungeon ../other-project` selects another project. Agents may require
+[guest authentication](#authentication) before use. Harnesses own conversation
+selection; guest session history remains in the retained sandbox.
+
+**Changed from the earlier preview:** bare OpenCode launch no longer attaches a
+host UI. Use explicit `dungeon attach` for the matched host/guest service path;
+see [optional attachment](#optional-attachment).
 
 On a new project, `dungeon run claude` (or `codex`) also requests the one-time
 binding review, records that agent as the default, then creates and launches the
@@ -212,13 +209,13 @@ dungeon config --path           # just the dungeon.json path
 | Project | Current directory | `--project PATH` |
 | Config directory | Private project binding | `--directory PATH` |
 | Environment name | Generated from the project path | `--name NAME` |
-| Agent | OpenCode | `--agent opencode\|claude\|codex` |
+| Harness | Ask once per project; no assumed choice | `--agent opencode\|claude\|codex` |
 | Image | Reviewed local `dungeon-agent:0.0.3-opencode-2.1.2` (build first) | `--image OCI_REFERENCE` |
 | Transfer | Live, one reviewed writable project mount | `--project-transfer copy\|live` |
 | Gateway | `dungeon-local` | `--gateway NAME` |
 | Workspace | `default` | `--workspace NAME` |
 | Providers | None | `--provider NAME` (repeatable; existing providers, not secrets) |
-| OpenCode host configuration | Reviewed read-only selected files | `--harness-config read-only\|copy\|disabled` |
+| OpenCode host configuration | Disabled; explicitly opt in | `--harness-config read-only\|copy\|disabled` |
 
 For noninteractive configuration writing:
 
@@ -226,8 +223,9 @@ For noninteractive configuration writing:
 dungeon init --yes --project /path/to/my-project --agent codex
 ```
 
-`--yes` approves saving configuration only; it does not start a sandbox or upload
-files. Existing directories are never overwritten. Full configuration rules are
+`--yes` approves saving configuration only; it does not choose a harness, start a
+sandbox or upload files. Noninteractive init requires `--agent`. Existing
+directories are never overwritten. Full configuration rules are
 in [configuration](docs/configuration.md#initialize-and-customize).
 
 Configuration lives under
@@ -257,8 +255,9 @@ Guest login credentials stay guest/vendor-owned. OpenShell named providers are
 the separate brokered API path. Native host session/authentication databases are
 never shared.
 
-New human OpenCode bindings now propose selected host configuration,
-plugins/themes and legacy `auth.json` read-only during scope review. **Read-only
+New bindings do not import host harness configuration. Explicit OpenCode
+`init --harness-config read-only` proposes selected host configuration,
+plugins/themes and legacy `auth.json` during scope review. **Read-only
 does not prevent credential use or exfiltration.** Current OpenCode 2.1.2 database
 credentials are not imported; guest login may still be required. **This first
 slice is not ready for normal use:** the native gate found original-source
@@ -270,10 +269,9 @@ provider-auth reuse is still unestablished. See the
 Existing bindings and Codex/Claude Code configuration sharing are unchanged.
 
 ```sh
-dungeon init --exclude-provider-auth     # also omits whole mixed OpenCode JSON configs
-dungeon init --harness-exclude plugins/private
-dungeon init --harness-config copy       # then dungeon reload to capture/review
-dungeon init --harness-config disabled
+dungeon init --agent opencode --harness-config read-only --exclude-provider-auth
+dungeon init --agent opencode --harness-config read-only --harness-exclude plugins/private
+dungeon init --agent opencode --harness-config copy  # then dungeon reload to capture/review
 ```
 
 **Read-only auth may prevent login refresh, and snapshots may become stale.**
@@ -281,6 +279,14 @@ dungeon init --harness-config disabled
 guest tokens. See [harness configuration](docs/configuration.md#harness-configuration-opencode-first-slice).
 
 ## Optional attachment
+
+`dungeon attach` explicitly starts an authenticated guest OpenCode service,
+forwards it to host loopback and opens a matching host OpenCode UI. It pauses at
+`Press Enter to open OpenCode` before the UI takes over. Normal exit/Ctrl-C cleans
+up the service and forward, keeping the sandbox; unconfirmed cleanup offers a
+confirmed sandbox stop or leaves it running for inspection. Attachment requires
+a terminal and does not select the last conversation or adopt detached services.
+A crash/SIGKILL may leave a service running; inspect and use `dungeon down`.
 
 ```sh
 dungeon code

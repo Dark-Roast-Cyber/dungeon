@@ -46,11 +46,11 @@ printf 'preserve copy host project\n' > "$fixture/copy-project/host.txt"
 sha256sum "$fixture/live-project/host.txt" "$fixture/copy-project/host.txt" > "$fixture/host-before.sha256"
 cd "$fixture/live-project"
 "$dungeon" setup
-"$dungeon" init --yes --harness-config disabled --project-transfer live --image "$image"
+"$dungeon" init --yes --agent opencode --harness-config disabled --project-transfer live --image "$image"
 "$dungeon" up
 "$dungeon" exec -- /bin/sh -c 'printf "guest state\n" > /sandbox/uninstall-marker'
 cd "$fixture/copy-project"
-"$dungeon" init --yes --harness-config disabled --project-transfer copy --image "$image"
+"$dungeon" init --yes --agent opencode --harness-config disabled --project-transfer copy --image "$image"
 "$dungeon" up
 "$dungeon" down
 podman ps --all --no-trunc --filter network=dungeon-local --format '{{.ID}}' > "$fixture/dungeon-containers-before"

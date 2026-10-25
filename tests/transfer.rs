@@ -44,6 +44,8 @@ fn native_cli_transfer_locks_use_shared_private_authority_not_project_bindings()
     for config in [&first, &second] {
         let result = run(&[
             "init",
+            "--agent",
+            "codex",
             "--directory",
             config.to_str().unwrap(),
             "--project",
@@ -123,6 +125,8 @@ fn native_cli_transfer_locks_use_shared_private_authority_not_project_bindings()
     assert!(
         run(&[
             "init",
+            "--agent",
+            "codex",
             "--directory",
             live.to_str().unwrap(),
             "--project",

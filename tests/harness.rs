@@ -97,6 +97,39 @@ impl Fixture {
 }
 
 #[test]
+fn default_opencode_init_does_not_inventory_host_configuration() {
+    let f = Fixture::new();
+    symlink(
+        "/unavailable-synthetic-plugin",
+        f.source.join("plugins/bad"),
+    )
+    .unwrap();
+    let out = f.success(&["init", "--yes", "--agent", "opencode"]);
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("database credentials"));
+    assert!(f.config()["values"]["harness"].is_null());
+    assert!(f.plan()["harness"].is_null());
+}
+
+#[test]
+fn disabled_imports_do_not_depend_on_host_harness_paths_for_any_agent() {
+    for agent in ["opencode", "claude", "codex"] {
+        let f = Fixture::new();
+        let out = Command::new(env!("CARGO_BIN_EXE_dungeon"))
+            .env_clear()
+            .env("HOME", &f.home)
+            .env("XDG_CONFIG_HOME", f.home.join("config"))
+            .env("XDG_DATA_HOME", f.project.join(".data"))
+            .env("PATH", "")
+            .current_dir(&f.project)
+            .args(["init", "--yes", "--agent", agent])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{agent}: {out:?}");
+        assert!(f.config()["values"]["harness"].is_null());
+    }
+}
+
+#[test]
 fn new_opencode_binding_selects_only_reviewed_native_leaves_and_no_session_database() {
     let f = Fixture::new();
     // Forbidden fixtures must be skipped before opening; contents are never read.
@@ -129,7 +162,14 @@ fn new_opencode_binding_selects_only_reviewed_native_leaves_and_no_session_datab
         "synthetic native state",
     )
     .unwrap();
-    let out = f.success(&["init", "--yes"]);
+    let out = f.success(&[
+        "init",
+        "--yes",
+        "--agent",
+        "opencode",
+        "--harness-config",
+        "read-only",
+    ]);
     assert!(
         String::from_utf8_lossy(&out.stdout)
             .contains("database credentials and sessions are NOT shared")
@@ -158,7 +198,14 @@ fn new_opencode_binding_selects_only_reviewed_native_leaves_and_no_session_datab
 #[test]
 fn plan_and_config_never_reopen_sources_or_refresh_a_selected_live_inventory() {
     let f = Fixture::new();
-    f.success(&["init", "--yes"]);
+    f.success(&[
+        "init",
+        "--yes",
+        "--agent",
+        "opencode",
+        "--harness-config",
+        "read-only",
+    ]);
     let plan = f.plan();
     let path = f.config_path();
     let before = fs::read(&path).unwrap();
@@ -186,6 +233,10 @@ fn exclusions_omit_whole_mixed_credential_configs_and_do_not_open_excluded_links
     f.success(&[
         "init",
         "--yes",
+        "--agent",
+        "opencode",
+        "--harness-config",
+        "read-only",
         "--exclude-provider-auth",
         "--harness-exclude",
         "plugins/excluded",
@@ -202,7 +253,14 @@ fn exclusions_omit_whole_mixed_credential_configs_and_do_not_open_excluded_links
 #[test]
 fn copy_reload_captures_private_bytes_and_source_drift_does_not_refresh_them() {
     let f = Fixture::new();
-    f.success(&["init", "--yes", "--harness-config", "copy"]);
+    f.success(&[
+        "init",
+        "--yes",
+        "--agent",
+        "opencode",
+        "--harness-config",
+        "copy",
+    ]);
     assert!(f.config()["values"]["harness"]["snapshot"].is_null());
     let path = f.config_path();
     let before = fs::read(&path).unwrap();
@@ -238,7 +296,14 @@ fn copy_reload_captures_private_bytes_and_source_drift_does_not_refresh_them() {
 #[test]
 fn reload_repairs_unbound_selection_but_refuses_any_runtime_binding_without_mutation() {
     let f = Fixture::new();
-    f.success(&["init", "--yes"]);
+    f.success(&[
+        "init",
+        "--yes",
+        "--agent",
+        "opencode",
+        "--harness-config",
+        "read-only",
+    ]);
     fs::remove_file(f.source.join("plugins/local/index.js")).unwrap();
     fs::write(f.source.join("plugins/new.js"), "export default () => ({})").unwrap();
     f.success(&["reload", "--yes"]);
@@ -267,10 +332,20 @@ fn disabled_and_legacy_configs_never_gain_harness_mounts() {
         f.source.join("plugins/bad"),
     )
     .unwrap();
-    f.success(&["init", "--yes", "--harness-config", "disabled"]);
-    assert_eq!(f.plan()["harness"]["mounts"], json!([]));
+    f.success(&[
+        "init",
+        "--yes",
+        "--agent",
+        "opencode",
+        "--harness-config",
+        "disabled",
+    ]);
+    assert!(f.plan()["harness"].is_null());
     let path = f.config_path();
     let mut doc: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    doc["harness"] = json!({"agent":"opencode", "mode":"disabled", "source":f.source, "legacy_auth":f.auth, "files":[]});
+    fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();
+    assert_eq!(f.plan()["harness"]["mounts"], json!([]));
     doc.as_object_mut().unwrap().remove("harness");
     fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();
     assert!(f.plan()["harness"].is_null());
@@ -296,7 +371,14 @@ fn source_links_hardlinks_special_entries_and_unsafe_permissions_are_refused() {
             }
             _ => unreachable!(),
         }
-        let out = f.run(&["init", "--yes"]);
+        let out = f.run(&[
+            "init",
+            "--yes",
+            "--agent",
+            "opencode",
+            "--harness-config",
+            "read-only",
+        ]);
         assert!(!out.status.success(), "{kind}: {out:?}");
         assert!(!String::from_utf8_lossy(&out.stderr).contains(SYNTHETIC_SECRET));
         assert!(!f.home.join("config/dungeon").exists());
@@ -308,7 +390,14 @@ fn serialized_mount_budget_refuses_before_scope_approval_or_snapshot_capture() {
     for mode in ["read-only", "copy"] {
         let f = Fixture::new();
         if mode == "copy" {
-            f.success(&["init", "--yes", "--harness-config", mode]);
+            f.success(&[
+                "init",
+                "--yes",
+                "--agent",
+                "opencode",
+                "--harness-config",
+                mode,
+            ]);
         }
         for i in 0..300 {
             fs::write(
@@ -319,7 +408,14 @@ fn serialized_mount_budget_refuses_before_scope_approval_or_snapshot_capture() {
             .unwrap();
         }
         let out = if mode == "read-only" {
-            f.run(&["init", "--yes", "--harness-config", mode])
+            f.run(&[
+                "init",
+                "--yes",
+                "--agent",
+                "opencode",
+                "--harness-config",
+                mode,
+            ])
         } else {
             f.run(&["reload", "--yes"])
         };
@@ -349,7 +445,14 @@ fn serialized_mount_budget_refuses_before_scope_approval_or_snapshot_capture() {
 #[test]
 fn snapshot_integrity_is_checked_before_runtime_and_does_not_require_original_sources() {
     let f = Fixture::new();
-    f.success(&["init", "--yes", "--harness-config", "copy"]);
+    f.success(&[
+        "init",
+        "--yes",
+        "--agent",
+        "opencode",
+        "--harness-config",
+        "copy",
+    ]);
     f.success(&["reload", "--yes"]);
     let copied = PathBuf::from(f.plan()["harness"]["mounts"][0]["source"].as_str().unwrap());
     fs::remove_dir_all(&f.source).unwrap();
@@ -384,6 +487,8 @@ fn selinux_preflight_precedes_runtime_contact_and_preserves_control_independence
         f.success(&[
             "init",
             "--yes",
+            "--agent",
+            "opencode",
             "--project-transfer",
             "copy",
             "--harness-config",

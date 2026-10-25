@@ -29,7 +29,7 @@ enum AuthAgent {
     name = "dungeon",
     version,
     about = "Manage agent environments with OpenShell",
-    after_help = "Quick start (after dungeon setup):\n  dungeon init                Review and save private project configuration\n  dungeon                     Attach host OpenCode to guest service (configured OpenCode)\n  dungeon run opencode        Run the guest OpenCode TUI instead\n  dungeon run codex           Run another agent in the same environment\n  dungeon exec -- cargo test  Run an image-provided tool\n  dungeon export              Review guest changes (copy mode)\n  dungeon down                Stop, preserving guest state\n  dungeon list                List bindings in/under this directory (offline)\n  dungeon list -a             List all private bindings (offline)\n  dungeon destroy             Delete a stopped bound sandbox after confirmation\n\nUse dungeon config --path to find your private configuration.\nAutomation: dungeon machine --help",
+    after_help = "Quick start (after dungeon setup and building an agent image):\n  dungeon init                Choose a harness and approve this project's scope\n  dungeon                     Launch the selected guest harness (interactive)\n  dungeon run                 Launch the same harness; accepts native CLI arguments\n  dungeon run codex           Use another harness for this invocation only\n  dungeon exec -- cargo test  Run an image-provided tool (after up)\n  dungeon attach              Optional host OpenCode UI (matching client required)\n  dungeon export              Review guest changes (copy mode)\n  dungeon down                Stop, preserving guest state\n  dungeon list                List bindings in/under this directory (offline)\n  dungeon list -a             List all private bindings (offline)\n  dungeon destroy             Delete a stopped bound sandbox after confirmation\n\nFirst use asks for OpenCode, Claude Code or Codex; existing bindings keep their choice.\nAutomation: dungeon init --yes --agent opencode|claude|codex\nUse dungeon config --path to find your private configuration.\nAutomation: dungeon machine --help",
     subcommand_precedence_over_arg = true
 )]
 struct Cli {
@@ -107,15 +107,19 @@ enum Commands {
         workspace: String,
         #[arg(long, default_value = DEFAULT_IMAGE)]
         image: String,
-        #[arg(long, value_enum, default_value = "opencode")]
-        agent: Agent,
+        #[arg(
+            long,
+            value_enum,
+            help = "harness (asks once for this project if omitted)"
+        )]
+        agent: Option<Agent>,
         #[arg(
             long = "provider",
             help = "existing OpenShell provider name; repeatable, never a secret"
         )]
         providers: Vec<String>,
         /// OpenCode host configuration access; existing bindings are never changed.
-        #[arg(long, value_enum, default_value = "read-only")]
+        #[arg(long, value_enum, default_value = "disabled")]
         harness_config: HarnessMode,
         /// Omit legacy auth and whole OpenCode JSON configs that can contain credentials.
         #[arg(long)]
@@ -204,9 +208,12 @@ enum Commands {
     },
     /// Run an agent (default: configured agent); resume a stopped sandbox without uploading.
     Run {
-        #[arg(value_enum)]
-        agent: Option<Agent>,
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        #[arg(
+            value_name = "AGENT_OR_ARG",
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            help = "optional opencode|claude|codex override; omit it for leading native flags (run -- --version); name it for native subcommands or positional arguments (run codex exec PROMPT)"
+        )]
         arguments: Vec<String>,
     },
     /// Run any image-provided command in an already Ready sandbox at /sandbox/project.
@@ -371,8 +378,9 @@ fn dispatch(cli: Cli) -> Result<i32> {
             print_plan(&config)
         }
         None => {
+            require_launch_terminal()?;
             let config = resolve_environment(config, project.as_deref(), true, None)?;
-            launch_default(&config)
+            run_command(&config, Commands::Run { arguments: vec![] })
         }
         Some(command) => {
             if project.is_some() {
@@ -385,7 +393,8 @@ fn dispatch(cli: Cli) -> Result<i32> {
                 Commands::Create | Commands::Up | Commands::Run { .. } | Commands::Attach
             );
             let first_agent = match &command {
-                Commands::Run { agent, .. } => *agent,
+                Commands::Run { arguments } => run_selection(arguments)?.0,
+                Commands::Attach => Some(Agent::Opencode),
                 _ => None,
             };
             let config = resolve_environment(config, None, create_binding, first_agent)?;
@@ -415,11 +424,65 @@ fn resolve_environment(
     }
     if !create_if_missing {
         return Err(Error::new(format!(
-            "no private Dungeon environment is bound to {}; run `dungeon init` from that project first (or `dungeon init --yes` for automation)",
+            "no private Dungeon environment is bound to {}; run `dungeon init` from that project first (or `dungeon init --yes --agent opencode|claude|codex` for automation)",
             project.display()
         )));
     }
-    create_project_binding(&project, first_agent.unwrap_or(Agent::Opencode))
+    create_project_binding(&project, select_agent(first_agent)?)
+}
+
+fn select_agent(agent: Option<Agent>) -> Result<Agent> {
+    if let Some(agent) = agent {
+        return Ok(agent);
+    }
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Err(Error::new(
+            "choose a harness with `dungeon init --yes --agent opencode|claude|codex`; no files were created",
+        ));
+    }
+    println!(
+        "Choose this project's harness (saved for later launches):\n  1. OpenCode\n  2. Claude Code\n  3. Codex"
+    );
+    loop {
+        print!("Harness [1-3 or name; no default]: ");
+        io::stdout().flush()?;
+        let mut answer = String::new();
+        if io::stdin().read_line(&mut answer)? == 0 {
+            return Err(Error::new(
+                "harness selection cancelled; no files were created",
+            ));
+        }
+        match answer.trim().to_ascii_lowercase().as_str() {
+            "1" | "opencode" => return Ok(Agent::Opencode),
+            "2" | "claude" => return Ok(Agent::Claude),
+            "3" | "codex" => return Ok(Agent::Codex),
+            _ => println!("Enter 1, 2 or 3 (opencode, claude or codex); Ctrl-C to cancel."),
+        }
+    }
+}
+
+fn run_selection(arguments: &[String]) -> Result<(Option<Agent>, &[String])> {
+    let Some(first) = arguments.first() else {
+        return Ok((None, arguments));
+    };
+    let agent = match first.as_str() {
+        "opencode" => Agent::Opencode,
+        "claude" => Agent::Claude,
+        "codex" => Agent::Codex,
+        value if value.starts_with('-') => return Ok((None, arguments)),
+        _ => {
+            return Err(Error::new(
+                "unknown harness; choose opencode, claude or codex, or put native flags after `dungeon run --`",
+            ));
+        }
+    };
+    let native = &arguments[1..];
+    let native = if native.first().is_some_and(|arg| arg == "--") {
+        &native[1..]
+    } else {
+        native
+    };
+    Ok((Some(agent), native))
 }
 
 fn create_project_binding(project: &Path, agent: Agent) -> Result<Config> {
@@ -438,7 +501,7 @@ fn create_project_binding(project: &Path, agent: Agent) -> Result<Config> {
         imports: vec![],
         harness: crate::imports::harness::defaults(
             agent,
-            HarnessMode::ReadOnly,
+            HarnessMode::Disabled,
             false,
             vec![],
             project,
@@ -495,25 +558,6 @@ fn print_plan(config: &Config) -> Result<i32> {
         }))?
     );
     Ok(0)
-}
-
-fn launch_default(config: &Config) -> Result<i32> {
-    crate::imports::verify(config)?;
-    if config.values.agent == Agent::Opencode {
-        require_attach_terminal()?;
-    }
-    let runtime = Runtime::new(config)?;
-    if config.values.agent == Agent::Opencode {
-        return attach_opencode(&runtime);
-    }
-    let code = runtime.up()?;
-    if code != 0 {
-        return Ok(code);
-    }
-    runtime.run_agent(
-        &[config.values.agent.as_str().to_owned()],
-        io::stdin().is_terminal() && io::stdout().is_terminal(),
-    )
 }
 
 fn run_command(config: &Config, command: Commands) -> Result<i32> {
@@ -627,13 +671,14 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
             );
             runtime.execute(&["claude".into()], true, "/sandbox")
         }
-        Commands::Run { agent, arguments } => {
+        Commands::Run { arguments } => {
+            let (agent, arguments) = run_selection(&arguments)?;
             let selected = agent.unwrap_or(config.values.agent);
             if !config.state_path().exists() {
                 runtime.up()?;
             }
             let mut command = vec![selected.as_str().to_owned()];
-            command.extend(arguments);
+            command.extend_from_slice(arguments);
             runtime.run_agent(
                 &command,
                 io::stdin().is_terminal() && io::stdout().is_terminal(),
@@ -691,6 +736,15 @@ fn require_attach_terminal() -> Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() || !io::stderr().is_terminal() {
         return Err(Error::new(
             "OpenCode attachment requires a terminal; use `dungeon run opencode` for guest CLI execution",
+        ));
+    }
+    Ok(())
+}
+
+fn require_launch_terminal() -> Result<()> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() || !io::stderr().is_terminal() {
+        return Err(Error::new(
+            "interactive launch requires a terminal; use `dungeon init --yes --agent opencode|claude|codex` to configure, then `dungeon run -- <native arguments>` for noninteractive guest execution",
         ));
     }
     Ok(())
@@ -802,7 +856,7 @@ fn initialize(
     gateway: Option<String>,
     workspace: String,
     image: String,
-    agent: Agent,
+    agent: Option<Agent>,
     providers: Vec<String>,
     harness_config: HarnessMode,
     exclude_provider_auth: bool,
@@ -810,6 +864,7 @@ fn initialize(
     yes: bool,
 ) -> Result<i32> {
     let project = canonical_project(&project)?;
+    let agent = select_agent(agent)?;
     let project_binding = directory.is_none();
     let directory = match directory {
         Some(directory) => directory,
@@ -852,9 +907,12 @@ fn initialize(
         );
     }
     if project_binding {
-        println!("From the project directory: dungeon plan, then dungeon up.");
+        println!(
+            "Next: dungeon plan to inspect policy; dungeon to start {}. No host harness client required.",
+            config.values.agent.as_str()
+        );
     } else {
-        println!("Next: run plan, then up, using --config with the path above.");
+        println!("Next: run plan, then launch dungeon, using --config with the path above.");
     }
     Ok(0)
 }
@@ -872,8 +930,15 @@ fn approve_environment(directory: &Path, values: &ConfigDoc, yes: bool) -> Resul
         "{}",
         crate::config::review_json(&json!({
             "config": directory.join("dungeon.json"),
-            "environment": values,
+            "name": values.name,
+            "harness": values.agent,
+            "project": values.project,
             "project_transfer": values.project_transfer,
+            "gateway": values.gateway,
+            "workspace": values.workspace,
+            "image": values.image,
+            "providers": values.providers,
+            "host_configuration": values.harness.as_ref().filter(|h| h.mode != HarnessMode::Disabled),
         }))?
     );
     match values.project_transfer {
@@ -887,7 +952,11 @@ fn approve_environment(directory: &Path, values: &ConfigDoc, yes: bool) -> Resul
     println!(
         "Review project contents before first up; all files within a live project become guest-visible, including secrets. Transfer is not a secret scanner."
     );
-    if let Some(h) = &values.harness {
+    if let Some(h) = values
+        .harness
+        .as_ref()
+        .filter(|h| h.mode != HarnessMode::Disabled)
+    {
         println!("{}", crate::imports::harness::WARNING);
         if h.mode == HarnessMode::Copy {
             println!(
@@ -997,24 +1066,55 @@ mod tests {
     }
 
     #[test]
-    fn first_run_selects_an_agent_without_accepting_unreviewed_options() {
+    fn run_selects_only_known_harnesses_and_forwards_native_flags() {
         let parsed = Cli::try_parse_from(["dungeon", "run", "claude"]).unwrap();
-        assert!(matches!(
-            parsed.command,
-            Some(Commands::Run {
-                agent: Some(Agent::Claude),
-                ..
-            })
-        ));
+        let Some(Commands::Run { arguments }) = parsed.command else {
+            panic!()
+        };
+        assert_eq!(run_selection(&arguments).unwrap().0, Some(Agent::Claude));
         let parsed = Cli::try_parse_from(["dungeon", "run", "codex"]).unwrap();
-        assert!(matches!(
-            parsed.command,
-            Some(Commands::Run {
-                agent: Some(Agent::Codex),
-                ..
-            })
-        ));
-        assert!(Cli::try_parse_from(["dungeon", "run", "--project-transfer", "live"]).is_err());
+        let Some(Commands::Run { arguments }) = parsed.command else {
+            panic!()
+        };
+        assert_eq!(run_selection(&arguments).unwrap().0, Some(Agent::Codex));
+        for args in [vec!["--version"], vec!["--project-transfer", "live"]] {
+            let arguments = args.into_iter().map(String::from).collect::<Vec<_>>();
+            let (agent, native) = run_selection(&arguments).unwrap();
+            assert_eq!(agent, None);
+            assert_eq!(native, arguments);
+        }
+        assert!(run_selection(&["unknown".into()]).is_err());
+    }
+
+    #[test]
+    fn run_consumes_only_the_dungeon_separator_after_an_explicit_harness() {
+        for agent in ["opencode", "claude", "codex"] {
+            for (input, expected) in [
+                (vec!["--version"], vec!["--version"]),
+                (vec!["--", "--version"], vec!["--version"]),
+                (vec!["--", "-p", "two words"], vec!["-p", "two words"]),
+                (
+                    vec!["exec", "--", "--version"],
+                    vec!["exec", "--", "--version"],
+                ),
+                (
+                    vec!["--", "exec", "--", "--version"],
+                    vec!["exec", "--", "--version"],
+                ),
+                (vec!["--", "--", "--version"], vec!["--", "--version"]),
+                (vec!["--"], vec![]),
+            ] {
+                let mut argv = vec!["dungeon", "run", agent];
+                argv.extend(input);
+                let parsed = Cli::try_parse_from(argv).unwrap();
+                let Some(Commands::Run { arguments }) = parsed.command else {
+                    panic!()
+                };
+                let (selected, native) = run_selection(&arguments).unwrap();
+                assert_eq!(selected.unwrap().as_str(), agent);
+                assert_eq!(native, expected, "{agent}: {arguments:?}");
+            }
+        }
     }
 
     #[test]

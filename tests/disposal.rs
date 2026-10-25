@@ -25,7 +25,14 @@ impl Fixture {
             project,
             config: PathBuf::new(),
         };
-        let init = fixture.run(&["init", "--yes", "--project-transfer", "copy"]);
+        let init = fixture.run(&[
+            "init",
+            "--yes",
+            "--agent",
+            "codex",
+            "--project-transfer",
+            "copy",
+        ]);
         assert!(init.status.success(), "{init:?}");
         let listing: Value = serde_json::from_slice(&fixture.run(&["list"]).stdout).unwrap();
         fixture.config = PathBuf::from(listing[0]["config"].as_str().unwrap());
@@ -166,7 +173,7 @@ fn list_scopes_to_directory_tree_and_all_includes_other_bindings() {
         fs::create_dir(directory).unwrap();
     }
     for directory in [&child, &prefix_sibling, &outside] {
-        let init = f.run_in(directory, &["init", "--yes"]);
+        let init = f.run_in(directory, &["init", "--yes", "--agent", "codex"]);
         assert!(init.status.success(), "{init:?}");
     }
     let listing = |directory: &std::path::Path, args: &[&str]| -> Vec<Value> {
