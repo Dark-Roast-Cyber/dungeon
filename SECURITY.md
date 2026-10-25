@@ -76,6 +76,15 @@ empty or custom engine storage instead of initializing it.
 
 ## Credentials
 
+Local `uninstall` is explicitly destructive, not secure erasure. It requires a
+review/confirmation (or `--yes`), refuses unknown bindings/resources and never
+uses a system/container prune. Guest sessions/authentication and private approved
+copies are deleted; original imports/projects and unrelated runtime resources
+are preserved. Keep prerequisites available and quiesce all clients first:
+setup's lock is not a cross-client maintenance lease. Failed removal can be
+partial and must not be reported as a clean uninstall. See
+[the bounded procedure](docs/distribution.md#clean-local-uninstall).
+
 Machine schema 1 emits fixed diagnostics, not native stderr, policy/provider JSON
 or parser error text. Requested workload bytes are intentionally lossless and
 unredacted, including secrets and terminal control sequences; consumers must treat

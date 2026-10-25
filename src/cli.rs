@@ -50,6 +50,18 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Delete local sandboxes, gateway, private Dungeon state and the user-local binary.
+    Uninstall {
+        /// Inspect the removal scope without changing files or containers.
+        #[arg(long, conflicts_with = "yes")]
+        dry_run: bool,
+        /// Approve permanent loss of guest files, sessions, auth and private configuration.
+        #[arg(long)]
+        yes: bool,
+        /// User-local installation directory (default: ~/.local/bin).
+        #[arg(long)]
+        bin_dir: Option<PathBuf>,
+    },
     /// Set up or verify the supported local OpenShell gateway (Linux/rootless Podman).
     Setup {
         /// Enable project bind capability on a fresh gateway (the default); kept for explicit scripts.
@@ -232,6 +244,18 @@ fn dispatch(cli: Cli) -> Result<i32> {
     } = cli;
 
     match command {
+        Some(Commands::Uninstall {
+            dry_run,
+            yes,
+            bin_dir,
+        }) => {
+            if config.is_some() || project.is_some() {
+                return Err(Error::new(
+                    "uninstall accepts no PROJECT or --config; it removes the local installation",
+                ));
+            }
+            crate::openshell::uninstall(bin_dir, dry_run, yes)
+        }
         Some(Commands::List { all }) => {
             if config.is_some() || project.is_some() {
                 return Err(Error::new(
@@ -636,6 +660,7 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         Commands::Init { .. }
         | Commands::Config { .. }
         | Commands::Setup { .. }
+        | Commands::Uninstall { .. }
         | Commands::Doctor { .. }
         | Commands::List { .. }
         | Commands::Versions { .. }

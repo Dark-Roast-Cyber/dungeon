@@ -156,6 +156,32 @@ transfer mode. Live-project host files are not deleted; copy-mode guest edits
 must be exported before destruction. This is not a container prune or a
 gateway teardown; if deletion or local cleanup fails, inspect before retrying.
 
+### Uninstall (Linux user-local installation)
+
+Close Dungeon clients and export any copy-mode work you need to keep, then run
+the **installed binary**:
+
+```sh
+~/.local/bin/dungeon uninstall --dry-run
+~/.local/bin/dungeon uninstall          # type `uninstall dungeon` to confirm
+# ~/.local/bin/dungeon uninstall --yes  # destructive test-environment automation
+```
+
+This stops and destroys recorded local sandboxes, verifies their containers are
+gone, removes the recognized `dungeon-local` gateway/container/network and its
+OpenShell registration, then deletes private Dungeon config/state and the
+user-local binary. **Guest files, sessions, authentication and saved configuration
+are permanently lost.** Host projects, original imports, other gateways/containers,
+cached images, OpenShell and Podman remain. This is file removal, not secure erasure.
+
+Use `--bin-dir /absolute/install/directory` for a custom local install. A different
+binary or symlink at that destination is refused. Unknown/unbound sandboxes,
+foreign bindings, unsafe paths and incompatible or unavailable prerequisites
+block removal rather than trigger a prune. A stopped gateway must be explicitly
+started first; uninstall never starts it. Custom `init --directory` configurations
+outside the private binding root must be destroyed separately and are not erased.
+See [uninstall scope and test gate](docs/distribution.md#clean-local-uninstall).
+
 ### Returning changes in copy mode
 
 Guest edits stay in the sandbox until `dungeon export`. Stop active writers in

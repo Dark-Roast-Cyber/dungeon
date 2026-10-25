@@ -34,6 +34,16 @@ mod local_setup;
 #[cfg(target_os = "linux")]
 pub(crate) use local_setup::run as setup;
 
+#[cfg(target_os = "linux")]
+pub(crate) use local_setup::uninstall;
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn uninstall(_bin_dir: Option<PathBuf>, _dry_run: bool, _yes: bool) -> Result<i32> {
+    Err(Error::new(
+        "dungeon uninstall supports Linux/rootless Podman only",
+    ))
+}
+
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn setup(_enable_live: bool, _dry_run: bool) -> Result<i32> {
     Err(Error::new(
