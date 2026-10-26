@@ -15,7 +15,7 @@ Formatting, all-target locked Clippy with warnings denied, **190 locked Rust
 tests** (132 unit + 58 integration), three npm launcher tests and the release
 build passed. Rust fixtures used checkout-local `TMPDIR`; launcher Node22.22.2
 is not the Node24 release gate. The preceding commit `28127b2` also passed hosted
-CI; these new edits have not been published. Evidence:
+CI. Evidence:
 `/tmp/opencode/dungeon-cleanup-20261025`.
 
 A disposable native run used Linux7.2.9-201.fc44.x86_64, OpenShell0.0.116,
@@ -37,6 +37,71 @@ gateway/sandbox IDs, states and start times matched before/after. The fixture's
 raw PTY logs and `native/results.json` retain the observations. This closes the
 single-interrupt startup check on this combination, not active-task cancellation,
 other harnesses, login/inference or a stronger cleanup/containment guarantee.
+
+## Local uninstall (source worktree, 2026-10-24/25)
+
+Eight synthetic cleanup tests exercise Ready/Stopped identity-checked destruction,
+container/volume/secret absence checks, preserved host files, client-TLS cleanup
+after metadata-only OpenShell removal, native failures/false success, unknown
+resources, unsafe paths, asynchronous deletion and interrupted-removal retry refusal. An actual-CLI
+test checks approval/selection refusal before native contact. These use synthetic
+native adapters, not live containers.
+
+The separate uninstall worktree passed `cargo fmt --check`, warnings-denied
+all-target locked Clippy, **189 locked Rust tests** (138 unit + 51 integration),
+three npm launcher tests, installer/native-test shell syntax and `git diff --check`.
+Rust fixtures used checkout-local `TMPDIR`; Node was 22.22.2, not the Node24
+release gate. Locked Linux release compilation also passed.
+Logs: `/tmp/opencode/dungeon-uninstall-{test-final,clippy-final,launcher-final}.log`.
+
+Integration with harness-neutral main `28127b2` passed formatting, warnings-denied
+all-target locked Clippy, **197 locked Rust tests** (139 unit + 58 integration),
+all **22 Node tests**, shell syntax, staged whitespace checks and locked release
+compilation. The native fixture now explicitly selects OpenCode for both init
+calls, matching the new no-default onboarding contract. These source checks used
+checkout-local `TMPDIR` and Node22.22.2. The native record below remains tied to
+its earlier binary hash, not a repeated run of the combined release binary.
+Integration logs: `/tmp/opencode/dungeon-uninstall-merge-*.log`.
+
+### Disposable native acceptance (2026-10-25 UTC): passed
+
+The actual [native gate](distribution.md#disposable-native-acceptance-gate) passed
+inside a fresh Fedora CoreOS44.20260913.3.2 validation VM, kernel7.2.5-200.fc44,
+Enforcing SELinux, rootless Podman5.8.4 and OpenShell0.0.116. The test installed a
+host-built locked release binary (prebuilt mode), not a mocked installer or a
+Rust build inside the VM. Final tested binary SHA-256:
+`7be4d0636bf63d2da2b5fb9cae8aac6f8bc10c8a60e98b9e14be72ce38259512`.
+The unchanged reviewed agent image was `bd446d0373bc…`; harness imports were
+disabled and no real credentials or host configuration were inputs.
+
+| Independent assertion | Result |
+| --- | --- |
+| Dry-run | Installation retained; all container IDs/states/start times unchanged |
+| Ready live sandbox + Stopped copy sandbox | Both recorded container IDs absent after approved uninstall |
+| Local gateway teardown | Container/network/registration/client TLS and Dungeon config/state roots absent |
+| Native guest resources | Volume/secret inventories equal their pre-setup baseline |
+| User-local installation | Custom binary absent; separate default-path reinstall/binary-only removal also passed |
+| Preserved resources | Sentinel container ID/state/start time, unrelated active gateway registration, host project hashes, agent image and prerequisite CLIs survived |
+
+Two earlier native attempts caught real integration differences. OpenShell leaves
+`last_sandbox` beside client TLS; the original allowlist refused before destruction.
+Then a successful delete returned before gateway inventory converged; installation
+was retained with its incomplete-removal marker. The correction explicitly permits
+the known selection file and waits for independently observed absence, refusing
+new resources. Both regressions have synthetic coverage. Earlier fixture resources
+were checked and deliberately cleaned up before the final fresh setup/gate; those
+failed attempts are not counted as passed tests. Sentinel cleanup's SIGTERM-to-KILL
+warning concerned only the test's explicitly created sleep container, after its
+unchanged lifecycle state had been compared.
+
+After evidence collection, the disposable VM was powered off/reaped, SSH closed,
+and its disks, image archive and synthetic keys were removed. The real host's
+container IDs/names/states/start times matched the pre-test inventory. No real host
+installation, gateway, project, image tag or authentication was replaced. This is
+one Linux cleanup combination, not secure erasure, cross-platform runtime,
+package-manager uninstall or containment validation. Source/tool hashes, raw logs,
+failed attempts and cleanup receipt:
+`/tmp/opencode/dungeon-uninstall-native-evidence-20261024`.
 
 ## Harness-neutral onboarding (2026-10-24, source checkout)
 

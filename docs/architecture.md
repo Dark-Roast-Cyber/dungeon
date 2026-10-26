@@ -68,6 +68,10 @@ A feature that belongs primarily to those orchestration concerns should live in 
 - `openshell`: the single OpenShell subprocess boundary and lifecycle operations.
 - `openshell::local_setup`: local gateway bootstrap, authoritative generated copy/live capability modes, shared bounded native queries and sanitized executable resolution within the same OpenShell boundary; OpenShell remains the registration/health authority, Podman the container/network authority.
 - `openshell::diagnostics`: read-only prerequisite/capability reporting with bounded native queries, sharing setup predicates without invoking setup.
+- `openshell::local_setup::removal`: explicit local uninstall; reuses setup's exact
+  gateway ownership/native query predicates and Runtime's identity-checked
+  stop/destroy. OpenShell owns registration and guest-resource deletion; Podman
+  owns container/network absence. Private state and the binary are removed last.
 
 There is no backend hierarchy, daemon, plugin ABI, embedded JS runtime, second policy language, or framework layer.
 

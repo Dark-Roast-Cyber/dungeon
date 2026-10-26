@@ -15,6 +15,10 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[path = "uninstall.rs"]
+mod removal;
+pub(crate) use removal::run as uninstall;
+
 pub(super) const GATEWAY: &str = "dungeon-local";
 pub(super) const CONTAINER: &str = "openshell-gateway-dungeon-local";
 const ENDPOINT: &str = "https://127.0.0.1:17670";
@@ -1424,15 +1428,15 @@ mod tests {
     use super::*;
     use std::os::unix::fs::{PermissionsExt, symlink};
 
-    fn host_maps() -> Value {
+    pub(super) fn host_maps() -> Value {
         serde_json::json!({"uidmap":[{"container_id":0,"host_id":unsafe { libc::geteuid() },"size":1},{"container_id":1,"host_id":524288,"size":65536}],"gidmap":[{"container_id":0,"host_id":unsafe { libc::getegid() },"size":1},{"container_id":1,"host_id":524288,"size":65536}]})
     }
 
-    fn image() -> Value {
+    pub(super) fn image() -> Value {
         serde_json::json!({"Id":"b".repeat(64),"Config":{"Env":["PATH=/usr/bin:/bin","SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"],"Entrypoint":["/usr/local/bin/openshell-gateway"],"WorkingDir":"/app"}})
     }
 
-    fn container(state: &Path, socket: &str) -> Value {
+    pub(super) fn container(state: &Path, socket: &str) -> Value {
         let mut env = image()["Config"]["Env"].as_array().unwrap().clone();
         env.extend(
             container_arguments(state, socket)

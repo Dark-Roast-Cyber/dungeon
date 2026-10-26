@@ -32,7 +32,11 @@ fn private_config_root() -> Result<PathBuf> {
 
 pub(crate) fn list() -> Result<Vec<Value>> {
     let root = private_config_root()?;
-    match fs::symlink_metadata(&root) {
+    list_in(&root)
+}
+
+pub(crate) fn list_in(root: &Path) -> Result<Vec<Value>> {
+    match fs::symlink_metadata(root) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error.into()),
         Ok(meta) if meta.file_type().is_dir() => {}
