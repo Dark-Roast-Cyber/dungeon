@@ -6,7 +6,7 @@ use crate::config::{
 use crate::openshell::{GUEST_PROJECT, Runtime, plan_create_arguments, project_transfer_plan};
 use crate::policy::starter_policy;
 use crate::{Error, OPEN_SHELL_VERSION, Result};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use serde_json::json;
 use std::env;
 use std::io::{self, IsTerminal, Write};
@@ -29,7 +29,7 @@ enum AuthAgent {
     name = "dungeon",
     version,
     about = "Manage agent environments with OpenShell",
-    after_help = "Quick start (after dungeon setup and building an agent image):\n  dungeon init                Choose a harness and approve this project's scope\n  dungeon                     Launch the selected guest harness (interactive)\n  dungeon run                 Launch the same harness; accepts native CLI arguments\n  dungeon run codex           Use another harness for this invocation only\n  dungeon exec -- cargo test  Run an image-provided tool (after up)\n  dungeon attach              Optional host OpenCode UI (matching client required)\n  dungeon export              Review guest changes (copy mode)\n  dungeon down                Stop, preserving guest state\n  dungeon list                List bindings in/under this directory (offline)\n  dungeon list -a             List all private bindings (offline)\n  dungeon destroy             Delete a stopped bound sandbox after confirmation\n\nFirst use asks for OpenCode, Claude Code or Codex; existing bindings keep their choice.\nAutomation: dungeon init --yes --agent opencode|claude|codex\nUse dungeon config --path to find your private configuration.\nAutomation: dungeon machine --help",
+    after_help = "Quick start (after dungeon setup and building an agent image):\n  dungeon init                Choose a harness and approve this project's scope\n  dungeon                     Launch it; later launches reuse the project choice\n  dungeon run -- --help        Pass native flags to the selected harness\n  dungeon exec -- cargo test   Run an image-provided tool (after up)\n  dungeon down                Stop, preserving guest state\n\nHarnesses: OpenCode, Claude Code or Codex; no assumed choice.\nUse dungeon COMMAND --help for options; dungeon config --path for your configuration.\nAutomation: dungeon init --yes --agent AGENT; dungeon machine --help",
     subcommand_precedence_over_arg = true
 )]
 struct Cli {
@@ -85,16 +85,19 @@ enum Commands {
         directory: Option<PathBuf>,
         #[arg(long, default_value = ".", help = "host project directory")]
         project: PathBuf,
-        #[arg(long, value_enum, default_value = "live")]
-        project_transfer: ProjectTransfer,
+        #[arg(long, value_enum, help = "project transfer (default: live)")]
+        project_transfer: Option<ProjectTransfer>,
         #[arg(long, help = "sandbox name (default: generated from the project path)")]
         name: Option<String>,
         #[arg(long, help = "registered OpenShell gateway (default: dungeon-local)")]
         gateway: Option<String>,
-        #[arg(long, default_value = "default")]
-        workspace: String,
-        #[arg(long, default_value = DEFAULT_IMAGE)]
-        image: String,
+        #[arg(long, help = "OpenShell workspace (default: default)")]
+        workspace: Option<String>,
+        #[arg(
+            long,
+            help = "sandbox image (default: reviewed local agent image; build first)"
+        )]
+        image: Option<String>,
         #[arg(
             long,
             value_enum,
@@ -107,8 +110,12 @@ enum Commands {
         )]
         providers: Vec<String>,
         /// OpenCode host configuration access; existing bindings are never changed.
-        #[arg(long, value_enum, default_value = "disabled")]
-        harness_config: HarnessMode,
+        #[arg(
+            long,
+            value_enum,
+            help = "OpenCode host configuration access (default: disabled)"
+        )]
+        harness_config: Option<HarnessMode>,
         /// Omit legacy auth and whole OpenCode JSON configs that can contain credentials.
         #[arg(long)]
         exclude_provider_auth: bool,
@@ -228,7 +235,34 @@ enum ImportCommands {
 }
 
 pub(crate) fn run() -> Result<i32> {
-    dispatch(Cli::parse())
+    let matches = human_command().get_matches();
+    dispatch(Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit()))
+}
+
+fn human_command() -> clap::Command {
+    let mut command = Cli::command();
+    command.build();
+    let mut groups = [String::new(), String::new(), String::new()];
+    for subcommand in command.get_subcommands() {
+        let name = subcommand.get_name();
+        let group = match name {
+            "init" | "up" | "down" | "status" | "list" | "run" | "exec" | "shell" | "auth"
+            | "export" => 0,
+            "setup" | "doctor" | "config" | "plan" => 1,
+            _ => 2,
+        };
+        groups[group].push_str(&format!(
+            "  {name:<12}{}\n",
+            subcommand
+                .get_about()
+                .map(ToString::to_string)
+                .unwrap_or_default()
+        ));
+    }
+    command.help_template(format!(
+        "{{about-with-newline}}\n{{usage-heading}} {{usage}}\n\nEveryday commands:\n{}\nSetup and configuration:\n{}\nAdvanced and recovery:\n{}\nArguments:\n{{positionals}}\nOptions:\n{{options}}\n{{after-help}}\n",
+        groups[0], groups[1], groups[2]
+    ))
 }
 
 fn dispatch(cli: Cli) -> Result<i32> {
@@ -464,28 +498,25 @@ fn run_selection(arguments: &[String]) -> Result<(Option<Agent>, &[String])> {
 fn create_project_binding(project: &Path, agent: Agent) -> Result<Config> {
     let path = binding::config_path(project)?;
     let directory = path.parent().expect("binding config parent").to_path_buf();
-    let values = ConfigDoc {
+    let values = environment_defaults(project.to_path_buf(), agent)?;
+    approve_environment(&directory, &values, false)?;
+    write_environment(directory, values)
+}
+
+fn environment_defaults(project: PathBuf, agent: Agent) -> Result<ConfigDoc> {
+    Ok(ConfigDoc {
         schema: 2,
-        name: binding::generated_name(project)?,
+        name: binding::generated_name(&project)?,
         gateway: "dungeon-local".into(),
         workspace: "default".into(),
-        project: project.to_path_buf(),
+        project,
         project_transfer: ProjectTransfer::Live,
         image: DEFAULT_IMAGE.into(),
         agent,
         providers: vec![],
         imports: vec![],
-        harness: crate::imports::harness::defaults(
-            agent,
-            HarnessMode::Disabled,
-            false,
-            vec![],
-            project,
-            &path,
-        )?,
-    };
-    approve_environment(&directory, &values, false)?;
-    write_environment(directory, values)
+        harness: None,
+    })
 }
 
 fn print_plan(config: &Config) -> Result<i32> {
@@ -826,14 +857,14 @@ fn versions(check: bool, config: Option<&Path>) -> Result<i32> {
 fn initialize(
     directory: Option<PathBuf>,
     project: PathBuf,
-    project_transfer: ProjectTransfer,
+    project_transfer: Option<ProjectTransfer>,
     name: Option<String>,
     gateway: Option<String>,
-    workspace: String,
-    image: String,
+    workspace: Option<String>,
+    image: Option<String>,
     agent: Option<Agent>,
     providers: Vec<String>,
-    harness_config: HarnessMode,
+    harness_config: Option<HarnessMode>,
     exclude_provider_auth: bool,
     harness_exclude: Vec<String>,
     yes: bool,
@@ -848,29 +879,31 @@ fn initialize(
             .expect("binding config parent")
             .to_path_buf(),
     };
-    let name = name.unwrap_or(binding::generated_name(&project)?);
-    let gateway = gateway.unwrap_or_else(|| "dungeon-local".to_owned());
-    let harness = crate::imports::harness::defaults(
+    let mut values = environment_defaults(project, agent)?;
+    if let Some(name) = name {
+        values.name = name;
+    }
+    if let Some(gateway) = gateway {
+        values.gateway = gateway;
+    }
+    if let Some(workspace) = workspace {
+        values.workspace = workspace;
+    }
+    if let Some(image) = image {
+        values.image = image;
+    }
+    if let Some(transfer) = project_transfer {
+        values.project_transfer = transfer;
+    }
+    values.providers = providers;
+    values.harness = crate::imports::harness::defaults(
         agent,
-        harness_config,
+        harness_config.unwrap_or(HarnessMode::Disabled),
         exclude_provider_auth,
         harness_exclude,
-        &project,
+        &values.project,
         &directory.join("dungeon.json"),
     )?;
-    let values = ConfigDoc {
-        schema: 2,
-        name,
-        gateway,
-        workspace,
-        project,
-        project_transfer,
-        image,
-        agent,
-        providers,
-        imports: vec![],
-        harness,
-    };
     approve_environment(&directory, &values, yes)?;
     let config = write_environment(directory, values)?;
 
@@ -1016,6 +1049,26 @@ fn confirm(label: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grouped_help_lists_every_registered_command_once() {
+        let mut command = human_command();
+        let names = command
+            .get_subcommands()
+            .map(|sub| sub.get_name().to_owned())
+            .collect::<Vec<_>>();
+        let text = command.render_long_help().to_string();
+        for name in names {
+            assert_eq!(
+                text.lines()
+                    .filter(|line| line.starts_with("  ")
+                        && line.split_whitespace().next() == Some(name.as_str()))
+                    .count(),
+                1,
+                "{name}: {text}"
+            );
+        }
+    }
 
     #[test]
     fn direct_launch_accepts_current_or_explicit_project_and_subcommands_keep_precedence() {

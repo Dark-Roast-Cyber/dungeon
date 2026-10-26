@@ -343,12 +343,26 @@ fn help_explains_the_main_workflow_and_configuration_flags() {
     for command in [
         "dungeon init",
         "dungeon exec",
-        "dungeon export",
         "dungeon config --path",
         "dungeon machine --help",
     ] {
         assert!(text.contains(command), "{command}");
     }
+    let everyday = text.split_once("Everyday commands:").unwrap().1;
+    let (everyday, rest) = everyday.split_once("Setup and configuration:").unwrap();
+    let (setup, advanced) = rest.split_once("Advanced and recovery:").unwrap();
+    assert!(everyday.contains("export"));
+    assert!(everyday.contains("run"));
+    assert!(!everyday.contains("create"));
+    assert!(setup.contains("doctor"));
+    assert!(advanced.contains("create"));
+    assert!(advanced.contains("start"));
+    assert!(advanced.contains("attach"));
+    assert_eq!(f.run(&["-h"]).stdout, text.as_bytes());
+    assert_eq!(f.run(&["help"]).stdout, text.as_bytes());
+    let out = f.run(&["create", "--help"]);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Usage: dungeon create"));
     let out = f.run(&["init", "--help"]);
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
@@ -356,7 +370,7 @@ fn help_explains_the_main_workflow_and_configuration_flags() {
     assert!(text.contains("--non-interactive"));
     assert!(text.contains("--project-transfer"));
     assert!(!text.contains("[default: opencode]"));
-    assert!(text.contains("[default: disabled]"));
+    assert!(text.contains("default: disabled"));
     let out = f.run(&["run", "--help"]);
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
@@ -512,6 +526,41 @@ mod terminal {
                 let _ = self.child.kill();
             }
             let _ = self.child.wait();
+        }
+    }
+
+    #[test]
+    fn implicit_and_explicit_initialization_share_every_configuration_default() {
+        for agent in ["opencode", "claude", "codex"] {
+            let f = Fixture::new();
+            let mut terminal = Terminal::spawn(f.command(), &["run", agent]);
+            terminal.until("Save this private configuration and continue?");
+            terminal.send("y\n");
+            terminal.finish(false);
+            let implicit = f.config();
+            let home = f.root.path().join("explicit-home");
+            fs::create_dir(&home).unwrap();
+            let explicit_command = || {
+                let mut command = f.command();
+                command
+                    .env("HOME", &home)
+                    .env("USERPROFILE", &home)
+                    .env("XDG_CONFIG_HOME", home.join("config"));
+                command
+            };
+            let out = explicit_command()
+                .args(["init", "--yes", "--agent", agent])
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{out:?}");
+            let out = explicit_command().arg("config").output().unwrap();
+            assert!(out.status.success(), "{out:?}");
+            let explicit: Value = serde_json::from_slice(&out.stdout).unwrap();
+            assert_eq!(implicit["values"], explicit["values"]);
+            assert_eq!(
+                fs::read(implicit["policy"].as_str().unwrap()).unwrap(),
+                fs::read(explicit["policy"].as_str().unwrap()).unwrap()
+            );
         }
     }
 
