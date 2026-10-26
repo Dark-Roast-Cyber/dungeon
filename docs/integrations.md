@@ -38,6 +38,11 @@ is automatic for interactive `run`, explicit with `exec --tty --`, and forced
 for `shell`. The backend owns terminal resizing and signal transport. Remote
 exit codes propagate; no retry restarts an agent session automatically.
 
+Ctrl-C handling belongs to OpenShell and the guest CLI; ordinary launch does not
+inject a second interrupt or stop the sandbox on exit. Single-interrupt exit from
+Codex's welcome screen is [validated](validation.md#onboarding-cleanup-2026-10-25-source-checkout),
+not a guarantee for every harness, screen or active task.
+
 ## Authentication
 
 Dungeon supports two explicit vendor-native guest login coordinators:

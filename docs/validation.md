@@ -2,6 +2,42 @@
 
 CI checks formatting, Clippy, locked Rust tests, release compilation, CLI version execution, npm launcher behavior, distribution version synchronization, native archive creation, and full npm package assembly on explicit supported runners.
 
+## Onboarding cleanup (2026-10-25, source checkout)
+
+Top-level help groups everyday, setup/configuration, and advanced/recovery
+commands, using the registered command descriptions. Tests verify every command
+is listed once, all help entrypoints agree, and advanced commands remain usable.
+Explicit and implicit human initialization now share one default constructor;
+synthetic PTY tests compare all configuration values and policy for each harness.
+Machine initialization, approval requirements and runtime signal handling are unchanged.
+
+Formatting, all-target locked Clippy with warnings denied, **190 locked Rust
+tests** (132 unit + 58 integration), three npm launcher tests and the release
+build passed. Rust fixtures used checkout-local `TMPDIR`; launcher Node22.22.2
+is not the Node24 release gate. The preceding commit `28127b2` also passed hosted
+CI; these new edits have not been published. Evidence:
+`/tmp/opencode/dungeon-cleanup-20261025`.
+
+A disposable native run used Linux7.2.9-201.fc44.x86_64, OpenShell0.0.116,
+rootless Podman5.8.7 and the unchanged `local-test` image `3947cf4ee202…`.
+Debug binary SHA-256:
+`f20c558eb88bf368cc37a9e803bf8c4f44f810f8e32a27d83476c03642c430db`.
+The PTY fixture continuously drained output, allowed one second after readiness,
+then sent exactly one Ctrl-C byte. No retry interrupt was sent.
+
+| Native case | Result |
+| --- | --- |
+| Controlled guest Node SIGINT handler | Handler marker, exit23, terminal restored (5 ms) |
+| Bare `dungeon`, Codex welcome screen | Exit0, terminal restored, no matching agent processes (19 ms) |
+| `dungeon run`, same configured Codex | Same result (19 ms) |
+
+The same sandbox remained Ready after each invocation and was observed Stopped
+between trials, then stopped/destroyed after validation. Protected existing
+gateway/sandbox IDs, states and start times matched before/after. The fixture's
+raw PTY logs and `native/results.json` retain the observations. This closes the
+single-interrupt startup check on this combination, not active-task cancellation,
+other harnesses, login/inference or a stronger cleanup/containment guarantee.
+
 ## Harness-neutral onboarding (2026-10-24, source checkout)
 
 Human initialization now asks for a harness if none is explicit, then reviews

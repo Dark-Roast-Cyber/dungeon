@@ -95,6 +95,9 @@ guest writes appear on the host immediately. Choose
 
 From the project directory, choose the interface you need:
 
+`dungeon --help` groups everyday commands, setup/configuration, and advanced or
+recovery commands. Use `dungeon COMMAND --help` for the options of any command.
+
 | Task | Command |
 | --- | --- |
 | Launch the configured agent | `dungeon` |

@@ -114,6 +114,9 @@ harness or global preference registry. It writes only private configuration and 
 policy; it does not contact OpenShell, create/start a sandbox, stage imports or
 upload files. Override values with flags before confirming:
 
+Explicit `init` and implicit first use resolve the same defaults; flags override
+only the selected values. Omitted options never add host configuration imports.
+
 | Flag | Default |
 | --- | --- |
 | `--project PATH` | Current directory, canonicalized |

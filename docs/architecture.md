@@ -213,6 +213,8 @@ asks once before saving scope. No harness is assumed or inferred from host tools
 The choice is stored in the project binding, without a global preference registry.
 `init --yes --agent AGENT` is explicit noninteractive approval and selection.
 Host harness imports are disabled by default; read-only/copy access is opt-in.
+Human explicit and implicit initialization share one configuration-default
+constructor; CLI options are overrides rather than a second set of defaults.
 The same config writer and validator serve direct binding and machine
 initialization. `config` exposes resolved values/paths without a new registry;
 `config` and `plan` never initialize missing bindings or contact OpenShell.
