@@ -2,8 +2,9 @@
 
 Run coding agents and development tools in isolated project environments, using
 their normal CLIs. Dungeon manages setup, private configuration, lifecycle and
-reviewed project transfers. [OpenShell](https://github.com/NVIDIA/OpenShell) owns
-isolation and policy enforcement; your tools own prompts, models and sessions.
+reviewed project transfers. Use local Podman/Docker containers, or optional
+[OpenShell](https://github.com/NVIDIA/OpenShell) for its policy enforcement and
+gateway features. Your tools own prompts, models and sessions.
 Part of [Agent Archaeology](https://agentarchaeology.ai/).
 
 **Development preview:** this README describes the source-only Rust 0.0.2
@@ -18,7 +19,8 @@ gateway and copy/live choices, use the [adoption cheat sheet](docs/adoption.md).
 ### 1. Build the CLI
 
 For the supported Linux path, install Git, a Rust toolchain manager providing
-`cargo`, OpenShell **0.0.116**, and rootless Podman separately. The repository pins
+`cargo`. Container execution needs rootless Podman with its user API socket, or
+standard local Docker CE with daemon access. The repository pins
 **Rust 1.98.1** in `rust-toolchain.toml`. Build the current preview from source:
 
 ```sh
@@ -36,15 +38,50 @@ For a user-local install from this checkout, run
 an existing different `~/.local/bin/dungeon` requires explicit `--replace`.
 The helper installs only the Rust binary, not OpenShell or a gateway.
 
-### 2. Set up the local gateway
+### 2. Discover the container service
+
+```sh
+dungeon setup --runtime container  # discover; prefer usable Podman over Docker
+dungeon doctor                    # concise, read-only dependency check
+```
+
+Setup remembers the selected engine/socket for future bindings. If neither
+service is usable, Dungeon asks you to install an engine or start/check its
+service. It does not install packages or change permissions. An override is
+`dungeon setup --runtime container --engine docker`.
+
+```sh
+cd my-project
+dungeon init                      # choose an agent and review scope
+dungeon                           # create/resume and launch its CLI
+```
+
+Plain containers pull a digest-pinned public agent base image on first use.
+The project is mounted read/write at `/sandbox/project`; guest state survives
+stop/resume. Select another image with `init --image REGISTRY/IMAGE:TAG`.
+Host configuration imports are opt-in and mounted read-only; see below.
+Plain containers use normal container networking and **do not enforce
+OpenShell's policy.json**. Docker CE daemon access is host-root-equivalent.
+
+Without saved defaults, fresh initialization uses OpenShell when its CLI is
+installed, otherwise plain containers. Use `init --runtime container` or
+`init --runtime openshell` explicitly. Existing bindings never switch runtime,
+engine or service because a dependency disappears.
+
+### Optional OpenShell gateway
+
+The remaining gateway instructions apply to OpenShell **0.0.116** with rootless
+Podman. Managed Docker/OpenShell gateway provisioning is not implemented;
+Docker CE support is the plain-container path. Install OpenShell only when using
+its policy, copy/export, provider, SSH/forwarding or owned-execution features.
 
 Start the user Podman API socket and pull the pinned gateway image explicitly:
 
 ```sh
 systemctl --user enable --now podman.socket
 podman pull ghcr.io/nvidia/openshell/gateway@sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645
-dungeon setup               # fresh bind-capable gateway; no project mounted yet
-dungeon doctor
+dungeon setup --runtime openshell
+dungeon doctor --runtime openshell
 ```
 
 Setup creates a local mTLS gateway, `dungeon-local`, on loopback port 17670 using
@@ -53,10 +90,10 @@ state; it never overwrites conflicts, repairs stopped gateways, installs
 prerequisites or falls back to weaker isolation. `doctor` is read-only and can
 also be used before setup to identify missing prerequisites.
 
-### 3. Review a project, then start it
+### Reviewed local image for OpenShell or plain containers
 
 Tools must be installed in the selected sandbox image; Dungeon does not use your
-host's tools. New CLI bindings select the versioned local image candidate with
+host's tools. New OpenShell bindings select the versioned local image candidate with
 reviewed OpenCode, Claude Code and Codex CLIs. **Build it explicitly before `up`** using the
 [image procedure](images/agent/README.md); setup does not download or build it.
 `dungeon versions --check` reads the upstream stable tag and reports if a newer
@@ -167,7 +204,14 @@ the **installed binary**:
 # ~/.local/bin/dungeon uninstall --yes  # destructive test-environment automation
 ```
 
-This stops and destroys recorded local sandboxes, verifies their containers are
+For plain-container bindings, uninstall verifies the recorded native containers,
+stops/removes them, then removes private bindings and the selected binary.
+Mixed OpenShell/plain installations require destroying plain containers first.
+`uninstall --binary-only` removes just the CLI without runtime dependencies and
+leaves configuration/containers untouched. With no Dungeon config/state, ordinary
+uninstall also removes only the CLI and reports container cleanup unverified.
+
+For an OpenShell installation, this stops and destroys recorded local sandboxes, verifies their containers are
 gone, removes the recognized `dungeon-local` gateway/container/network and its
 OpenShell registration, then deletes private Dungeon config/state and the
 user-local binary. **Guest files, sessions, authentication and saved configuration
@@ -209,11 +253,14 @@ dungeon config --path           # just the dungeon.json path
 
 | Setting | Default | Initialization flag |
 | --- | --- | --- |
+| Runtime | Saved container preference; otherwise installed OpenShell or plain container | `--runtime auto\|container\|openshell` |
+| Container engine | Usable Podman, otherwise Docker CE; recorded on creation | `--engine auto\|podman\|docker` |
+| Container socket | Engine's standard local Unix socket | `--endpoint unix:///absolute/socket` with explicit engine |
 | Project | Current directory | `--project PATH` |
 | Config directory | Private project binding | `--directory PATH` |
 | Environment name | Generated from the project path | `--name NAME` |
 | Harness | Ask once per project; no assumed choice | `--agent opencode\|claude\|codex` |
-| Image | Reviewed local `dungeon-agent:0.0.3-opencode-2.1.2` (build first) | `--image OCI_REFERENCE` |
+| Image | Plain: pinned public base (pull on use); OpenShell: reviewed local agent image (build first) | `--image OCI_REFERENCE` |
 | Transfer | Live, one reviewed writable project mount | `--project-transfer copy\|live` |
 | Gateway | `dungeon-local` | `--gateway NAME` |
 | Workspace | `default` | `--workspace NAME` |
@@ -239,7 +286,7 @@ to a bound configuration fail identity checks; Dungeon does not silently rebuild
 or widen policy. Use `--directory PATH` for a separately managed environment and
 `dungeon --config PATH COMMAND` to select it explicitly.
 
-Live transfer exposes only the selected host project read-write and requires
+For OpenShell, live transfer exposes only the selected host project read-write and requires
 a recognized bind-enabled gateway. Fresh `setup` creates that capability by
 default, but never mounts a project by itself. `setup --copy-only` and
 `init --project-transfer copy` keep the isolated copy/review workflow. Existing
@@ -311,7 +358,7 @@ and `/proc` are required. See [attachment](docs/configuration.md#remote-first-at
 - Harnesses use [`dungeon machine --schema 1 ...`](docs/machine.md) for lifecycle
   JSON, workload-byte JSONL and explicit whole-project transfer. No daemon or
   agent orchestration is added. Sandcastle integration is not implemented.
-- Runtime evidence covers specific Linux/OpenShell **0.0.116**/rootless-Podman
+- OpenShell runtime evidence covers specific Linux/OpenShell **0.0.116**/rootless-Podman
   combinations, not general desktop, EDR, macOS or native Windows containment.
   Setup health and tests are not security attestation.
 - No host home, engine socket or native auth/session database is shared.

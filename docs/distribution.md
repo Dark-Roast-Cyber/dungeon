@@ -15,8 +15,21 @@ Python wheel/source archive and does not implement this Rust manual. The
 
 ## Clean local uninstall
 
-The Rust CLI's `uninstall` targets the Linux/rootless-Podman setup and the
-user-local install helper. It is not a package-manager uninstaller.
+The Rust CLI's `uninstall` supports standalone plain-container installations and
+the Linux/rootless-Podman OpenShell setup with the user-local install helper.
+It is not a package-manager uninstaller.
+
+For plain containers, it inventories the recorded native services, rejects
+unrecorded Dungeon containers, stops/removes recorded containers, verifies absence,
+and removes private configuration and the selected CLI. Projects, original imports,
+cached images and unrelated containers remain. Mixed installations require
+destroying plain containers before OpenShell teardown.
+
+`uninstall --binary-only` needs no engine or OpenShell and removes only the selected
+CLI. Configuration/resources remain; cleanup is reported unverified. Ordinary
+uninstall takes this same path when Dungeon config/state are absent.
+
+The following detailed teardown sequence applies to OpenShell installations:
 
 1. Close all Dungeon clients and other lifecycle/transfer commands. Export needed
    copy-mode edits before removal; uninstall does not export or back up anything.

@@ -1,5 +1,41 @@
 # Configuration
 
+## Runtime and engine selection
+
+OpenShell is optional. Fresh human initialization uses saved container defaults,
+otherwise installed OpenShell, otherwise a plain container. Existing configurations
+without a `container` field retain OpenShell. Existing runtime bindings never switch
+engine or service when a dependency disappears.
+
+```sh
+dungeon setup --runtime container       # prefer reachable rootless Podman, then Docker CE
+dungeon init --runtime container --image REGISTRY/IMAGE:TAG
+dungeon init --runtime container --engine docker --endpoint unix:///var/run/docker.sock
+dungeon init --runtime openshell        # optional policy/gateway contract
+```
+
+`setup --runtime container` records the resolved engine/socket in private
+`${XDG_CONFIG_HOME:-$HOME/.config}/dungeon/container-defaults.json`. Edit it to
+change future environments. `init --engine` overrides that default and implies
+the container runtime. An explicit endpoint requires an explicit engine. Only
+local Linux Unix sockets are supported; Docker rootless/userns-remap is currently
+rejected. Standard discovery checks `/run/user/<uid>/podman/podman.sock` and
+`/var/run/docker.sock`; it does not adopt Docker contexts or engine environment
+overrides. Missing engines/services produce a short installation/start message.
+
+Plain containers mount the project read/write at `/sandbox/project`. Reviewed
+configuration imports remain opt-in, read-only, and separate from writable guest
+state. The default image is the digest-pinned public OpenShell-community base
+listed by `dungeon versions`, pulled on first use; using that image does not need
+OpenShell. Custom images must provide `/bin/sh`, `/bin/sleep`, the selected tools,
+and a writable `/sandbox` home, with no implicit volumes.
+
+`policy.json` is not enforced in plain containers. Networking is ordinary bridge
+networking with unrestricted outbound access. Copy/export, named providers,
+SSH/forwarding, host UI attachment and owned/streamed machine execution require
+OpenShell. Normal `up`, `down`, `status`, `exec`, `run`, `shell`, `auth` and `destroy`
+use the recorded runtime. Native guest state persists through stop/resume.
+
 ## Machine callers
 
 Use the [machine schema-1 contract](machine.md) for deterministic lifecycle,
@@ -30,7 +66,12 @@ bounded bytes feed the existing strict parser/validator; doctor does not reopen
 the paths after a safety preflight. This is a diagnostic-only read restriction,
 not a change to other commands' configuration-loading contract.
 
-The supported diagnostic runtime boundary is Linux, OpenShell **0.0.116** and
+For plain bindings (or no binding), doctor checks local native service readiness
+and, when bound, recorded service/container identity and configuration. Its JSON
+adds `container` instead of `supported_openshell`. Use `doctor --runtime openshell`
+to request gateway diagnostics before initializing an OpenShell binding.
+
+The OpenShell diagnostic runtime boundary is Linux, OpenShell **0.0.116** and
 rootless Podman. Other platforms report unsupported without invoking runtime
 tools. Checks cover pinned CLI, rootless info/API socket readiness, local images,
 `dungeon-local` registration, container, bridge network and gateway/driver health.
@@ -93,6 +134,9 @@ inspection, AI task, guest probe or native-client compatibility test. Consult
 gates.
 
 ## Environment configuration
+
+The gateway setup description below applies to `setup --runtime openshell`.
+Plain setup discovers a service and saves defaults as described above.
 
 Dungeon keeps one private directory per environment and never discovers configuration or policy from a repository. For normal interactive use, `dungeon` resolves the current directory, or an explicit positional project path, to a deterministic private binding under `${XDG_CONFIG_HOME:-$HOME/.config}/dungeon/projects/<project-key>`. Explicit `--config PATH` remains the authoritative automation/recovery surface and is never silently replaced by project resolution.
 

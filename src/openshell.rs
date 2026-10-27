@@ -29,7 +29,7 @@ pub(crate) use remote::attach_opencode;
 
 #[cfg(target_os = "linux")]
 #[path = "setup.rs"]
-mod local_setup;
+pub(crate) mod local_setup;
 
 #[cfg(target_os = "linux")]
 pub(crate) use local_setup::run as setup;
@@ -454,6 +454,7 @@ impl<'a> Runtime<'a> {
         serde_json::to_writer_pretty(
             &mut state,
             &RuntimeState {
+                container: None,
                 schema: 1,
                 id: Self::remote_str(&remote, "id")?.to_owned(),
                 config: self.config.fingerprint.clone(),
@@ -1035,6 +1036,7 @@ mod tests {
                 path: canonical.join("dungeon.json"),
                 policy_path: canonical.join("policy.json"),
                 values: ConfigDoc {
+                    container: None,
                     schema: 2,
                     name: "demo".into(),
                     gateway: "local".into(),
@@ -1778,6 +1780,7 @@ esac
         let config = Config {
             path: PathBuf::from("/tmp/dungeon.json"),
             values: ConfigDoc {
+                container: None,
                 schema: 2,
                 name: "demo".into(),
                 gateway: "local".into(),

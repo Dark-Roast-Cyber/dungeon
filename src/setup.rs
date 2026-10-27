@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 #[path = "uninstall.rs"]
 mod removal;
+pub(crate) use removal::binary_only as uninstall_binary;
 pub(crate) use removal::run as uninstall;
 
 pub(super) const GATEWAY: &str = "dungeon-local";
@@ -58,13 +59,13 @@ pub(super) fn parse_bind_config(text: &str) -> Option<BindConfig> {
     None
 }
 
-pub(super) struct Reply {
-    pub(super) code: i32,
-    pub(super) text: String,
+pub(crate) struct Reply {
+    pub(crate) code: i32,
+    pub(crate) text: String,
 }
 
 // One bounded native subprocess mechanism for setup and read-only diagnostics.
-pub(super) fn query(
+pub(crate) fn query(
     binary: &Path,
     env: &HashMap<OsString, OsString>,
     args: &[&str],

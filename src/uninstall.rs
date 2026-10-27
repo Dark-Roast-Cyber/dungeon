@@ -175,7 +175,10 @@ fn runtime<'a>(tools: &Tools, binding: &'a Config) -> Result<Runtime<'a>> {
 }
 
 fn plan(tools: &Tools, config: PathBuf, state: PathBuf, binary: PathBuf) -> Result<Plan> {
-    check_tree(&config, &["projects", "transfer-locks"])?;
+    check_tree(
+        &config,
+        &["projects", "transfer-locks", "container-defaults.json"],
+    )?;
     check_tree(
         &state,
         &["local-setup", "setup.lock", "uninstall-incomplete.json"],
@@ -487,7 +490,10 @@ fn execute(tools: &Tools, plan: &Plan, cleanup_timeout: Duration) -> Result<()> 
             "gateway client TLS files remain; installation retained",
         ));
     }
-    check_tree(&plan.config, &["projects", "transfer-locks"])?;
+    check_tree(
+        &plan.config,
+        &["projects", "transfer-locks", "container-defaults.json"],
+    )?;
     check_tree(
         &plan.state,
         &["local-setup", "setup.lock", "uninstall-incomplete.json"],
@@ -518,7 +524,6 @@ pub(crate) fn run(bin_dir: Option<PathBuf>, dry_run: bool, yes: bool) -> Result<
     let home = PathBuf::from(env::var_os("HOME").ok_or_else(|| Error::new("HOME required"))?);
     let cwd = env::current_dir()?.canonicalize()?;
     let project = (cwd != home.canonicalize()?).then_some(cwd.as_path());
-    let tools = prerequisites(env::consts::OS, project, setup_environment(project)?)?;
     let config = env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".config"))
@@ -547,6 +552,58 @@ pub(crate) fn run(bin_dir: Option<PathBuf>, dry_run: bool, yes: bool) -> Result<
     {
         return Err(Error::new("uninstall roots must not overlap"));
     }
+    if !present(&config)? && !present(&state)? {
+        return binary_only(binary.parent().map(Path::to_path_buf), dry_run, yes);
+    }
+    let entries = crate::binding::list_in(&config.join("projects"))?;
+    if entries.is_empty()
+        && present(&config.join("container-defaults.json"))?
+        && !present(&state)?
+        && !present(
+            &config
+                .parent()
+                .unwrap()
+                .join("openshell/gateways/dungeon-local"),
+        )?
+    {
+        return remove_plain(&[], &config, &state, &binary, dry_run, yes);
+    }
+    let mut plain = vec![];
+    for entry in &entries {
+        if entry["binding"]["state"] == "invalid" {
+            return Err(Error::new(
+                "invalid private binding; inspect before uninstall",
+            ));
+        }
+        let binding = crate::config::load_config(Path::new(
+            entry["config"]
+                .as_str()
+                .ok_or_else(|| Error::new("invalid binding path"))?,
+        ))?;
+        if binding.values.container.is_some() {
+            plain.push(binding);
+        }
+    }
+    if !plain.is_empty() {
+        let mixed = plain.len() != entries.len()
+            || present(&state)?
+            || present(
+                &config
+                    .parent()
+                    .unwrap()
+                    .join("openshell/gateways/dungeon-local"),
+            )?;
+        if mixed && plain.iter().any(|c| c.state_path().exists()) {
+            return Err(Error::new(
+                "mixed runtime installation: destroy plain containers first, then retry uninstall; --binary-only removes only the CLI",
+            ));
+        }
+        if !mixed {
+            return remove_plain(&plain, &config, &state, &binary, dry_run, yes);
+        }
+        crate::container::removal_inventory(&plain)?.verify_empty()?;
+    }
+    let tools = prerequisites(env::consts::OS, project, setup_environment(project)?)?;
     let plan = plan(&tools, config, state, binary)?;
     println!(
         "{}",
@@ -591,6 +648,120 @@ pub(crate) fn run(bin_dir: Option<PathBuf>, dry_run: bool, yes: bool) -> Result<
     println!(
         "Dungeon uninstalled; local sandbox/gateway containers, network, registration, private state and selected binary are absent."
     );
+    Ok(0)
+}
+
+fn approve_removal(yes: bool) -> Result<()> {
+    if yes {
+        return Ok(());
+    }
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Err(Error::new(
+            "uninstall requires a terminal or explicit --yes",
+        ));
+    }
+    print!("Type `uninstall dungeon` to confirm: ");
+    io::stdout().flush()?;
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    if answer.trim() != "uninstall dungeon" {
+        return Err(Error::new("uninstall cancelled; nothing removed"));
+    }
+    Ok(())
+}
+
+pub(crate) fn binary_only(bin_dir: Option<PathBuf>, dry_run: bool, yes: bool) -> Result<i32> {
+    let home = PathBuf::from(env::var_os("HOME").ok_or_else(|| Error::new("HOME required"))?);
+    let binary = bin_dir
+        .unwrap_or_else(|| home.join(".local/bin"))
+        .join("dungeon");
+    check_binary(&binary)?;
+    println!(
+        "{}",
+        crate::config::review_json(
+            &serde_json::json!({"operation":"uninstall-binary","dry_run":dry_run,"remove_path":binary,"container_cleanup":"not verified; configuration and runtime resources retained"})
+        )?
+    );
+    if dry_run {
+        return Ok(0);
+    }
+    approve_removal(yes)?;
+    check_binary(&binary)?;
+    if present(&binary)? {
+        fs::remove_file(&binary)?;
+    }
+    if present(&binary)? {
+        return Err(Error::new("binary removal incomplete"));
+    }
+    println!("CLI removed. Container cleanup not verified.");
+    Ok(0)
+}
+
+fn remove_plain(
+    bindings: &[Config],
+    config: &Path,
+    state: &Path,
+    binary: &Path,
+    dry: bool,
+    yes: bool,
+) -> Result<i32> {
+    check_tree(
+        config,
+        &["projects", "transfer-locks", "container-defaults.json"],
+    )?;
+    check_binary(binary)?;
+    for binding in bindings {
+        for source in std::iter::once(&binding.values.project)
+            .chain(binding.values.imports.iter().map(|i| &i.source))
+            .chain(
+                binding
+                    .values
+                    .harness
+                    .iter()
+                    .flat_map(|h| [&h.source, &h.legacy_auth]),
+            )
+        {
+            if source.starts_with(config) || source.starts_with(state) || binary.starts_with(source)
+            {
+                return Err(Error::new(
+                    "uninstall scope overlaps a project or original import",
+                ));
+            }
+        }
+    }
+    let inventory = crate::container::removal_inventory(bindings)?;
+    let ids = &inventory.ids;
+    println!(
+        "{}",
+        crate::config::review_json(
+            &serde_json::json!({"operation":"uninstall","dry_run":dry,"containers":ids,"remove_paths":[config,binary]})
+        )?
+    );
+    if dry {
+        return Ok(0);
+    }
+    approve_removal(yes)?;
+    if &crate::container::removal_inventory(bindings)?.ids != ids {
+        return Err(Error::new("uninstall inventory changed"));
+    }
+    for binding in bindings {
+        if binding.state_path().try_exists()? {
+            let runtime = crate::container::Runtime::new(binding)?;
+            runtime.down()?;
+            runtime.destroy()?;
+        }
+    }
+    inventory.verify_empty()?;
+    check_tree(
+        config,
+        &["projects", "transfer-locks", "container-defaults.json"],
+    )?;
+    check_binary(binary)?;
+    fs::remove_dir_all(config)?;
+    if present(binary)? {
+        fs::remove_file(binary)?;
+    }
+    println!("Recorded containers, private configuration and selected CLI removed.");
     Ok(0)
 }
 

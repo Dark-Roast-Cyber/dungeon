@@ -1,12 +1,15 @@
 mod binding;
 mod cli;
 mod config;
+#[cfg(target_os = "linux")]
+mod container;
 mod export;
 mod imports;
 mod machine;
 mod openshell;
 mod output;
 mod policy;
+mod runtime;
 
 pub(crate) const OPEN_SHELL_VERSION: &str = "0.0.116";
 

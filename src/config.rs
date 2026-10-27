@@ -51,6 +51,8 @@ impl ProjectTransfer {
 #[serde(deny_unknown_fields)]
 pub(crate) struct ConfigDoc {
     pub(crate) schema: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) container: Option<ContainerOptions>,
     pub(crate) name: String,
     pub(crate) gateway: String,
     pub(crate) workspace: String,
@@ -64,6 +66,42 @@ pub(crate) struct ConfigDoc {
     pub(crate) imports: Vec<Import>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) harness: Option<HarnessConfig>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, clap::ValueEnum, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Engine {
+    #[default]
+    Auto,
+    Podman,
+    Docker,
+}
+
+impl Engine {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Podman => "podman",
+            Self::Docker => "docker",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ContainerOptions {
+    #[serde(default)]
+    pub(crate) engine: Engine,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) endpoint: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ContainerBinding {
+    pub(crate) engine: Engine,
+    pub(crate) endpoint: String,
+    pub(crate) daemon: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, clap::ValueEnum, PartialEq, Eq)]
@@ -129,6 +167,8 @@ impl Config {
 #[serde(deny_unknown_fields)]
 pub(crate) struct RuntimeState {
     pub(crate) schema: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) container: Option<ContainerBinding>,
     pub(crate) id: String,
     pub(crate) config: String,
     pub(crate) observed_policy: String,
@@ -158,7 +198,7 @@ pub(crate) fn read_runtime_state(path: &Path) -> Result<RuntimeState> {
         std::str::from_utf8(&bytes).map_err(|_| Error::new("invalid runtime state"))?,
     )?)?;
     #[cfg(unix)]
-    if state.initial_upload_pending {
+    if state.initial_upload_pending || state.container.is_some() {
         use std::os::unix::fs::MetadataExt;
         if metadata.uid() != unsafe { libc::geteuid() }
             || metadata.mode() & 0o7777 != 0o600
@@ -192,6 +232,21 @@ pub(crate) fn load_config_data(
 
     if values.schema != 2 {
         return Err(Error::new("expected configuration schema 2"));
+    }
+    if let Some(container) = &values.container {
+        if values.project_transfer != ProjectTransfer::Live || !values.providers.is_empty() {
+            return Err(Error::new(
+                "copy transfer and named providers require --runtime openshell",
+            ));
+        }
+        if let Some(endpoint) = &container.endpoint {
+            validate_endpoint(endpoint)?;
+            if container.engine == Engine::Auto {
+                return Err(Error::new(
+                    "--endpoint requires an explicit --engine podman or docker",
+                ));
+            }
+        }
     }
 
     sandbox_name(&values.name)?;
@@ -293,6 +348,28 @@ pub(crate) fn load_config_data(
     };
     crate::openshell::validate_mount_request(&config)?;
     Ok(config)
+}
+
+pub(crate) fn validate_endpoint(endpoint: &str) -> Result<()> {
+    let path = endpoint
+        .strip_prefix("unix://")
+        .map(Path::new)
+        .ok_or_else(|| Error::new("container endpoint must be a local unix:///absolute/socket"))?;
+    if !path.is_absolute()
+        || path.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir | std::path::Component::CurDir
+            )
+        })
+        || endpoint.bytes().any(|b| b.is_ascii_control())
+        || endpoint.contains("/./")
+    {
+        return Err(Error::new(
+            "container endpoint must be an absolute normalized Unix socket",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_import(source: &Path) -> Result<()> {

@@ -30,6 +30,13 @@ fn private_config_root() -> Result<PathBuf> {
     Ok(root.join("dungeon/projects"))
 }
 
+pub(crate) fn preferences_path() -> Result<PathBuf> {
+    Ok(private_config_root()?
+        .parent()
+        .unwrap()
+        .join("container-defaults.json"))
+}
+
 pub(crate) fn list() -> Result<Vec<Value>> {
     let root = private_config_root()?;
     list_in(&root)
@@ -229,6 +236,7 @@ mod tests {
         write_new(
             &path,
             &ConfigDoc {
+                container: None,
                 schema: 2,
                 name: "demo".into(),
                 gateway: "local".into(),

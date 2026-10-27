@@ -3,8 +3,10 @@ use crate::config::{
     Agent, Config, ConfigDoc, HarnessMode, ProjectTransfer, canonical_project, create_private_dir,
     load_config, load_config_data, write_new,
 };
-use crate::openshell::{GUEST_PROJECT, Runtime, plan_create_arguments, project_transfer_plan};
+use crate::config::{ContainerOptions, Engine};
+use crate::openshell::{GUEST_PROJECT, plan_create_arguments, project_transfer_plan};
 use crate::policy::starter_policy;
+use crate::runtime::{Runtime, RuntimeChoice};
 use crate::{Error, OPEN_SHELL_VERSION, Result};
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use serde_json::json;
@@ -28,8 +30,8 @@ enum AuthAgent {
 #[command(
     name = "dungeon",
     version,
-    about = "Manage agent environments with OpenShell",
-    after_help = "Quick start (after dungeon setup and building an agent image):\n  dungeon init                Choose a harness and approve this project's scope\n  dungeon                     Launch it; later launches reuse the project choice\n  dungeon run -- --help        Pass native flags to the selected harness\n  dungeon exec -- cargo test   Run an image-provided tool (after up)\n  dungeon down                Stop, preserving guest state\n\nHarnesses: OpenCode, Claude Code or Codex; no assumed choice.\nUse dungeon COMMAND --help for options; dungeon config --path for your configuration.\nAutomation: dungeon init --yes --agent AGENT; dungeon machine --help",
+    about = "Manage project containers and optional OpenShell environments",
+    after_help = "Quick start (with a usable container service or configured OpenShell):\n  dungeon init                Choose a harness and approve this project's scope\n  dungeon                     Launch it; later launches reuse the project choice\n  dungeon run -- --help        Pass native flags to the selected harness\n  dungeon exec -- cargo test   Run an image-provided tool (after up)\n  dungeon down                Stop, preserving guest state\n\nHarnesses: OpenCode, Claude Code or Codex; no assumed choice.\nUse dungeon COMMAND --help for options; dungeon config --path for your configuration.\nAutomation: dungeon init --yes --agent AGENT; dungeon machine --help",
     subcommand_precedence_over_arg = true
 )]
 struct Cli {
@@ -52,6 +54,9 @@ struct Cli {
 enum Commands {
     /// Delete local sandboxes, gateway, private Dungeon state and the user-local binary.
     Uninstall {
+        /// Remove only this installed CLI; retain all configuration and runtime resources.
+        #[arg(long)]
+        binary_only: bool,
         /// Inspect the removal scope without changing files or containers.
         #[arg(long, conflicts_with = "yes")]
         dry_run: bool,
@@ -62,8 +67,14 @@ enum Commands {
         #[arg(long)]
         bin_dir: Option<PathBuf>,
     },
-    /// Set up or verify the supported local OpenShell gateway (Linux/rootless Podman).
+    /// Discover a container service, or set up the optional OpenShell gateway.
     Setup {
+        #[arg(long, value_enum, default_value = "auto")]
+        runtime: RuntimeChoice,
+        #[arg(long, value_enum, default_value = "auto")]
+        engine: Engine,
+        #[arg(long)]
+        endpoint: Option<String>,
         /// Enable project bind capability on a fresh gateway (the default); kept for explicit scripts.
         #[arg(long, conflicts_with = "copy_only")]
         enable_live: bool,
@@ -76,6 +87,8 @@ enum Commands {
     },
     /// Read-only prerequisite and capability diagnostics; never initializes an environment.
     Doctor {
+        #[arg(long, value_enum, default_value = "auto")]
+        runtime: RuntimeChoice,
         #[arg(long)]
         json: bool,
     },
@@ -93,6 +106,12 @@ enum Commands {
     },
     /// Review and save private configuration; never starts a sandbox or uploads files.
     Init {
+        #[arg(long, value_enum, default_value = "auto")]
+        runtime: RuntimeChoice,
+        #[arg(long, value_enum, default_value = "auto")]
+        engine: Engine,
+        #[arg(long, help = "local Unix socket; requires an explicit engine")]
+        endpoint: Option<String>,
         #[arg(long, help = "private config directory (default: the project binding)")]
         directory: Option<PathBuf>,
         #[arg(long, default_value = ".", help = "host project directory")]
@@ -286,6 +305,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
 
     match command {
         Some(Commands::Uninstall {
+            binary_only,
             dry_run,
             yes,
             bin_dir,
@@ -295,7 +315,11 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     "uninstall accepts no PROJECT or --config; it removes the local installation",
                 ));
             }
-            crate::openshell::uninstall(bin_dir, dry_run, yes)
+            if binary_only {
+                crate::runtime::uninstall_binary(bin_dir, dry_run, yes)
+            } else {
+                crate::runtime::uninstall(bin_dir, dry_run, yes)
+            }
         }
         Some(Commands::List { all }) => {
             if config.is_some() || project.is_some() {
@@ -319,15 +343,18 @@ fn dispatch(cli: Cli) -> Result<i32> {
             }
             versions(check, config.as_deref())
         }
-        Some(Commands::Doctor { json }) => {
+        Some(Commands::Doctor { json, runtime }) => {
             if project.is_some() {
                 return Err(Error::new(
                     "doctor accepts --config or the existing current-directory binding, not PROJECT",
                 ));
             }
-            crate::openshell::doctor(config, json)
+            crate::openshell::doctor(config, json, matches!(runtime, RuntimeChoice::Openshell))
         }
         Some(Commands::Setup {
+            runtime,
+            engine,
+            endpoint,
             enable_live,
             copy_only,
             dry_run,
@@ -337,9 +364,36 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     "PROJECT is only accepted for direct launch; setup has no project binding",
                 ));
             }
-            crate::openshell::setup(enable_live || !copy_only, dry_run)
+            let project = env::current_dir()?.canonicalize()?;
+            let plain = !matches!(runtime, RuntimeChoice::Openshell)
+                && (engine != Engine::Auto
+                    || endpoint.is_some()
+                    || crate::runtime::choose(runtime, &project)?);
+            if plain {
+                if copy_only || enable_live {
+                    return Err(Error::new(
+                        "gateway capability flags require --runtime openshell",
+                    ));
+                }
+                let options = crate::runtime::options(engine, endpoint);
+                crate::runtime::discover(&options, false)?;
+                if !dry_run {
+                    crate::runtime::save_preferences(&options)?;
+                }
+                Ok(0)
+            } else {
+                if engine == Engine::Docker || endpoint.is_some() {
+                    return Err(Error::new(
+                        "managed OpenShell gateway setup currently requires rootless Podman; use --runtime container for Docker CE",
+                    ));
+                }
+                crate::openshell::setup(enable_live || !copy_only, dry_run)
+            }
         }
         Some(Commands::Init {
+            runtime,
+            engine,
+            endpoint,
             directory,
             project: init_project,
             project_transfer,
@@ -378,6 +432,9 @@ fn dispatch(cli: Cli) -> Result<i32> {
                 exclude_provider_auth,
                 harness_exclude,
                 yes,
+                runtime,
+                engine,
+                endpoint,
             )
         }
         Some(Commands::Config { path }) => {
@@ -528,14 +585,26 @@ fn create_project_binding(project: &Path, agent: Agent) -> Result<Config> {
 }
 
 fn environment_defaults(project: PathBuf, agent: Agent) -> Result<ConfigDoc> {
+    let preferences = crate::runtime::preferences()?;
+    let plain =
+        preferences.container.is_some() || crate::runtime::choose(RuntimeChoice::Auto, &project)?;
     Ok(ConfigDoc {
+        container: if plain {
+            Some(preferences.container.unwrap_or_default())
+        } else {
+            None
+        },
         schema: 2,
         name: binding::generated_name(&project)?,
         gateway: "dungeon-local".into(),
         workspace: "default".into(),
         project,
         project_transfer: ProjectTransfer::Live,
-        image: DEFAULT_IMAGE.into(),
+        image: if plain {
+            crate::runtime::DEFAULT_CONTAINER_IMAGE.into()
+        } else {
+            DEFAULT_IMAGE.into()
+        },
         agent,
         providers: vec![],
         imports: vec![],
@@ -544,6 +613,13 @@ fn environment_defaults(project: PathBuf, agent: Agent) -> Result<ConfigDoc> {
 }
 
 fn print_plan(config: &Config) -> Result<i32> {
+    if config.values.container.is_some() {
+        println!(
+            "{}",
+            crate::config::review_json(&crate::runtime::container_plan(config))?
+        );
+        return Ok(0);
+    }
     let imports = crate::imports::plan(config)?;
     let mut unsatisfied = Vec::new();
     if !config.values.imports.is_empty() {
@@ -592,6 +668,22 @@ fn print_plan(config: &Config) -> Result<i32> {
 }
 
 fn run_command(config: &Config, command: Commands) -> Result<i32> {
+    if config.values.container.is_some()
+        && matches!(
+            &command,
+            Commands::Code
+                | Commands::SshConfig
+                | Commands::Ssh { .. }
+                | Commands::Forward { .. }
+                | Commands::Attach
+                | Commands::Exec { owned: true, .. }
+        )
+    {
+        if matches!(&command, Commands::Attach) {
+            require_attach_terminal()?;
+        }
+        return Err(crate::runtime::openshell_feature_error());
+    }
     if let Commands::Reload { yes } = command {
         return crate::imports::harness::reload(config, yes);
     }
@@ -751,10 +843,7 @@ fn attach_opencode(runtime: &Runtime<'_>) -> Result<i32> {
     require_attach_terminal()?;
     #[cfg(target_os = "linux")]
     {
-        if runtime.up()? != 0 {
-            return Err(Error::new("sandbox did not become Ready"));
-        }
-        crate::openshell::attach_opencode(runtime)
+        runtime.attach()
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -869,6 +958,7 @@ fn versions(check: bool, config: Option<&Path>) -> Result<i32> {
             "host_opencode": host,
             "reviewed_guest_opencode": reviewed,
             "reviewed_local_image": DEFAULT_IMAGE,
+            "default_container_image": crate::runtime::DEFAULT_CONTAINER_IMAGE,
             "selected_project_image": selected,
             "registry_stable": latest,
             "reviewed_update_available": latest.as_deref().and_then(stable_version).is_some_and(|version| version > reviewed_number),
@@ -893,6 +983,9 @@ fn initialize(
     exclude_provider_auth: bool,
     harness_exclude: Vec<String>,
     yes: bool,
+    runtime: RuntimeChoice,
+    engine: Engine,
+    endpoint: Option<String>,
 ) -> Result<i32> {
     let project = canonical_project(&project)?;
     let agent = select_agent(agent)?;
@@ -905,6 +998,36 @@ fn initialize(
             .to_path_buf(),
     };
     let mut values = environment_defaults(project, agent)?;
+    if matches!(runtime, RuntimeChoice::Openshell) {
+        if engine == Engine::Docker || endpoint.is_some() {
+            return Err(Error::new(
+                "OpenShell engine selection belongs to its gateway; plain Docker uses --runtime container",
+            ));
+        }
+        values.container = None;
+        values.image = DEFAULT_IMAGE.into();
+    } else if matches!(runtime, RuntimeChoice::Container)
+        || engine != Engine::Auto
+        || endpoint.is_some()
+    {
+        values.container = Some(if engine == Engine::Auto && endpoint.is_none() {
+            values.container.unwrap_or_default()
+        } else {
+            ContainerOptions { engine, endpoint }
+        });
+        values.image = crate::runtime::DEFAULT_CONTAINER_IMAGE.into();
+    }
+    // Explicit OpenShell-only features select that contract during initialization.
+    if matches!(runtime, RuntimeChoice::Auto)
+        && engine == Engine::Auto
+        && (project_transfer == Some(ProjectTransfer::Copy)
+            || gateway.is_some()
+            || workspace.is_some()
+            || !providers.is_empty())
+    {
+        values.container = None;
+        values.image = DEFAULT_IMAGE.into();
+    }
     if let Some(name) = name {
         values.name = name;
     }
@@ -933,6 +1056,10 @@ fn initialize(
     let config = write_environment(directory, values)?;
 
     println!("Configuration: {:?}", config.path);
+    if config.values.container.is_some() {
+        println!("Next: dungeon up. Missing registry images are pulled on first use.");
+        return Ok(0);
+    }
     println!("No runtime was started. Review policy.json and named providers before first up.");
     if config.values.image == DEFAULT_IMAGE {
         println!(
@@ -972,8 +1099,26 @@ fn approve_environment(directory: &Path, values: &ConfigDoc, yes: bool) -> Resul
             "image": values.image,
             "providers": values.providers,
             "host_configuration": values.harness.as_ref().filter(|h| h.mode != HarnessMode::Disabled),
+            "runtime": if values.container.is_some() {"container"} else {"openshell"},
+            "container": values.container,
         }))?
     );
+    if values.container.is_some() {
+        println!(
+            "Plain container: project read/write; selected configuration mounts read-only; normal container networking, no OpenShell policy enforcement."
+        );
+        if !yes && (!io::stdin().is_terminal() || !io::stdout().is_terminal()) {
+            return Err(Error::new(
+                "initialization requires a terminal or explicit `dungeon init --yes`; no files were created",
+            ));
+        }
+        if !yes && !confirm("Save this private configuration and continue?")? {
+            return Err(Error::new(
+                "project environment initialization cancelled; no files were created",
+            ));
+        }
+        return Ok(());
+    }
     match values.project_transfer {
         ProjectTransfer::Copy => println!(
             "Copy mode: first up uploads the project; guest changes reach the host only through reviewed export. No writable host mounts."
@@ -1183,6 +1328,7 @@ mod tests {
         write_new(
             &path,
             &ConfigDoc {
+                container: None,
                 schema: 2,
                 name: "demo".into(),
                 gateway: "local".into(),
@@ -1364,6 +1510,7 @@ mod tests {
         write_new(
             &path,
             &ConfigDoc {
+                container: None,
                 schema: 2,
                 name: "demo".into(),
                 gateway: "local".into(),
@@ -1458,6 +1605,7 @@ mod tests {
         std::fs::write(source.join("init.lua"), "vim.opt.number = true").unwrap();
         write_new(&private.join("policy.json"), &starter_policy()).unwrap();
         let mut doc = serde_json::to_value(ConfigDoc {
+            container: None,
             schema: 2,
             name: "demo".into(),
             gateway: "local".into(),

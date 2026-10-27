@@ -8,7 +8,28 @@ Dungeon 0.0.x is an engineering preview and has not undergone an independent sec
 
 Trust the host administrator, Dungeon binary/configuration, OpenShell CLI/gateway/driver, selected image, and explicitly exposed credential/tool services. Treat the coding agent, project content, downloaded code, and agent-authored session records as untrusted.
 
-OpenShell owns filesystem/process/network enforcement. Dungeon requires Landlock `hard_requirement` in accepted policy and refuses inspected audit-only endpoints, but policy readback is not kernel attestation.
+In OpenShell environments, OpenShell owns filesystem/process/network enforcement.
+Dungeon requires Landlock `hard_requirement` in accepted policy and refuses
+inspected audit-only endpoints, but policy readback is not kernel attestation.
+
+Plain-container environments explicitly use standard Linux rootless Podman or
+rootful Docker CE. They do not apply `policy.json`, restrict outbound networking,
+or promise OpenShell/Landlock containment. Docker daemon access is effectively
+host-root authority. Runtime selection is reviewed at initialization and recorded;
+an existing OpenShell binding never falls back when OpenShell is unavailable.
+Only the project is mounted read/write; existing reviewed import selection supplies
+read-only leaves/snapshots. The project and private snapshots use SELinux private
+relabeling; original configuration files are never relabeled. Imported native
+databases, host home and guest engine sockets remain excluded.
+
+Plain guests execute as UID998 with Podman keep-id, or the invoking host UID/GID
+on standard Docker CE. Before first workload execution, a fixed root guest command
+prepares only image-owned HOME/config/state parent directories (no recursive chown).
+Container ID, service identity, labels, mounts, user and stable native configuration
+are checked on reuse. Engine output is bounded; no project or output shell snippets
+execute on the host. Interrupted initialization retains a pending binding for
+explicit stop/destroy. Docker rootless/userns-remap and remote endpoints are not
+supported by this UID mapping contract.
 
 Dungeon clears the inherited environment before invoking OpenShell and restores only an explicit allowlist. It does not automatically mount/copy host homes, engine sockets, native agent databases or private keys. Reviewed OpenCode configuration access can expose provider secrets as described below.
 

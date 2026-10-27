@@ -2,6 +2,45 @@
 
 CI checks formatting, Clippy, locked Rust tests, release compilation, CLI version execution, npm launcher behavior, distribution version synchronization, native archive creation, and full npm package assembly on explicit supported runners.
 
+## Optional plain containers (2026-10-27, source worktree)
+
+The optional-runtime change passed formatting, warnings-denied all-target Clippy,
+**202 locked Rust tests** (140 unit + 62 integration), npm launcher/package-staging
+tests, and a locked release build. Synthetic fixtures cover both native command
+contracts, recorded service replacement, mount drift, failed deletion, unavailable
+pinned engines and dependency-free binary removal. Existing OpenShell fixtures
+explicitly select that runtime; their passing results remain synthetic evidence.
+
+The release binary passed `tests/container-live.sh` with rootless Podman **5.8.7**:
+project writes, read-only copied OpenCode theme, OpenCode/Claude/Codex version
+commands, same-ID stop/resume with retained guest state, uninstall, and preservation
+of project/import bytes. The host's pre-existing container inventory, states and
+start timestamps matched before/after. This is Linux native execution evidence,
+not an OpenShell-policy, authenticated-agent, desktop or EDR containment claim.
+
+The same expanded gate passed on standard Docker CE **29.9.2** in a disposable
+FCOS **44.20260913.3.2** VM. Additional native checks covered Docker-only discovery,
+Podman preference with both services reachable, saved engine/socket defaults,
+failure without fallback when the pinned Podman service disappeared, and unchanged
+inspection of an unrelated Docker container across uninstall. Native logs and
+binary hashes were retained separately from the source checkout.
+
+To repeat in a disposable HOME with a reachable local engine service:
+
+```sh
+HOME=/absolute/disposable-home \
+DUNGEON_CONTAINER_TEST=disposable-home \
+DUNGEON_CONTAINER_BINARY=/absolute/path/to/dungeon \
+DUNGEON_CONTAINER_ENGINE=podman \
+DUNGEON_CONTAINER_ENDPOINT=unix:///run/user/1000/podman/podman.sock \
+sh tests/container-live.sh
+```
+
+Unset inherited XDG roots before running; use `docker` and
+`unix:///var/run/docker.sock` for standard Docker CE. The gate pulls the pinned
+image when missing and removes only its recorded container/private CLI binding.
+Guest tool-version checks do not establish login or end-to-end inference.
+
 ## Onboarding cleanup (2026-10-25, source checkout)
 
 Top-level help groups everyday, setup/configuration, and advanced/recovery

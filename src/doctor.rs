@@ -59,7 +59,11 @@ impl Report {
     }
 }
 
-pub(crate) fn run(explicit: Option<std::path::PathBuf>, json: bool) -> Result<i32> {
+pub(crate) fn run(
+    explicit: Option<std::path::PathBuf>,
+    json: bool,
+    force_openshell: bool,
+) -> Result<i32> {
     #[cfg(target_os = "linux")]
     let selected = linux::select(explicit);
     #[cfg(not(target_os = "linux"))]
@@ -94,6 +98,49 @@ pub(crate) fn run(explicit: Option<std::path::PathBuf>, json: bool) -> Result<i3
             None
         }
     };
+    #[cfg(target_os = "linux")]
+    if !force_openshell && config.as_ref().is_none_or(|c| c.values.container.is_some()) {
+        let diagnostic = if report.exit_code == 0 {
+            crate::container::diagnostic(config.as_ref())
+        } else {
+            Err(crate::Error::new(
+                "private configuration is incompatible; inspect it before continuing",
+            ))
+        };
+        let mut value = serde_json::to_value(&report)?;
+        value.as_object_mut().unwrap().remove("supported_openshell");
+        match diagnostic {
+            Ok(diagnostic) => {
+                if !json {
+                    println!(
+                        "Container: {} ({})",
+                        diagnostic["selected"]["engine"]
+                            .as_str()
+                            .unwrap_or("unknown"),
+                        diagnostic["selected"]["endpoint"]
+                            .as_str()
+                            .unwrap_or("unknown")
+                    );
+                }
+                value["container"] = diagnostic;
+            }
+            Err(error) => {
+                report.exit_code = 1;
+                value["exit_code"] = serde_json::json!(1);
+                value["container"] =
+                    serde_json::json!({"state":"unavailable","remediation":error.to_string()});
+                if !json {
+                    println!("{error}");
+                }
+            }
+        }
+        if json {
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        }
+        return Ok(report.exit_code);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = force_openshell;
     #[cfg(target_os = "linux")]
     linux::collect(&mut report, config.as_ref());
     #[cfg(not(target_os = "linux"))]
@@ -763,6 +810,7 @@ mod linux {
             write_new(
                 &path,
                 &ConfigDoc {
+                    container: None,
                     schema: 2,
                     name: "fixture".into(),
                     gateway: "dungeon-local".into(),
@@ -1324,6 +1372,7 @@ esac
             let config = Config {
                 path: home.join("private/dungeon.json"),
                 values: ConfigDoc {
+                    container: None,
                     schema: 2,
                     name: "fixture".into(),
                     gateway: "foreign".into(),

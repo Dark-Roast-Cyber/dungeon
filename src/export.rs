@@ -1111,6 +1111,7 @@ mod tests {
             path: config_dir.join("dungeon.json"),
             policy_path: config_dir.join("policy.json"),
             values: ConfigDoc {
+                container: None,
                 schema: 2,
                 name: "demo".into(),
                 gateway: "local".into(),
@@ -1129,6 +1130,7 @@ mod tests {
         write_new(
             &config.state_path(),
             &RuntimeState {
+                container: None,
                 schema: 1,
                 id: "id".into(),
                 config: "fingerprint".into(),

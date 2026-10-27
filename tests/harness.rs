@@ -71,6 +71,11 @@ impl Fixture {
             .current_dir(&self.project)
             .stdin(Stdio::null())
             .args(args)
+            .args(if args.first() == Some(&"init") {
+                vec!["--runtime", "openshell"]
+            } else {
+                vec![]
+            })
             .output()
             .unwrap()
     }

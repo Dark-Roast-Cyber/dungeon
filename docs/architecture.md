@@ -2,13 +2,19 @@
 
 Dungeon is a low-friction environment manager and adoption layer for isolated agent development. It should mostly disappear once an environment is running.
 
-OpenShell owns workload isolation and policy enforcement. Dungeon owns setup, environment configuration, lifecycle, project scope and transfer, reviewed capability requests, authentication entrypoints, and attachment/integration surfaces. Reviewed images own installed tool and agent versions. Agent interfaces and external harnesses own prompts, models, sessions, orchestration, issue workflows, and review strategy. Telltale is not part of the active runtime architecture.
+OpenShell optionally owns workload policy enforcement. Plain containers use the
+selected engine's standard isolation without OpenShell policy. Dungeon owns setup,
+environment configuration, lifecycle, project scope and transfer, reviewed capability
+requests, authentication entrypoints, and attachment/integration surfaces. Reviewed
+images own installed tool and agent versions. Agent interfaces and external harnesses
+own prompts, models, sessions, orchestration, issue workflows, and review strategy.
+Telltale is not part of the active runtime architecture.
 
 ```text
 developer / agent CLI / editor / external harness
   -> Dungeon environment interface
-  -> explicit resolved configuration + native OpenShell policy
-  -> pinned OpenShell adapter
+   -> explicit resolved configuration
+   -> plain Podman/Docker container OR pinned OpenShell adapter/policy
   -> managed isolated environment
        -> agent + tools + project + guest-owned session state
        -> terminal / SSH / editor / future remote attachment
@@ -65,6 +71,10 @@ A feature that belongs primarily to those orchestration concerns should live in 
 - `output`: concrete human/quiet operation output and structured export review.
 - `config`: config/state parsing, validation, strict JSON, and fingerprints.
 - `policy`: the starter policy and policy safety validation.
+- `runtime`: concrete dispatch between the two recorded contracts, shared by human
+  and machine entrypoints; OpenShell-only operations refuse on plain containers.
+- `container`: local engine discovery, direct lifecycle, inspected native identity
+  and mount scope. It reuses the bounded native-query mechanism from setup.
 - `openshell`: the single OpenShell subprocess boundary and lifecycle operations.
 - `openshell::local_setup`: local gateway bootstrap, authoritative generated copy/live capability modes, shared bounded native queries and sanitized executable resolution within the same OpenShell boundary; OpenShell remains the registration/health authority, Podman the container/network authority.
 - `openshell::diagnostics`: read-only prerequisite/capability reporting with bounded native queries, sharing setup predicates without invoking setup.
@@ -73,7 +83,40 @@ A feature that belongs primarily to those orchestration concerns should live in 
   stop/destroy. OpenShell owns registration and guest-resource deletion; Podman
   owns container/network absence. Private state and the binary are removed last.
 
-There is no backend hierarchy, daemon, plugin ABI, embedded JS runtime, second policy language, or framework layer.
+There is no backend trait hierarchy, daemon, plugin ABI, embedded JS runtime,
+second policy language, or framework layer. Two concrete runtimes now have an
+independently useful contract: plain containers do not require OpenShell.
+
+### Plain-container selection and lifetime
+
+New bindings choose installed OpenShell or plain containers, unless explicitly
+selected with `--runtime` or saved container defaults. Existing schema-2 configs
+without `container` remain OpenShell with unchanged serialization/fingerprints.
+`container` holds the requested engine and optional local Unix endpoint. First
+creation discovers usable services (Podman first), then records engine, endpoint,
+daemon identity and exact container ID in `runtime.json`; reuse never rediscovers.
+`setup --runtime container` saves the resolved engine/socket for future projects
+in private `container-defaults.json`. `init` overrides and private config remain
+authoritative. No remote Docker contexts, engine environment overrides, or
+repository-local settings are adopted.
+
+Plain containers support live projects, guest CLI/exec/shell/auth, stop/resume,
+status, destroy and standalone uninstall. Copy/export, providers, SSH/forwarding,
+host UI attachment and owned/machine-stream execution require OpenShell. Missing
+dependencies are reported at feature use; offline config/list/plan and explicit
+binary-only uninstall need neither runtime. Doctor uses descriptor-checked config
+selection for both contracts and does not initialize engine storage.
+
+Creation uses a deterministic labeled container name, explicit non-root user,
+bridge networking, fixed entrypoint, and only derived project/import binds. A
+pending record precedes guest HOME preparation, so interruption blocks execution
+but permits identity-checked cleanup. Configuration/mount drift blocks reuse.
+The plain state's `observed_policy` field stores the stable native specification
+digest, not an enforced OpenShell policy. Generated Podman metadata and consumed
+SELinux relabel options are excluded; inspected bind sources/targets/modes remain
+authoritative. Native engines retain writable guest state between stop/start.
+
+The OpenShell-specific sections below describe that optional contract.
 
 This remains the default architectural posture. A new abstraction must earn its existence through a real substitution boundary or repeated semantic responsibility rather than anticipated integrations.
 

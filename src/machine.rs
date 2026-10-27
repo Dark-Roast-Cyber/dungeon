@@ -1,5 +1,6 @@
 use crate::config::{Agent, Config, ConfigDoc, ProjectTransfer, canonical_project, load_config};
-use crate::openshell::{GUEST_PROJECT, Runtime};
+use crate::openshell::GUEST_PROJECT;
+use crate::runtime::Runtime;
 use crate::{Error, ErrorCode, Result};
 use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
@@ -326,6 +327,7 @@ fn dispatch(explicit: Option<PathBuf>, operation: Operation) -> Response {
             let config = crate::cli::write_environment(
                 directory,
                 ConfigDoc {
+                    container: None,
                     schema: 2,
                     name,
                     gateway,
@@ -421,7 +423,7 @@ fn dispatch(explicit: Option<PathBuf>, operation: Operation) -> Response {
                 Operation::Upload { .. } => runtime.upload()?,
                 Operation::Export { yes } => {
                     let outcome = runtime.export(yes);
-                    review = runtime.output.reviewed();
+                    review = runtime.output().reviewed();
                     outcome?
                 }
                 Operation::Exec {
@@ -466,7 +468,7 @@ fn dispatch(explicit: Option<PathBuf>, operation: Operation) -> Response {
             };
             Ok((0, Some(result(&config, remote.as_ref(), review.clone()))))
         })()
-        .map_err(|error| runtime.output.error(error))
+        .map_err(|error| runtime.output().error(error))
     })();
     run.map_err(|error| (error, review))
 }

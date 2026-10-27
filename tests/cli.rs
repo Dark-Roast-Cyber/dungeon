@@ -67,7 +67,7 @@ fn default_init_binds_current_project_and_offline_commands_do_not_need_openshell
     assert_eq!(values["providers"], json!([]));
     assert_eq!(
         values["image"],
-        "localhost/dungeon-agent:0.0.3-opencode-2.1.2"
+        "ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e"
     );
     assert_eq!(config["project_transfer"], "live");
     assert_eq!(values["project_transfer"], "live");
@@ -161,7 +161,7 @@ fn versions_is_read_only_and_uses_the_reviewed_image_pin() {
     let bound: serde_json::Value = serde_json::from_slice(&f.run(&["versions"]).stdout).unwrap();
     assert_eq!(
         bound["selected_project_image"],
-        report["reviewed_local_image"]
+        report["default_container_image"]
     );
 }
 
@@ -583,7 +583,7 @@ mod terminal {
             assert!(config["values"]["harness"].is_null());
             let text = Terminal::spawn(f.command(), &[]).finish(false);
             assert!(!text.contains("Choose this project's harness"));
-            assert!(text.contains("install the OpenShell"), "{text}");
+            assert!(text.contains("install Podman or Docker CE"), "{text}");
         }
     }
 
