@@ -28,7 +28,12 @@ prepares only image-owned HOME/config/state parent directories (no recursive cho
 Container ID, service identity, labels, mounts, user and stable native configuration
 are checked on reuse. Engine output is bounded; no project or output shell snippets
 execute on the host. Interrupted initialization retains a pending binding for
-explicit stop/destroy. Docker rootless/userns-remap and remote endpoints are not
+explicit stop/destroy. A creation intent is persisted before native create; a lost
+reply is reconciled only to a unique matching container on the recorded service.
+An absent or ambiguous result retains the intent because a timed-out service could
+still complete its request. Default restart, DNS, extra-host, supplemental-group
+and sysctl settings are checked separately on reuse; this is not an exhaustive
+attestation of every native engine setting. Docker rootless/userns-remap and remote endpoints are not
 supported by this UID mapping contract.
 
 Dungeon clears the inherited environment before invoking OpenShell and restores only an explicit allowlist. It does not automatically mount/copy host homes, engine sockets, native agent databases or private keys. Reviewed OpenCode configuration access can expose provider secrets as described below.

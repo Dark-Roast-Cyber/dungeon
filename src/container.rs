@@ -214,10 +214,12 @@ fn service_identity(engine: Engine, info: &Value) -> Result<String> {
             let security = info["SecurityOptions"]
                 .as_array()
                 .ok_or_else(|| Error::new("unrecognized Docker service"))?;
-            if security.iter().any(|s| {
-                s.as_str()
-                    .is_some_and(|s| s.contains("rootless") || s.contains("userns"))
-            }) {
+            if info["Rootless"] == true
+                || security.iter().any(|s| {
+                    s.as_str()
+                        .is_some_and(|s| s.contains("rootless") || s.contains("userns"))
+                })
+            {
                 return Err(Error::new(
                     "Docker rootless/userns-remap requires separate UID mapping support; use rootless Podman or standard Docker CE",
                 ));
@@ -364,7 +366,7 @@ pub(crate) fn removal_inventory(configs: &[Config]) -> Result<RemovalInventory> 
     for config in configs {
         let runtime = Runtime::new(config)?;
         let expected = if config.state_path().try_exists()? {
-            let state = runtime.state()?;
+            let state = runtime.recovery_state()?;
             if runtime.exists(&state.id)? {
                 Some(runtime.checked_state(false, true)?.0.id)
             } else {
@@ -528,6 +530,7 @@ impl<'a> Runtime<'a> {
         let c = &items[0];
         if c["Id"] != id
             || c["Config"]["Labels"][LABEL] != self.config.fingerprint
+            || c["Config"]["Labels"][RUNTIME_LABEL] != "container"
             || c["Name"].as_str().map(|s| s.trim_start_matches('/')) != Some(self.name().as_str())
         {
             return Err(Error::refusal(
@@ -575,6 +578,28 @@ impl<'a> Runtime<'a> {
                 "container user, privilege or mounts differ from reviewed scope",
             ));
         }
+        for key in ["Dns", "DnsOptions", "DnsSearch", "ExtraHosts", "GroupAdd"] {
+            let value = &c["HostConfig"][key];
+            if !value.is_null() && !value.as_array().is_some_and(Vec::is_empty) {
+                return Err(Error::new(
+                    "container network or group settings differ from the default",
+                ));
+            }
+        }
+        let sysctls = &c["HostConfig"]["Sysctls"];
+        if !sysctls.is_null() && !sysctls.as_object().is_some_and(serde_json::Map::is_empty) {
+            return Err(Error::new("container sysctls differ from the default"));
+        }
+        let restart = &c["HostConfig"]["RestartPolicy"];
+        if !restart.is_null()
+            && (!matches!(restart["Name"].as_str(), Some("" | "no"))
+                || (!restart["MaximumRetryCount"].is_null()
+                    && restart["MaximumRetryCount"].as_u64() != Some(0)))
+        {
+            return Err(Error::new(
+                "container restart policy differs from the default",
+            ));
+        }
         let config: serde_json::Map<String, Value> = [
             "User",
             "Image",
@@ -614,7 +639,30 @@ impl<'a> Runtime<'a> {
         {
             return Err(Error::new("container binding changed; refusing operation"));
         }
-        checked_id(&state.id)?;
+        if state.id.is_empty() {
+            if !state.initial_upload_pending || !state.observed_policy.is_empty() {
+                return Err(Error::new("invalid pending container creation intent"));
+            }
+        } else {
+            checked_id(&state.id)?;
+        }
+        Ok(state)
+    }
+    fn recovery_state(&self) -> Result<RuntimeState> {
+        let mut state = self.state()?;
+        if state.id.is_empty() {
+            let ids = self
+                .native
+                .inventory(Some(&format!("label={LABEL}={}", self.config.fingerprint)))?;
+            if ids.len() != 1 {
+                return Err(Error::new(
+                    "pending container creation has no uniquely identifiable result; the engine may still be processing it, inspect the pinned service before recovery",
+                ));
+            }
+            let c = self.inspect(&ids[0])?;
+            self.specification(&c)?;
+            state.id = ids[0].clone();
+        }
         Ok(state)
     }
     fn exists(&self, id: &str) -> Result<bool> {
@@ -628,14 +676,14 @@ impl<'a> Runtime<'a> {
     fn checked(&self, work: bool) -> Result<(RuntimeState, Value)> {
         self.checked_state(work, false)
     }
-    fn checked_state(&self, work: bool, allow_paused: bool) -> Result<(RuntimeState, Value)> {
-        let state = self.state()?;
+    fn checked_state(&self, work: bool, recovery: bool) -> Result<(RuntimeState, Value)> {
+        let state = self.recovery_state()?;
         let c = self.inspect(&state.id)?;
         if !c["State"]["Running"].is_boolean()
-            || ["Restarting", "Dead"]
-                .iter()
-                .any(|key| c["State"][key] == true)
-            || (!allow_paused && c["State"]["Paused"] == true)
+            || (!recovery
+                && ["Paused", "Restarting", "Dead"]
+                    .iter()
+                    .any(|key| c["State"][key] == true))
         {
             return Err(Error::new(
                 "container is in an unsupported transitional state; inspect the selected engine",
@@ -779,18 +827,20 @@ impl<'a> Runtime<'a> {
         }
         args.extend([image.clone(), "infinity".into()]);
         lock.verify_environment(self.config)?;
-        self.output.mutating();
-        let id = self.native.query(&args, 120)?.trim().to_owned();
-        checked_id(&id)?;
         let mut state = RuntimeState {
             schema: 1,
             container: Some(self.native.binding.clone()),
-            id,
+            id: String::new(),
             config: self.config.fingerprint.clone(),
             observed_policy: String::new(),
             initial_upload_pending: true,
         };
+        self.output.mutating();
         self.persist(&state, false)?;
+        let id = self.native.query(&args, 120)?.trim().to_owned();
+        checked_id(&id)?;
+        state.id = id;
+        self.persist(&state, true)?;
         let c = self.inspect(&state.id)?;
         state.observed_policy = digest(&self.specification(&c)?)?;
         self.persist(&state, true)?;
@@ -839,7 +889,7 @@ impl<'a> Runtime<'a> {
     }
     pub(crate) fn down(&self) -> Result<i32> {
         let _lock = crate::export::TransferGuard::environment(self.config)?;
-        let state = self.state()?;
+        let state = self.recovery_state()?;
         if !self.exists(&state.id)? {
             return Ok(0);
         }
@@ -849,11 +899,12 @@ impl<'a> Runtime<'a> {
             self.native.query(&strings(&["unpause", &s.id]), 30)?;
             c = self.checked(false)?.1;
         }
-        if c["State"]["Running"] == true {
+        if c["State"]["Running"] == true || c["State"]["Restarting"] == true {
             self.output.mutating();
             self.native.query(&strings(&["stop", &s.id]), 45)?;
         }
-        if self.checked(false)?.1["State"]["Running"] != false {
+        let stopped = self.checked_state(false, true)?.1;
+        if stopped["State"]["Running"] != false || stopped["State"]["Restarting"] == true {
             return Err(Error::new("container did not stop"));
         }
         Ok(0)
@@ -867,25 +918,38 @@ impl<'a> Runtime<'a> {
         )
     }
     pub(crate) fn inspect_for_destroy(&self) -> Result<Value> {
-        let state = self.state()?;
+        let state = self.recovery_state()?;
         if !self.exists(&state.id)? {
             return Ok(
                 json!({"id":state.id,"name":self.config.values.name,"workspace":self.config.values.workspace,"phase":"Stopped","runtime":"container","engine":self.native.binding.engine,"policy_enforcement":false,"already_absent":true}),
             );
         }
-        self.inspect_bound()
+        let (s, c) = self.checked_state(false, true)?;
+        Ok(
+            json!({"id":s.id,"name":self.config.values.name,"workspace":self.config.values.workspace,
+            "phase":if c["State"]["Running"] == false && c["State"]["Restarting"] != true {"Stopped"} else {"Ready"},
+            "runtime":"container","engine":self.native.binding.engine,"policy_enforcement":false}),
+        )
     }
     pub(crate) fn destroy(&self) -> Result<i32> {
         let lock = crate::export::TransferGuard::environment(self.config)?;
         let _imports = crate::imports::cleanup_lock(self.config)?;
-        let state = self.state()?;
+        let state = self.recovery_state()?;
+        if self.state()?.id.is_empty() {
+            self.persist(&state, true)?;
+        }
         if self.exists(&state.id)? {
-            let (s, c) = self.checked(false)?;
-            if c["State"]["Running"] != false {
+            let (s, c) = self.checked_state(false, true)?;
+            if c["State"]["Running"] != false || c["State"]["Restarting"] == true {
                 return Err(Error::new("stop the container before destroy"));
             }
             self.output.mutating();
-            self.native.query(&strings(&["rm", &s.id]), 30)?;
+            let args = if c["State"]["Dead"] == true {
+                strings(&["rm", "--force", &s.id])
+            } else {
+                strings(&["rm", &s.id])
+            };
+            self.native.query(&args, 30)?;
             if self.exists(&s.id)? {
                 return Err(Error::new("container remains; runtime binding retained"));
             }

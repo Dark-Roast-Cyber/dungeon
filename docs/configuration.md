@@ -35,13 +35,16 @@ networking with unrestricted outbound access. Copy/export, named providers,
 SSH/forwarding, host UI attachment and owned/streamed machine execution require
 OpenShell. Normal `up`, `down`, `status`, `exec`, `run`, `shell`, `auth` and `destroy`
 use the recorded runtime. Native guest state persists through stop/resume.
-Creation records a pending binding immediately after the engine returns an ID;
-if inspection or preparation fails, stop and destroy that binding before retrying.
-If creation succeeds but the engine times out before returning an ID, or the
-pending state cannot be written, an unbound container may remain. Dungeon refuses
-automatic adoption/removal: inspect the selected engine and manually remove only
-the exact identified orphan. A paused bound container can be unpaused and stopped
-by `dungeon down`; dead or restarting containers still require engine inspection.
+Creation persists a pending intent and selected service before invoking the
+engine. If a create reply is lost, recovery checks that service for exactly one
+container with the expected label, name, user and mounts; `down` and `destroy` can
+then remove it. If no unique match exists, the intent remains: the engine may
+still be processing the request, so inspect the pinned service before clearing
+anything. Work never starts from an incomplete intent. If inspection or guest
+preparation fails, stop and destroy the pending binding before retrying.
+`down` can unpause or stop a restarting bound container; a stopped dead container
+can be destroyed after identity and scope checks. A failed engine operation still
+retains state for inspection and retry.
 
 ## Machine callers
 

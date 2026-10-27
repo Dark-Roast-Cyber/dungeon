@@ -109,8 +109,11 @@ selection for both contracts and does not initialize engine storage.
 
 Creation uses a deterministic labeled container name, explicit non-root user,
 bridge networking, fixed entrypoint, and only derived project/import binds. A
-pending record precedes guest HOME preparation, so interruption blocks execution
-but permits identity-checked cleanup. Configuration/mount drift blocks reuse.
+pending intent precedes native creation and pins its service; a lost create reply
+can be reconciled only to one matching label, name, user and mount scope. An absent
+or ambiguous result retains the intent because native work may still be in flight.
+Guest HOME preparation also remains pending until verified. Configuration/mount
+drift blocks reuse.
 The plain state's `observed_policy` field stores the stable native specification
 digest, not an enforced OpenShell policy. Generated Podman metadata and consumed
 SELinux relabel options are excluded; inspected bind sources/targets/modes remain

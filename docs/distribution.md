@@ -26,6 +26,10 @@ cached images and unrelated containers remain. Mixed installations require
 destroying plain containers before OpenShell teardown.
 An empty, private Dungeon state directory is removed by standalone plain cleanup;
 nonempty or unknown state still requires inspection and is not silently deleted.
+An interrupted create with a recorded intent is included in native inventory and
+can be removed when exactly one container matches. If the result is absent or
+ambiguous, uninstall retains the intent rather than guessing that the service has
+finished processing it.
 
 `uninstall --binary-only` needs no engine or OpenShell and removes only the selected
 CLI. Configuration/resources remain; cleanup is reported unverified. Ordinary

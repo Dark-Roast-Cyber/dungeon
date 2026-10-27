@@ -49,7 +49,7 @@ case "$1 ${{2:-}}" in
   'image inspect') printf '[{{"Config":{{}}}}]\n';;
   'ps --all') test ! -e fail-ps; if [ -e exists ]; then printf '%s\n' '{ID}'; fi; if [ -e extra ]; then /bin/cat extra; fi;;
   'container inspect') test -e exists; test ! -e fail-inspect; /bin/cat inspect.json;;
-  'create --name') : > exists; /bin/cp stopped.json inspect.json; printf '%s\n' '{ID}';;
+  'create --name') if [ -e fail-before-create ]; then exit 17; fi; : > exists; /bin/cp stopped.json inspect.json; if [ -e lose-create-reply ]; then exit 17; fi; printf '%s\n' '{ID}';;
   'start '*) /bin/cp running.json inspect.json;;
   'unpause '*) /bin/cp running.json inspect.json;;
   'stop '*) /bin/cp stopped.json inspect.json;;
@@ -324,4 +324,163 @@ fn retry_destroy_after_post_removal_inventory_failure() {
     fs::remove_file(f.root.path().join("fail-ps")).unwrap();
     f.ok(&["destroy", "--yes"]);
     assert!(!f.state().exists());
+}
+
+#[test]
+fn lost_create_reply_recovers_only_the_pinned_matching_container() {
+    for engine in ["podman", "docker"] {
+        let f = Fixture::new(engine);
+        fs::write(f.root.path().join("lose-create-reply"), "").unwrap();
+        assert!(!f.run(&["up"]).status.success());
+        let state: Value = serde_json::from_slice(&fs::read(f.state()).unwrap()).unwrap();
+        assert_eq!(state["id"], "");
+        assert_eq!(state["initial_upload_pending"], true);
+        fs::write(f.root.path().join("extra"), format!("{}\n", "b".repeat(64))).unwrap();
+        assert!(!f.run(&["destroy", "--yes"]).status.success());
+        assert!(f.root.path().join("exists").exists());
+        fs::remove_file(f.root.path().join("extra")).unwrap();
+        let mut bad: Value =
+            serde_json::from_slice(&fs::read(f.root.path().join("inspect.json")).unwrap()).unwrap();
+        bad[0]["Config"]["Labels"]["agentarchaeology.ai/dungeon-runtime"] = json!("foreign");
+        f.write("inspect.json", &bad);
+        assert!(!f.run(&["destroy", "--yes"]).status.success());
+        assert!(f.root.path().join("exists").exists());
+        fs::copy(
+            f.root.path().join("stopped.json"),
+            f.root.path().join("inspect.json"),
+        )
+        .unwrap();
+        f.ok(&["down"]);
+        f.ok(&["destroy", "--yes"]);
+        assert!(!f.state().exists());
+        assert!(!f.root.path().join("exists").exists());
+    }
+}
+
+#[test]
+fn unresolved_intent_is_retained_when_engine_has_no_matching_container() {
+    let f = Fixture::new("docker");
+    fs::write(f.root.path().join("fail-before-create"), "").unwrap();
+    assert!(!f.run(&["up"]).status.success());
+    assert!(f.state().exists());
+    assert!(!f.run(&["destroy", "--yes"]).status.success());
+    assert!(f.state().exists());
+    assert!(!f.root.path().join("exists").exists());
+    // A delayed engine result remains recoverable using the original intent.
+    fs::write(f.root.path().join("exists"), "").unwrap();
+    fs::copy(
+        f.root.path().join("stopped.json"),
+        f.root.path().join("inspect.json"),
+    )
+    .unwrap();
+    f.ok(&["destroy", "--yes"]);
+    assert!(!f.state().exists());
+}
+
+#[test]
+fn unwritable_private_state_prevents_native_create() {
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+    let f = Fixture::new("docker");
+    let private = f.config.parent().unwrap();
+    fs::set_permissions(private, fs::Permissions::from_mode(0o500)).unwrap();
+    let output = f.run(&["up"]);
+    fs::set_permissions(private, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(!output.status.success());
+    assert!(!f.root.path().join("exists").exists());
+    let calls = fs::read_to_string(f.root.path().join("calls")).unwrap_or_default();
+    assert!(!calls.contains("create --name"));
+}
+
+#[test]
+fn dead_and_restarting_containers_allow_bounded_cleanup() {
+    for state in ["Dead", "Restarting"] {
+        let f = Fixture::new("docker");
+        f.ok(&["up"]);
+        let mut c: Value =
+            serde_json::from_slice(&fs::read(f.root.path().join("inspect.json")).unwrap()).unwrap();
+        c[0]["State"][state] = json!(true);
+        if state == "Dead" {
+            c[0]["State"]["Running"] = json!(false);
+        }
+        f.write("inspect.json", &c);
+        f.ok(&["down"]);
+        f.ok(&["destroy", "--yes"]);
+        assert!(!f.state().exists());
+    }
+}
+
+#[test]
+fn rejects_restart_network_group_and_sysctl_drift() {
+    for (field, value) in [
+        (
+            "RestartPolicy",
+            json!({"Name":"always","MaximumRetryCount":0}),
+        ),
+        (
+            "RestartPolicy",
+            json!({"Name":"no","MaximumRetryCount":"invalid"}),
+        ),
+        ("Dns", json!(["192.0.2.1"])),
+        ("ExtraHosts", json!(["example:192.0.2.1"])),
+        ("GroupAdd", json!(["0"])),
+        ("Sysctls", json!({"net.ipv4.ip_forward":"1"})),
+    ] {
+        let f = Fixture::new("docker");
+        f.ok(&["up"]);
+        let mut c: Value =
+            serde_json::from_slice(&fs::read(f.root.path().join("inspect.json")).unwrap()).unwrap();
+        c[0]["HostConfig"][field] = value;
+        f.write("inspect.json", &c);
+        assert!(
+            !f.run(&["exec", "--", "true"]).status.success(),
+            "accepted {field}"
+        );
+    }
+}
+
+#[test]
+fn docker_rootless_flag_is_rejected_even_without_security_option() {
+    let f = Fixture::new("docker");
+    f.write(
+        "info.json",
+        &json!({"ID":"synthetic-daemon", "OSType":"linux", "Rootless":true, "SecurityOptions":[]}),
+    );
+    assert!(!f.run(&["up"]).status.success());
+    assert!(!f.state().exists());
+    assert!(!f.root.path().join("exists").exists());
+}
+
+#[test]
+fn recovered_id_is_persisted_before_removal_so_failed_verification_can_retry() {
+    let f = Fixture::new("docker");
+    fs::write(f.root.path().join("lose-create-reply"), "").unwrap();
+    assert!(!f.run(&["up"]).status.success());
+    fs::write(f.root.path().join("fail-after-rm"), "").unwrap();
+    assert!(!f.run(&["destroy", "--yes"]).status.success());
+    let state: Value = serde_json::from_slice(&fs::read(f.state()).unwrap()).unwrap();
+    assert_eq!(state["id"], ID);
+    fs::remove_file(f.root.path().join("fail-ps")).unwrap();
+    f.ok(&["destroy", "--yes"]);
+    assert!(!f.state().exists());
+}
+
+#[test]
+fn uninstall_recovers_a_container_after_lost_create_reply() {
+    let f = Fixture::new("docker");
+    fs::write(f.root.path().join("lose-create-reply"), "").unwrap();
+    assert!(!f.run(&["up"]).status.success());
+    let installed = f.bin.join("dungeon");
+    fs::copy(env!("CARGO_BIN_EXE_dungeon"), &installed).unwrap();
+    f.ok(&[
+        "uninstall",
+        "--bin-dir",
+        f.bin.to_str().unwrap(),
+        "--dry-run",
+    ]);
+    assert!(f.root.path().join("exists").exists());
+    f.ok(&["uninstall", "--bin-dir", f.bin.to_str().unwrap(), "--yes"]);
+    assert!(!f.root.path().join("exists").exists());
+    assert!(!installed.exists());
 }

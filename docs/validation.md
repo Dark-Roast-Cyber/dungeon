@@ -4,6 +4,24 @@ CI checks formatting, Clippy, locked Rust tests, release compilation, CLI versio
 
 ## Optional plain containers (2026-10-27, source worktree)
 
+The subsequent recovery/drift changes passed formatting, warnings-denied all-target
+Clippy, **215 locked Rust tests** (140 unit + 75 integration), four npm launcher and
+package-staging tests, and a locked release build. Synthetic cases cover unwritable
+state, lost create replies, late and ambiguous results, retry after failed deletion
+verification, pending uninstall, dead/restarting states and the new drift checks.
+
+On rootless Podman **5.8.7**, the final release passed the expanded live gate and
+a separate native create whose CLI reply was deliberately discarded; the recorded
+intent identified and removed that exact container. Host container inventory and
+start timestamps matched the pre-test baseline. In a disposable FCOS VM, Docker
+CE **29.9.2** passed the same lost-reply recovery, restart-policy drift refusal,
+pause/stop and cleanup on that final binary. The expanded Docker gate also passed
+on the immediately preceding binary; its only subsequent runtime change tightened
+validation of malformed restart retry counts. The VM's final Docker inventory was
+empty and the VM was shut down. Dead/restarting states and lost-reply timing were
+not induced as genuine daemon failures; the latter was simulated by a CLI wrapper.
+These results do not attest OpenShell policy, authenticated agents, desktop or EDR.
+
 The follow-up to adversarial review passed formatting, warnings-denied all-target
 Clippy, **207 locked Rust tests** (140 unit + 67 integration), npm launcher/package
 staging tests and a release build. New synthetic cases cover machine policy and
