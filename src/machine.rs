@@ -202,13 +202,27 @@ pub(crate) fn error_json(operation: &str, error: &Error, review: Value) -> Value
 fn environment(config: &Config, remote: Option<&Value>) -> Value {
     json!({"config":config.path,"project":config.values.project,"fingerprint":config.fingerprint,
         "sandbox_id":remote.and_then(|v|v["id"].as_str()),"guest_project":GUEST_PROJECT,
-        "execution_location":"local","project_transfer":config.values.project_transfer})
+        "execution_location":"local","project_transfer":config.values.project_transfer,
+        "runtime":if config.values.container.is_some(){"container"}else{"openshell"},
+        "engine":remote.and_then(|v|v["engine"].as_str())})
 }
 fn capability(state: &str, reason: Option<&str>) -> Value {
     json!({"state":state,"reason":reason})
 }
 fn capabilities(config: &Config) -> Value {
-    capabilities_on(config.values.project_transfer, std::env::consts::OS)
+    let mut caps = capabilities_on(config.values.project_transfer, std::env::consts::OS);
+    if config.values.container.is_some() {
+        for name in [
+            "streamed_exec",
+            "owned_interrupt",
+            "unowned_interrupt",
+            "interactive",
+            "finite_stdin",
+        ] {
+            caps[name] = capability("unsupported", Some("requires_openshell"));
+        }
+    }
+    caps
 }
 fn capabilities_on(transfer: ProjectTransfer, platform: &str) -> Value {
     let copy = transfer == ProjectTransfer::Copy;
@@ -249,7 +263,7 @@ fn result(config: &Config, remote: Option<&Value>, review: Value) -> Value {
         "copy_baseline_valid":remote.map(|_| config.values.project_transfer == ProjectTransfer::Copy && crate::export::load_baseline(config).is_ok()).unwrap_or(false),
         "initial_upload_pending":remote.map(|v| v["initial_upload_pending"].clone()).unwrap_or(Value::Null),
         "identity":if remote.is_some(){"verified"}else{"configured"},
-        "policy":if remote.is_some(){"verified"}else{"unknown"},"capabilities":capabilities(config),"review":review})
+        "policy":if config.values.container.is_some(){"unenforced"}else if remote.is_some(){"verified"}else{"unknown"},"capabilities":capabilities(config),"review":review})
 }
 fn approve(yes: bool) -> Result<()> {
     if yes {

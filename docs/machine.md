@@ -81,11 +81,18 @@ Except execution, successful operations produce one line:
 Environment paths are authoritative configuration data. Sandbox IDs and fingerprints
 are opaque strings; `sandbox_id` is null before runtime inspection. Resolve does not
 assert runtime identity or policy: its phase is `uncreated`, identity `configured`,
-policy `unknown`, even if an unobserved runtime already exists. An unbound resolve
+policy `unknown` for OpenShell, even if an unobserved runtime already exists. A
+plain-container binding reports policy `unenforced`, including before creation;
+its environment identifies the runtime and, once observed, the engine. An unbound resolve
 uses null environment/capabilities, phase `unbound`, identity/policy `unknown`.
 Observed phases are `ready`, `stopped`, `error`, `transitioning` or `unknown`.
 
-`initial_upload_pending` is a bound-state boolean, or null without runtime
+For plain containers, `initial_upload_pending` indicates incomplete guest
+preparation, not an upload. Stop and destroy the container before creating it
+again; `upload` cannot repair it. Plain containers do not support the machine
+streaming, owned interrupt or interactive execution contracts.
+
+For OpenShell, `initial_upload_pending` is a bound-state boolean, or null without runtime
 inspection (including resolve/uncreated/unbound). It does not redefine backend
 phase: Ready can still be pending. Pending first-copy initialization blocks new
 execution, attachment and automatic start with `operation_failed`, effects `none`

@@ -141,9 +141,9 @@ Dungeon must not silently install privileged dependencies, overwrite incompatibl
 
 Setup health is not containment attestation.
 
-Fresh plain `setup` creates a bind-capable gateway; `--copy-only` explicitly
+Fresh `setup --runtime openshell` creates a bind-capable gateway; `--copy-only` explicitly
 chooses a gateway without project bind capability. Neither is project mount
-authority. Plain setup verifies an exact existing live mode without changing it;
+authority. OpenShell setup verifies an exact existing live mode without changing it;
 an exact existing copy-only gateway requires `--copy-only` verification. Migration is
 blocked; setup never restarts an existing gateway. Fresh creators serialize with
 a private setup file lock, not a runtime daemon or cross-client maintenance lease.

@@ -4,6 +4,20 @@ CI checks formatting, Clippy, locked Rust tests, release compilation, CLI versio
 
 ## Optional plain containers (2026-10-27, source worktree)
 
+The follow-up to adversarial review passed formatting, warnings-denied all-target
+Clippy, **207 locked Rust tests** (140 unit + 67 integration), npm launcher/package
+staging tests and a release build. New synthetic cases cover machine policy and
+capability reporting, pending inspection failure, pause recovery, absent container
+and post-removal inventory failure, and empty-state uninstall. These synthetic
+checks do not establish behavior of native engines under interruption.
+With rootless Podman 5.8.7, the follow-up release binary also passed the expanded
+live gate and a separate paused-container stop, externally absent-container destroy
+and empty-state uninstall. Concurrent fixture cleanup initially refused another
+Dungeon-labeled container; retry after that fixture finished succeeded. Host
+container inventory and start timestamps matched the pre-test baseline. Docker
+was not rerun for the follow-up; its earlier VM evidence applies to the preceding
+implementation only.
+
 The optional-runtime change passed formatting, warnings-denied all-target Clippy,
 **202 locked Rust tests** (140 unit + 62 integration), npm launcher/package-staging
 tests, and a locked release build. Synthetic fixtures cover both native command

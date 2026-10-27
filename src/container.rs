@@ -364,7 +364,12 @@ pub(crate) fn removal_inventory(configs: &[Config]) -> Result<RemovalInventory> 
     for config in configs {
         let runtime = Runtime::new(config)?;
         let expected = if config.state_path().try_exists()? {
-            Some(runtime.checked(false)?.0.id)
+            let state = runtime.state()?;
+            if runtime.exists(&state.id)? {
+                Some(runtime.checked_state(false, true)?.0.id)
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -612,19 +617,34 @@ impl<'a> Runtime<'a> {
         checked_id(&state.id)?;
         Ok(state)
     }
+    fn exists(&self, id: &str) -> Result<bool> {
+        checked_id(id)?;
+        let ids = self.native.inventory(Some(&format!("id={id}")))?;
+        if ids.iter().any(|found| found != id) {
+            return Err(Error::new("ambiguous container inventory"));
+        }
+        Ok(!ids.is_empty())
+    }
     fn checked(&self, work: bool) -> Result<(RuntimeState, Value)> {
+        self.checked_state(work, false)
+    }
+    fn checked_state(&self, work: bool, allow_paused: bool) -> Result<(RuntimeState, Value)> {
         let state = self.state()?;
         let c = self.inspect(&state.id)?;
         if !c["State"]["Running"].is_boolean()
-            || ["Paused", "Restarting", "Dead"]
+            || ["Restarting", "Dead"]
                 .iter()
                 .any(|key| c["State"][key] == true)
+            || (!allow_paused && c["State"]["Paused"] == true)
         {
             return Err(Error::new(
                 "container is in an unsupported transitional state; inspect the selected engine",
             ));
         }
-        if digest(&self.specification(&c)?)? != state.observed_policy {
+        let observed = digest(&self.specification(&c)?)?;
+        if !(state.initial_upload_pending && state.observed_policy.is_empty())
+            && observed != state.observed_policy
+        {
             return Err(Error::new(
                 "container configuration drift; refusing operation",
             ));
@@ -663,6 +683,16 @@ impl<'a> Runtime<'a> {
         if !self.config.values.project.is_dir() {
             return Err(Error::new("project directory is unavailable"));
         }
+        self.output.message(format_args!(
+            "Selected {} at {}; plain container policy is not enforced.{}",
+            self.native.binding.engine.name(),
+            self.native.binding.endpoint,
+            if self.native.binding.engine == Engine::Docker {
+                " Docker daemon access is host-root-equivalent."
+            } else {
+                ""
+            }
+        ))?;
         if !self
             .native
             .inventory(Some(&format!("label={LABEL}={}", self.config.fingerprint)))?
@@ -752,16 +782,18 @@ impl<'a> Runtime<'a> {
         self.output.mutating();
         let id = self.native.query(&args, 120)?.trim().to_owned();
         checked_id(&id)?;
-        let c = self.inspect(&id)?;
         let mut state = RuntimeState {
             schema: 1,
             container: Some(self.native.binding.clone()),
             id,
             config: self.config.fingerprint.clone(),
-            observed_policy: digest(&self.specification(&c)?)?,
+            observed_policy: String::new(),
             initial_upload_pending: true,
         };
         self.persist(&state, false)?;
+        let c = self.inspect(&state.id)?;
+        state.observed_policy = digest(&self.specification(&c)?)?;
+        self.persist(&state, true)?;
         self.native.query(&strings(&["start", &state.id]), 30)?;
         // Only image-owned parent directories; never recurse into project or imported leaves.
         let script = "set -eu; for p in /sandbox /sandbox/.config /sandbox/.config/opencode /sandbox/.local /sandbox/.local/share /sandbox/.local/state /sandbox/.cache /sandbox/.local/share/opencode /sandbox/.local/state/opencode /sandbox/.cache/opencode; do test ! -L \"$p\"; mkdir -p \"$p\"; chown \"$1\" \"$p\"; done";
@@ -807,7 +839,16 @@ impl<'a> Runtime<'a> {
     }
     pub(crate) fn down(&self) -> Result<i32> {
         let _lock = crate::export::TransferGuard::environment(self.config)?;
-        let (s, c) = self.checked(false)?;
+        let state = self.state()?;
+        if !self.exists(&state.id)? {
+            return Ok(0);
+        }
+        let (s, mut c) = self.checked_state(false, true)?;
+        if c["State"]["Paused"] == true {
+            self.output.mutating();
+            self.native.query(&strings(&["unpause", &s.id]), 30)?;
+            c = self.checked(false)?.1;
+        }
         if c["State"]["Running"] == true {
             self.output.mutating();
             self.native.query(&strings(&["stop", &s.id]), 45)?;
@@ -826,19 +867,28 @@ impl<'a> Runtime<'a> {
         )
     }
     pub(crate) fn inspect_for_destroy(&self) -> Result<Value> {
+        let state = self.state()?;
+        if !self.exists(&state.id)? {
+            return Ok(
+                json!({"id":state.id,"name":self.config.values.name,"workspace":self.config.values.workspace,"phase":"Stopped","runtime":"container","engine":self.native.binding.engine,"policy_enforcement":false,"already_absent":true}),
+            );
+        }
         self.inspect_bound()
     }
     pub(crate) fn destroy(&self) -> Result<i32> {
         let lock = crate::export::TransferGuard::environment(self.config)?;
         let _imports = crate::imports::cleanup_lock(self.config)?;
-        let (s, c) = self.checked(false)?;
-        if c["State"]["Running"] != false {
-            return Err(Error::new("stop the container before destroy"));
-        }
-        self.output.mutating();
-        self.native.query(&strings(&["rm", &s.id]), 30)?;
-        if self.native.inventory(None)?.contains(&s.id) {
-            return Err(Error::new("container remains; runtime binding retained"));
+        let state = self.state()?;
+        if self.exists(&state.id)? {
+            let (s, c) = self.checked(false)?;
+            if c["State"]["Running"] != false {
+                return Err(Error::new("stop the container before destroy"));
+            }
+            self.output.mutating();
+            self.native.query(&strings(&["rm", &s.id]), 30)?;
+            if self.exists(&s.id)? {
+                return Err(Error::new("container remains; runtime binding retained"));
+            }
         }
         lock.verify_environment(self.config)?;
         fs::remove_file(self.config.state_path())?;

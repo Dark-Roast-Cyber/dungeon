@@ -768,6 +768,9 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
                     "workspace": remote["workspace"],
                     "phase": remote["phase"],
                     "initial_upload_pending": remote["initial_upload_pending"],
+                    "runtime": if config.values.container.is_some() {"container"} else {"openshell"},
+                    "engine": remote["engine"],
+                    "policy_enforcement": remote["policy_enforcement"],
                 }))?
             );
             Ok(0)

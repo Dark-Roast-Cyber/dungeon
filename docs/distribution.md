@@ -24,6 +24,8 @@ unrecorded Dungeon containers, stops/removes recorded containers, verifies absen
 and removes private configuration and the selected CLI. Projects, original imports,
 cached images and unrelated containers remain. Mixed installations require
 destroying plain containers before OpenShell teardown.
+An empty, private Dungeon state directory is removed by standalone plain cleanup;
+nonempty or unknown state still requires inspection and is not silently deleted.
 
 `uninstall --binary-only` needs no engine or OpenShell and removes only the selected
 CLI. Configuration/resources remain; cleanup is reported unverified. Ordinary

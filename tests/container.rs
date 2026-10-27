@@ -47,12 +47,13 @@ if [ "$1" = --remote ]; then shift 3; else shift 2; fi
 case "$1 ${{2:-}}" in
   'info --format') /bin/cat info.json;;
   'image inspect') printf '[{{"Config":{{}}}}]\n';;
-  'ps --all') if [ -e exists ]; then printf '%s\n' '{ID}'; fi; if [ -e extra ]; then /bin/cat extra; fi;;
-  'container inspect') test -e exists; /bin/cat inspect.json;;
+  'ps --all') test ! -e fail-ps; if [ -e exists ]; then printf '%s\n' '{ID}'; fi; if [ -e extra ]; then /bin/cat extra; fi;;
+  'container inspect') test -e exists; test ! -e fail-inspect; /bin/cat inspect.json;;
   'create --name') : > exists; /bin/cp stopped.json inspect.json; printf '%s\n' '{ID}';;
   'start '*) /bin/cp running.json inspect.json;;
+  'unpause '*) /bin/cp running.json inspect.json;;
   'stop '*) /bin/cp stopped.json inspect.json;;
-  'rm '*) if [ ! -e leave-container ]; then /bin/rm exists; fi;;
+  'rm '*) if [ ! -e leave-container ]; then /bin/rm exists; fi; if [ -e fail-after-rm ]; then : > fail-ps; fi;;
   'exec '*) for a in "$@"; do if [ "$a" = fail-fixture ]; then exit 23; fi; done;;
   *) exit 9;;
 esac
@@ -159,6 +160,22 @@ fn both_engines_use_native_lifecycle_and_pin_identity_without_openshell() {
             .unwrap();
         assert!(out.status.success(), "setup from HOME: {out:?}");
         f.ok(&["up"]);
+        let output = f.ok(&[
+            "--config",
+            f.config.to_str().unwrap(),
+            "machine",
+            "--schema",
+            "1",
+            "status",
+        ]);
+        let status: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(status["result"]["policy"], "unenforced");
+        assert_eq!(status["result"]["environment"]["runtime"], "container");
+        assert_eq!(status["result"]["environment"]["engine"], engine);
+        assert_eq!(
+            status["result"]["capabilities"]["streamed_exec"]["state"],
+            "unsupported"
+        );
         let before = fs::read(f.state()).unwrap();
         let state: Value = serde_json::from_slice(&before).unwrap();
         assert_eq!(state["container"]["engine"], engine);
@@ -240,4 +257,71 @@ fn binary_only_uninstall_needs_no_runtime_and_preserves_configuration() {
     ]);
     assert!(!installed.exists());
     assert!(f.config.exists());
+}
+
+#[test]
+fn plain_uninstall_accepts_empty_state_directory_without_openshell() {
+    let f = Fixture::new("docker");
+    f.ok(&["up"]);
+    let state_dir = f.home.join(".local/state/dungeon");
+    fs::create_dir_all(&state_dir).unwrap();
+    fs::set_permissions(&state_dir, fs::Permissions::from_mode(0o700)).unwrap();
+    let installed = f.bin.join("dungeon");
+    fs::copy(env!("CARGO_BIN_EXE_dungeon"), &installed).unwrap();
+    f.ok(&["uninstall", "--bin-dir", f.bin.to_str().unwrap(), "--yes"]);
+    assert!(!installed.exists());
+    assert!(!state_dir.exists());
+    assert!(!f.root.path().join("exists").exists());
+}
+
+#[test]
+fn failed_initial_inspection_retains_recoverable_pending_binding() {
+    let f = Fixture::new("docker");
+    fs::write(f.root.path().join("fail-inspect"), "").unwrap();
+    assert!(!f.run(&["up"]).status.success());
+    let state: Value = serde_json::from_slice(&fs::read(f.state()).unwrap()).unwrap();
+    assert_eq!(state["initial_upload_pending"], true);
+    assert_eq!(state["observed_policy"], "");
+    fs::remove_file(f.root.path().join("fail-inspect")).unwrap();
+    assert!(!f.run(&["up"]).status.success());
+    f.ok(&["down"]);
+    f.ok(&["destroy", "--yes"]);
+    assert!(!f.state().exists());
+    assert!(!f.root.path().join("exists").exists());
+}
+
+#[test]
+fn paused_container_can_be_stopped_and_destroyed() {
+    let f = Fixture::new("docker");
+    f.ok(&["up"]);
+    let mut c: Value =
+        serde_json::from_slice(&fs::read(f.root.path().join("inspect.json")).unwrap()).unwrap();
+    c[0]["State"]["Paused"] = json!(true);
+    f.write("inspect.json", &c);
+    f.ok(&["down"]);
+    f.ok(&["destroy", "--yes"]);
+    assert!(!f.state().exists());
+}
+
+#[test]
+fn destroy_recovers_a_binding_when_the_recorded_container_is_absent() {
+    let f = Fixture::new("docker");
+    f.ok(&["up"]);
+    f.ok(&["down"]);
+    fs::remove_file(f.root.path().join("exists")).unwrap();
+    f.ok(&["destroy", "--yes"]);
+    assert!(!f.state().exists());
+}
+
+#[test]
+fn retry_destroy_after_post_removal_inventory_failure() {
+    let f = Fixture::new("docker");
+    f.ok(&["up"]);
+    f.ok(&["down"]);
+    fs::write(f.root.path().join("fail-after-rm"), "").unwrap();
+    assert!(!f.run(&["destroy", "--yes"]).status.success());
+    assert!(f.state().exists());
+    fs::remove_file(f.root.path().join("fail-ps")).unwrap();
+    f.ok(&["destroy", "--yes"]);
+    assert!(!f.state().exists());
 }

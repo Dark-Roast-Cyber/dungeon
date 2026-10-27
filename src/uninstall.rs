@@ -556,9 +556,14 @@ pub(crate) fn run(bin_dir: Option<PathBuf>, dry_run: bool, yes: bool) -> Result<
         return binary_only(binary.parent().map(Path::to_path_buf), dry_run, yes);
     }
     let entries = crate::binding::list_in(&config.join("projects"))?;
+    let empty_state = if present(&state)? {
+        check_tree(&state, &[]).is_ok()
+    } else {
+        true
+    };
     if entries.is_empty()
         && present(&config.join("container-defaults.json"))?
-        && !present(&state)?
+        && empty_state
         && !present(
             &config
                 .parent()
@@ -586,7 +591,7 @@ pub(crate) fn run(bin_dir: Option<PathBuf>, dry_run: bool, yes: bool) -> Result<
     }
     if !plain.is_empty() {
         let mixed = plain.len() != entries.len()
-            || present(&state)?
+            || !empty_state
             || present(
                 &config
                     .parent()
@@ -710,6 +715,7 @@ fn remove_plain(
         &["projects", "transfer-locks", "container-defaults.json"],
     )?;
     check_binary(binary)?;
+    check_tree(state, &[])?;
     for binding in bindings {
         for source in std::iter::once(&binding.values.project)
             .chain(binding.values.imports.iter().map(|i| &i.source))
@@ -757,7 +763,11 @@ fn remove_plain(
         &["projects", "transfer-locks", "container-defaults.json"],
     )?;
     check_binary(binary)?;
+    check_tree(state, &[])?;
     fs::remove_dir_all(config)?;
+    if present(state)? {
+        fs::remove_dir(state)?;
+    }
     if present(binary)? {
         fs::remove_file(binary)?;
     }
