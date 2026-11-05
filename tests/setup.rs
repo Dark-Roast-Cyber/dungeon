@@ -34,6 +34,47 @@ fn setup_flags_parse_and_missing_prerequisites_leave_home_and_project_empty() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn approved_openshell_setup_checks_compatibility_before_service_or_image_changes() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let project = root.path().join("project");
+    let home = root.path().join("home");
+    let bin = root.path().join("bin");
+    for dir in [&project, &home, &bin] {
+        fs::create_dir(dir).unwrap();
+    }
+    let marker = root.path().join("native-mutated");
+    for name in ["podman", "systemctl"] {
+        let path = bin.join(name);
+        fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\nprintf forbidden > '{}'\nexit 9\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let path = bin.join("openshell");
+    fs::write(&path, "#!/bin/sh\nprintf 'openshell 0.0.1\\n'\n").unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_dungeon"))
+        .args(["setup", "--yes", "--runtime", "openshell"])
+        .env_clear()
+        .env("HOME", &home)
+        .env("PATH", &bin)
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("OpenShell 0.0.116 required"));
+    assert!(!marker.exists());
+    assert_eq!(fs::read_dir(home).unwrap().count(), 0);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn dry_run_does_not_query_or_initialize_an_empty_engine_store() {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();

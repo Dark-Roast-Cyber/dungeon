@@ -1,20 +1,51 @@
 //! The two concrete execution contracts. Existing bindings always retain their runtime.
-use crate::config::{Config, ContainerOptions, Engine};
+use crate::config::{Config, ContainerOptions};
 use crate::{Error, Result};
 use serde_json::Value;
 use std::num::NonZeroU16;
 
-pub(crate) const DEFAULT_CONTAINER_IMAGE: &str = "ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e";
+pub(crate) const DEFAULT_IMAGE: &str = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest";
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Preferences {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) runtime: Option<RuntimeChoice>,
     pub(crate) container: Option<ContainerOptions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) image: Option<String>,
 }
 
-pub(crate) fn preferences() -> Result<Preferences> {
+impl Preferences {
+    pub(crate) fn runtime_choice(&self) -> RuntimeChoice {
+        self.runtime.unwrap_or(if self.container.is_some() {
+            RuntimeChoice::Container
+        } else {
+            RuntimeChoice::Auto
+        })
+    }
+}
+
+pub(crate) fn preferences(project: Option<&std::path::Path>) -> Result<Preferences> {
     let path = crate::binding::preferences_path()?;
-    if path.starts_with(std::env::current_dir()?.canonicalize()?) {
+    let cwd = std::env::current_dir()?.canonicalize()?;
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .and_then(|p| p.canonicalize().ok());
+    let ancestor = path
+        .parent()
+        .unwrap()
+        .ancestors()
+        .find(|p| p.exists())
+        .ok_or_else(|| Error::new("setup defaults have no existing parent"))?;
+    let resolved = ancestor
+        .canonicalize()?
+        .join(path.strip_prefix(ancestor).unwrap());
+    if [Some(cwd.as_path()), project]
+        .into_iter()
+        .flatten()
+        .any(|p| home.as_deref() != Some(p) && resolved.starts_with(p))
+    {
         return Err(Error::new("runtime defaults must be outside the project"));
     }
     let mut options = std::fs::OpenOptions::new();
@@ -31,53 +62,61 @@ pub(crate) fn preferences() -> Result<Preferences> {
     };
     let meta = file.metadata()?;
     if !meta.is_file() || meta.len() > 8192 {
-        return Err(Error::new("invalid private container defaults"));
+        return Err(Error::new("invalid private setup defaults"));
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         if meta.uid() != unsafe { libc::geteuid() } || meta.mode() & 0o077 != 0 || meta.nlink() != 1
         {
-            return Err(Error::new(
-                "container defaults must be private and user-owned",
-            ));
+            return Err(Error::new("setup defaults must be private and user-owned"));
         }
     }
     use std::io::Read;
     let mut text = String::new();
     file.take(8193).read_to_string(&mut text)?;
     if text.len() > 8192 {
-        return Err(Error::new("container defaults exceed limit"));
+        return Err(Error::new("setup defaults exceed limit"));
     }
-    let prefs: Preferences = serde_json::from_value(crate::config::read_json_text(&text)?)?;
-    if let Some(options) = &prefs.container
-        && let Some(endpoint) = &options.endpoint
+    let prefs: Preferences = crate::config::read_json_text(&text)
+        .and_then(|value| serde_json::from_value(value).map_err(Into::into))
+        .map_err(|_| Error::new("invalid private setup defaults"))?;
+    if prefs.runtime == Some(RuntimeChoice::Auto)
+        || (prefs.runtime == Some(RuntimeChoice::Openshell) && prefs.container.is_some())
+        || (prefs.runtime == Some(RuntimeChoice::Container) && prefs.container.is_none())
+        || prefs
+            .image
+            .as_deref()
+            .is_some_and(|image| !crate::config::valid_image(image))
     {
-        crate::config::validate_endpoint(endpoint)?;
+        return Err(Error::new("invalid private setup defaults"));
+    }
+    if let Some(options) = &prefs.container {
+        if options.engine == crate::config::Engine::Auto && options.endpoint.is_some() {
+            return Err(Error::new("saved endpoint requires an explicit engine"));
+        }
+        if let Some(endpoint) = &options.endpoint {
+            crate::config::validate_endpoint(endpoint)?;
+        }
     }
     Ok(prefs)
 }
 
-pub(crate) fn save_preferences(options: &ContainerOptions) -> Result<()> {
-    #[cfg(target_os = "linux")]
-    let options = crate::container::resolved_options(options)?;
-    #[cfg(not(target_os = "linux"))]
-    let options = options.clone();
+#[cfg(target_os = "linux")]
+pub(crate) fn save_preferences(value: &Preferences) -> Result<()> {
     let path = crate::binding::preferences_path()?;
-    let value = Preferences {
-        container: Some(options),
-    };
-    if path.try_exists()? {
-        if serde_json::to_value(preferences()?)? == serde_json::to_value(&value)? {
-            return Ok(());
-        }
-        return Err(Error::new(format!(
-            "container defaults already exist; edit {} to change future environments",
-            path.display()
-        )));
+    let previous = preferences(None)?;
+    if serde_json::to_value(&previous)? == serde_json::to_value(value)? {
+        return Ok(());
     }
     crate::config::create_private_dir(path.parent().unwrap())?;
-    crate::config::write_new(&path, &value)
+    let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
+    serde_json::to_writer_pretty(&mut file, value)?;
+    file.as_file().sync_all()?;
+    file.persist(&path).map_err(|e| Error::new(e.to_string()))?;
+    #[cfg(unix)]
+    std::fs::File::open(path.parent().unwrap())?.sync_all()?;
+    Ok(())
 }
 
 pub(crate) fn container_plan(config: &Config) -> Value {
@@ -111,7 +150,18 @@ pub(crate) fn uninstall(bin: Option<std::path::PathBuf>, dry: bool, yes: bool) -
     crate::openshell::uninstall(bin, dry, yes)
 }
 
-#[derive(Clone, Copy, Debug, Default, clap::ValueEnum)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    clap::ValueEnum,
+)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum RuntimeChoice {
     #[default]
     Auto,
@@ -120,29 +170,24 @@ pub(crate) enum RuntimeChoice {
 }
 
 pub(crate) fn choose(choice: RuntimeChoice, project: &std::path::Path) -> Result<bool> {
-    let env = crate::openshell::host_environment(Some(project))?;
-    let installed =
-        crate::openshell::find_executable("openshell", env.get(std::ffi::OsStr::new("PATH")))
-            .is_some_and(|p| !p.starts_with(project));
-    Ok(match choice {
-        RuntimeChoice::Auto => !installed,
-        RuntimeChoice::Container => true,
-        RuntimeChoice::Openshell => false,
-    })
+    match choice {
+        RuntimeChoice::Container => Ok(true),
+        RuntimeChoice::Openshell => Ok(false),
+        RuntimeChoice::Auto => {
+            let env = crate::openshell::host_environment(Some(project))?;
+            Ok(crate::openshell::find_executable(
+                "openshell",
+                env.get(std::ffi::OsStr::new("PATH")),
+            )
+            .is_none_or(|p| p.starts_with(project)))
+        }
+    }
 }
 
 pub(crate) fn openshell_feature_error() -> Error {
-    let absent = std::env::current_dir()
-        .ok()
-        .and_then(|p| choose(RuntimeChoice::Auto, &p).ok())
-        .unwrap_or(true);
     Error::refusal(
         crate::ErrorCode::Unsupported,
-        if absent {
-            "this feature requires OpenShell 0.0.116; install it and initialize a separate environment with --runtime openshell"
-        } else {
-            "this feature requires an OpenShell environment; initialize a separate environment with --runtime openshell"
-        },
+        "this feature requires OpenShell 0.0.116; initialize a separate environment with --runtime openshell",
     )
 }
 
@@ -253,20 +298,4 @@ impl<'a> Runtime<'a> {
         }
         crate::openshell::attach_opencode(r)
     }
-}
-
-pub(crate) fn discover(options: &ContainerOptions, json: bool) -> Result<i32> {
-    #[cfg(target_os = "linux")]
-    {
-        crate::container::discover(options, json)
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (options, json);
-        Err(Error::new("plain containers currently require Linux"))
-    }
-}
-
-pub(crate) fn options(engine: Engine, endpoint: Option<String>) -> ContainerOptions {
-    ContainerOptions { engine, endpoint }
 }

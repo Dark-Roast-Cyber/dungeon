@@ -2,32 +2,46 @@
 
 ## Runtime and engine selection
 
-OpenShell is optional. Fresh human initialization uses saved container defaults,
+OpenShell is optional. Fresh human initialization uses saved setup defaults,
 otherwise installed OpenShell, otherwise a plain container. Existing configurations
 without a `container` field retain OpenShell. Existing runtime bindings never switch
 engine or service when a dependency disappears.
 
 ```sh
-dungeon setup --runtime container       # prefer reachable rootless Podman, then Docker CE
+dungeon setup                          # choose runtime/image, review and approve
+dungeon setup --yes --runtime container # unattended; prefer usable Podman, then Docker CE
 dungeon init --runtime container --image REGISTRY/IMAGE:TAG
 dungeon init --runtime container --engine docker --endpoint unix:///var/run/docker.sock
 dungeon init --runtime openshell        # optional policy/gateway contract
 ```
 
-`setup --runtime container` records the resolved engine/socket in private
-`${XDG_CONFIG_HOME:-$HOME/.config}/dungeon/container-defaults.json`. Edit it to
-change future environments. `init --engine` overrides that default and implies
+`setup` records the runtime, resolved container engine/socket (when applicable)
+and image in private
+`${XDG_CONFIG_HOME:-$HOME/.config}/dungeon/container-defaults.json` (the historical
+filename is retained). Repeat setup to approve changed defaults for future
+environments; existing bindings are unchanged. Old engine/socket-only defaults
+remain valid. OpenShell selection is remembered even when its CLI disappears;
+there is no silent fallback. `init --engine` overrides that default and implies
 the container runtime. An explicit endpoint requires an explicit engine. Only
 local Linux Unix sockets are supported; Docker rootless/userns-remap is currently
 rejected. Standard discovery checks `/run/user/<uid>/podman/podman.sock` and
 `/var/run/docker.sock`; it does not adopt Docker contexts or engine environment
-overrides. Missing engines/services produce a short installation/start message.
+overrides. After approval, setup can activate the normal user's Podman socket
+when no usable selected service exists. An explicit endpoint is never repaired
+or replaced. Missing packages and Docker daemon/access problems require manual
+installation or remediation. Setup never uses sudo or changes permissions.
 
 Plain containers mount the project read/write at `/sandbox/project`. Reviewed
 configuration imports remain opt-in, read-only, and separate from writable guest
-state. The default image is the digest-pinned public OpenShell-community base
-listed by `dungeon versions`, pulled on first use; using that image does not need
-OpenShell. Custom images must provide `/bin/sh`, `/bin/sleep`, the selected tools,
+state. Both runtimes use setup's image, otherwise the public
+`ghcr.io/nvidia/openshell-community/sandboxes/base:latest`. `setup --image` saves
+a tag or digest for future projects; `init --image` overrides it for one binding.
+Setup refreshes registry images, while local `localhost/` images must already be
+built. Ordinary creation pulls missing images and reuse never refreshes or
+replaces a guest. Cached tags may be stale until setup is repeated; only a
+digest pins immutable content. The optional local recipe's tool-version and
+security checks are not claims about upstream `latest`.
+Custom images must provide `/bin/sh`, `/bin/sleep`, the selected tools,
 and a writable `/sandbox` home, with no implicit volumes.
 
 `policy.json` is not enforced in plain containers. Networking is ordinary bridge
@@ -76,8 +90,9 @@ bounded bytes feed the existing strict parser/validator; doctor does not reopen
 the paths after a safety preflight. This is a diagnostic-only read restriction,
 not a change to other commands' configuration-loading contract.
 
-For plain bindings (or no binding), doctor checks local native service readiness
-and, when bound, recorded service/container identity and configuration. Its JSON
+Without a binding, doctor follows saved setup defaults, otherwise normal runtime
+discovery. For plain bindings it checks local native service readiness and, when
+bound, recorded service/container identity and configuration. Its JSON
 adds `container` instead of `supported_openshell`. Explicit `--runtime container`
 or `--runtime openshell` requests that runtime's diagnostics, even when the current
 project uses the other runtime. In that case only machine prerequisites are

@@ -31,17 +31,20 @@ trial without installation, use `cargo build --release --locked` followed by
 
 ## 2. Choose the runtime
 
-For the simplest local trial, use an existing container service:
+Run the setup wizard:
 
 ```sh
-dungeon setup --runtime container   # discover Podman first, otherwise Docker CE
-dungeon doctor --runtime container
+dungeon setup                     # runtime, image, review, approval
+dungeon doctor                    # read-only; follows the saved runtime
 ```
 
-Setup remembers the engine/socket for new projects. It installs nothing and never
-changes permissions. If rootless Podman's socket is stopped, explicitly start it
-with `systemctl --user enable --now podman.socket`. For Docker CE, start its daemon
-and check access yourself; daemon access is host-root-equivalent. Containers mount
+Setup remembers the runtime, engine/socket and image for new projects. After
+confirmation it can run `systemctl --user enable --now podman.socket`, pull images
+and create the owned gateway. It installs nothing and never changes permissions.
+For Docker CE, start its daemon and check access yourself; daemon access is
+host-root-equivalent. Select it with `setup --runtime container --engine docker`.
+Noninteractive setup requires `--yes`; `--dry-run` never activates services, pulls
+images or writes defaults. Containers mount
 only the reviewed project/imports, but **do not enforce OpenShell policy or restrict
 outbound networking**. Existing bindings never switch runtime automatically.
 
@@ -51,10 +54,8 @@ Install the pinned OpenShell CLI and rootless Podman before using this path:
 
 ```sh
 dungeon doctor --runtime openshell  # read-only; inspect individual checks
-systemctl --user enable --now podman.socket
-podman pull ghcr.io/nvidia/openshell/gateway@sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645
 dungeon setup --runtime openshell --dry-run
-dungeon setup --runtime openshell   # fresh bind-capable gateway; no project mounted yet
+dungeon setup --runtime openshell   # approve socket/images and fresh gateway
 dungeon doctor --runtime openshell
 ```
 
@@ -69,12 +70,18 @@ needs an explicit disposal/reprovision decision. Doctor health is not proof of i
 
 ## 3. Choose a project and agent
 
-Plain containers pull a digest-pinned public base image on first use. That image
-has older harness versions than the reviewed image. For the reviewed tool versions,
-build the [local Linux amd64 image](../images/agent/README.md) and select it with
-`dungeon init --image localhost/dungeon-agent:0.0.3-opencode-2.1.2`. OpenShell defaults to
-that local image, which must be built before launch. Both include all three
-harnesses; the tag names the OpenCode pin, not a required harness choice.
+Both runtimes use setup's saved image, otherwise
+`ghcr.io/nvidia/openshell-community/sandboxes/base:latest`. Setup pulls the current
+image; first use pulls a missing image, but a cached tag is not refreshed on each
+launch. Use `setup --image REGISTRY/IMAGE:VERSION` to pin future projects, or
+`init --image REGISTRY/IMAGE@sha256:DIGEST` for one new project. Only a digest pins
+immutable content. Setup never replaces existing guests or rewrites their bindings.
+
+For the optional reviewed tool versions, build the
+[local Linux amd64 image](../images/agent/README.md) and select it with
+`dungeon init --image localhost/dungeon-agent:0.0.3-opencode-2.1.2`. The tag names
+the OpenCode pin, not a required harness choice. Upstream image contents and
+versions differ from this recipe; its native results do not validate `latest`.
 To use the optional host OpenCode UI, separately install a host client
 matching the guest pin (currently 2.1.2); use `dungeon versions` to compare them.
 Ordinary `dungeon` / `dungeon run` uses the guest CLI and needs no host harness client.
@@ -94,12 +101,12 @@ config without starting anything; use it **before** first launch to choose an
 image, transfer mode, gateway, or provider:
 
 ```sh
-dungeon init                     # choose harness; other settings use reviewed defaults
+dungeon init                     # choose harness; other settings use setup defaults
 dungeon plan                     # inspect policy and requested mounts
 dungeon                           # first up, then the selected agent
 ```
 
-The reviewed local image is not published or pulled by Dungeon.
+The optional reviewed local image is not published, built or pulled by Dungeon.
 `dungeon versions --check` reads the registry stable tag but does not download
 or execute an update.
 Existing bindings keep their selected image. Host configuration imports are off

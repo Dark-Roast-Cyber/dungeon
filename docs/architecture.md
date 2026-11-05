@@ -89,14 +89,17 @@ independently useful contract: plain containers do not require OpenShell.
 
 ### Plain-container selection and lifetime
 
-New bindings choose installed OpenShell or plain containers, unless explicitly
-selected with `--runtime` or saved container defaults. Existing schema-2 configs
+New bindings use saved setup defaults, otherwise installed OpenShell or plain
+containers, unless explicitly selected with `--runtime`. Existing schema-2 configs
 without `container` remain OpenShell with unchanged serialization/fingerprints.
 `container` holds the requested engine and optional local Unix endpoint. First
 creation discovers usable services (Podman first), then records engine, endpoint,
 daemon identity and exact container ID in `runtime.json`; reuse never rediscovers.
-`setup --runtime container` saves the resolved engine/socket for future projects
-in private `container-defaults.json`. `init` overrides and private config remain
+`setup` saves the selected runtime, image and resolved container engine/socket
+for future projects in private `container-defaults.json`. Both runtimes default
+to the upstream base's `latest` tag, with explicit version/digest overrides.
+Setup refreshes images; ordinary creation pulls missing images, not every cached
+tag. Existing guests are not updated. `init` overrides and private config remain
 authoritative. No remote Docker contexts, engine environment overrides, or
 repository-local settings are adopted.
 
@@ -140,7 +143,13 @@ For supported combinations, Dungeon may:
 - provide exact remediation guidance;
 - expose the same diagnostics in machine-readable form.
 
-Dungeon must not silently install privileged dependencies, overwrite incompatible OpenShell/runtime state, or fall back to weaker containment.
+The human setup wizard reviews the selected runtime/image and requires confirmation
+or `--yes` before activating the user Podman socket, pulling images, creating the
+gateway or replacing saved new-project defaults. Missing dependencies still need
+manual installation; no sudo, permission changes or arbitrary host scripts are
+added. The OpenShell CLI/gateway compatibility pin remains separate from the
+mutable agent image. `--dry-run` and doctor remain read-only. Dungeon must not
+overwrite incompatible OpenShell/runtime state or fall back to weaker containment.
 
 Setup health is not containment attestation.
 

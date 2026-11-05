@@ -67,7 +67,7 @@ fn default_init_binds_current_project_and_offline_commands_do_not_need_openshell
     assert_eq!(values["providers"], json!([]));
     assert_eq!(
         values["image"],
-        "ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e"
+        "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
     );
     assert_eq!(config["project_transfer"], "live");
     assert_eq!(values["project_transfer"], "live");
@@ -136,6 +136,109 @@ fn explicit_copy_stays_available_for_new_bindings() {
     assert!(out.status.success(), "{out:?}");
     assert_eq!(f.config()["project_transfer"], "copy");
     assert!(f.config()["values"]["project_transfer"].is_null());
+}
+
+#[test]
+fn every_runtime_and_harness_uses_the_same_image_default_and_accepts_pins() {
+    for runtime in ["container", "openshell"] {
+        for agent in ["opencode", "claude", "codex"] {
+            for image in [
+                None,
+                Some("ghcr.io/example/agent:Release-X"),
+                Some(
+                    "ghcr.io/example/agent@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                ),
+            ] {
+                let f = Fixture::new();
+                let mut args = vec!["init", "--yes", "--runtime", runtime, "--agent", agent];
+                if let Some(image) = image {
+                    args.extend(["--image", image]);
+                }
+                let out = f.run(&args);
+                assert!(out.status.success(), "{out:?}");
+                assert_eq!(
+                    f.config()["values"]["image"],
+                    image.unwrap_or("ghcr.io/nvidia/openshell-community/sandboxes/base:latest")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn saved_openshell_defaults_are_authoritative_without_an_installed_cli() {
+    let f = Fixture::new();
+    let directory = f.home.join("config/dungeon");
+    fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("container-defaults.json");
+    fs::write(
+        &path,
+        json!({"runtime":"openshell","container":null,"image":"ghcr.io/example/agent:1"})
+            .to_string(),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    assert!(
+        f.run(&["init", "--yes", "--agent", "codex"])
+            .status
+            .success()
+    );
+    let values = &f.config()["values"];
+    assert!(values["container"].is_null());
+    assert_eq!(values["image"], "ghcr.io/example/agent:1");
+    #[cfg(target_os = "linux")]
+    {
+        let report: Value = serde_json::from_slice(&f.run(&["doctor", "--json"]).stdout).unwrap();
+        assert!(report.get("supported_openshell").is_some());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_defaults_cannot_be_loaded_from_the_selected_project_or_an_alias() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    for alias in [false, true] {
+        let f = Fixture::new();
+        let source = f.project.join("config");
+        fs::create_dir_all(source.join("dungeon")).unwrap();
+        let prefs = source.join("dungeon/container-defaults.json");
+        fs::write(&prefs, json!({"runtime":"openshell","container":null,"image":"ghcr.io/untrusted/agent:latest"}).to_string()).unwrap();
+        fs::set_permissions(&prefs, fs::Permissions::from_mode(0o600)).unwrap();
+        let config_root = if alias {
+            let config = f.home.join("alias");
+            fs::create_dir(&config).unwrap();
+            symlink(source.join("dungeon"), config.join("dungeon")).unwrap();
+            config
+        } else {
+            source
+        };
+        let out = f
+            .command()
+            .current_dir(&f.home)
+            .env("XDG_CONFIG_HOME", &config_root)
+            .args([
+                "init",
+                "--yes",
+                "--agent",
+                "codex",
+                "--project",
+                f.project.to_str().unwrap(),
+                "--directory",
+                f.home.join("private").to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{out:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("defaults must be outside the project"),
+            "{out:?}"
+        );
+        assert!(!config_root.join("dungeon/projects").exists());
+    }
 }
 
 #[test]
@@ -526,6 +629,42 @@ mod terminal {
                 let _ = self.child.kill();
             }
             let _ = self.child.wait();
+        }
+    }
+
+    #[test]
+    fn setup_wizard_reviews_runtime_and_preserves_image_case_before_approval() {
+        for runtime in ["1", "OpenShell"] {
+            let f = Fixture::new();
+            let mut terminal = Terminal::spawn(f.command(), &["setup"]);
+            terminal.until("Runtime [container/openshell;");
+            terminal.send("invalid\n");
+            terminal.until("Enter 1 or 2");
+            terminal.send(&format!("{runtime}\n"));
+            terminal.until("Image [");
+            terminal.send("ghcr.io/example/agent:Release-X\n");
+            terminal.until("Apply this setup?");
+            assert!(
+                terminal
+                    .text
+                    .contains("\"image\": \"ghcr.io/example/agent:Release-X\"")
+            );
+            assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
+            terminal.send("n\n");
+            terminal.finish(false);
+            assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
+        }
+    }
+
+    #[test]
+    fn cancelling_setup_selection_creates_nothing() {
+        for input in ["\x03", "\x04"] {
+            let f = Fixture::new();
+            let mut terminal = Terminal::spawn(f.command(), &["setup"]);
+            terminal.until("Runtime [container/openshell;");
+            terminal.send(input);
+            terminal.finish(false);
+            assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
         }
     }
 

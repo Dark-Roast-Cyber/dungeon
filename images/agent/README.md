@@ -1,6 +1,6 @@
 # Local reviewed agent image
 
-Issue #6's Linux image candidate, extended by Issue #17 with reviewed image-owned Neovim and Rust capabilities. The [Issue #17 local Linux amd64 validation](../../docs/validation.md#issue-17-local-image-tooling-2026-09-26) passed under the unchanged OpenShell hard policy. New human CLI bindings select the versioned local candidate; it is **not published or automatically built**. Build it before first `up` or choose another image explicitly.
+Issue #6's optional Linux image candidate, extended by Issue #17 with reviewed image-owned Neovim and Rust capabilities. The [Issue #17 local Linux amd64 validation](../../docs/validation.md#issue-17-local-image-tooling-2026-09-26) passed under the unchanged OpenShell hard policy. Both runtimes now default to upstream `base:latest`, not this recipe. To use this candidate, build it explicitly and select it with `setup --image` or `init --image`; it is **not published or automatically built**. Its reviewed pins and native results are not claims about upstream `latest`.
 
 ## Inputs and ownership
 
@@ -120,4 +120,4 @@ Long-duration token refresh and vendor browser/desktop integrations remain separ
 - Official registry integrity pins bytes, not vendor trust or absence of vulnerabilities. This build does not independently verify registry provenance attestations or reproduce vendor native binaries from source.
 - OpenCode's installer selects its CPU-specific binary at build time. The local build does not establish portability to older CPUs.
 - Guest users can download their own tools into writable state; the image's root-owned install is a reproducible starting contract, not a prohibition on guest execution.
-- The local source-only `init` default is not a published distribution contract. Do not publish or promote the image as a cross-platform default until GHCR naming, signing/provenance, release tags, immutable digest handling, base security review, and CI publication permissions are separately approved.
+- This optional local recipe is not a published distribution contract. Do not publish or promote it as a cross-platform default until GHCR naming, signing/provenance, release tags, immutable digest handling, base security review, and CI publication permissions are separately approved.

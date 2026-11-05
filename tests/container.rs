@@ -46,7 +46,8 @@ printf '%s\n' "$*" >> calls
 if [ "$1" = --remote ]; then shift 3; else shift 2; fi
 case "$1 ${{2:-}}" in
   'info --format') /bin/cat info.json;;
-  'image inspect') printf '[{{"Config":{{}}}}]\n';;
+  'image inspect') test ! -e missing-image; printf '[{{"Config":{{}}}}]\n';;
+  'pull '*) test ! -e fail-pull; /bin/rm -f missing-image;;
   'ps --all') test ! -e fail-ps; if [ -e exists ]; then printf '%s\n' '{ID}'; fi; if [ -e extra ]; then /bin/cat extra; fi;;
   'container inspect') test -e exists; test ! -e fail-inspect; /bin/cat inspect.json;;
   'create --name') if [ -e fail-before-create ]; then exit 17; fi; : > exists; /bin/cp stopped.json inspect.json; if [ -e lose-create-reply ]; then exit 17; fi; printf '%s\n' '{ID}';;
@@ -154,6 +155,118 @@ fn headless_run_keeps_stdout_clean_on_first_launch_ready_and_resume() {
             }
         }
     }
+}
+
+#[test]
+fn setup_prepares_images_and_saves_only_new_project_defaults() {
+    for engine in ["podman", "docker"] {
+        let f = Fixture::new(engine);
+        let original = fs::read(&f.config).unwrap();
+        let endpoint = format!("unix://{}", f.root.path().join("engine.sock").display());
+        let setup = |image: &str| {
+            f.run(&[
+                "setup",
+                "--yes",
+                "--runtime",
+                "container",
+                "--engine",
+                engine,
+                "--endpoint",
+                &endpoint,
+                "--image",
+                image,
+            ])
+        };
+        let preferences = f.home.join(".config/dungeon/container-defaults.json");
+        let image = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest";
+        let output = setup(image);
+        assert!(output.status.success(), "{output:?}");
+        let saved: Value = serde_json::from_slice(&fs::read(&preferences).unwrap()).unwrap();
+        assert_eq!(saved["runtime"], "container");
+        assert_eq!(saved["image"], image);
+        assert_eq!(saved["container"]["engine"], engine);
+        assert_eq!(saved["container"]["endpoint"], endpoint);
+        let pin = format!("ghcr.io/example/agent@sha256:{}", "a".repeat(64));
+        assert!(setup(&pin).status.success());
+        let calls = fs::read_to_string(f.root.path().join("calls")).unwrap();
+        assert!(calls.contains(&format!("pull {image}")));
+        assert!(calls.contains(&format!("pull {pin}")));
+        assert!(!calls.contains("create --name"));
+        assert_eq!(fs::read(&f.config).unwrap(), original);
+        assert!(!f.state().exists());
+        let second = f.root.path().join("second-project");
+        fs::create_dir(&second).unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_dungeon"))
+            .args(["init", "--yes", "--agent", "claude"])
+            .env_clear()
+            .env("HOME", &f.home)
+            .env("PATH", &f.bin)
+            .current_dir(&second)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        assert!(String::from_utf8_lossy(&out.stdout).contains(&pin));
+        assert_eq!(fs::read(&f.config).unwrap(), original);
+        let before = fs::read(&preferences).unwrap();
+        fs::write(f.root.path().join("fail-pull"), "").unwrap();
+        assert!(!setup(image).status.success());
+        assert_eq!(fs::read(&preferences).unwrap(), before);
+    }
+}
+
+#[test]
+fn setup_dry_run_and_missing_approval_do_not_pull_or_save() {
+    let f = Fixture::new("docker");
+    let endpoint = format!("unix://{}", f.root.path().join("engine.sock").display());
+    let args = [
+        "setup",
+        "--runtime",
+        "container",
+        "--engine",
+        "docker",
+        "--endpoint",
+        &endpoint,
+    ];
+    assert!(!f.run(&args).status.success());
+    let mut args = args.to_vec();
+    args.push("--dry-run");
+    let out = f.run(&args);
+    assert!(out.status.success(), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Would pull image:"));
+    assert!(
+        !f.home
+            .join(".config/dungeon/container-defaults.json")
+            .exists()
+    );
+    let calls = fs::read_to_string(f.root.path().join("calls")).unwrap();
+    assert!(!calls.contains("pull "));
+    assert!(!calls.contains("image inspect"));
+}
+
+#[test]
+fn setup_preserves_invalid_defaults_and_never_repairs_an_explicit_endpoint() {
+    let f = Fixture::new("docker");
+    let path = f.home.join(".config/dungeon/container-defaults.json");
+    fs::write(&path, b"{bad private defaults").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let endpoint = format!("unix://{}", f.root.path().join("engine.sock").display());
+    let args = [
+        "setup",
+        "--yes",
+        "--runtime",
+        "container",
+        "--engine",
+        "docker",
+        "--endpoint",
+        &endpoint,
+    ];
+    assert!(!f.run(&args).status.success());
+    assert_eq!(fs::read(&path).unwrap(), b"{bad private defaults");
+    fs::remove_file(&path).unwrap();
+    fs::remove_file(f.root.path().join("engine.sock")).unwrap();
+    assert!(!f.run(&args).status.success());
+    assert!(!path.exists());
+    assert!(!f.root.path().join("calls").exists());
 }
 
 #[test]

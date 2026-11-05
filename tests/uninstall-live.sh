@@ -45,7 +45,7 @@ printf 'preserve live host project\n' > "$fixture/live-project/host.txt"
 printf 'preserve copy host project\n' > "$fixture/copy-project/host.txt"
 sha256sum "$fixture/live-project/host.txt" "$fixture/copy-project/host.txt" > "$fixture/host-before.sha256"
 cd "$fixture/live-project"
-"$dungeon" setup
+"$dungeon" setup --yes --runtime openshell --image "$image"
 "$dungeon" init --yes --agent opencode --harness-config disabled --project-transfer live --image "$image"
 "$dungeon" up
 "$dungeon" exec -- /bin/sh -c 'printf "guest state\n" > /sandbox/uninstall-marker'

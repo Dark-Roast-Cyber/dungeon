@@ -77,6 +77,7 @@ pub(crate) enum Engine {
     Docker,
 }
 
+#[cfg(target_os = "linux")]
 impl Engine {
     pub(crate) fn name(self) -> &'static str {
         match self {
@@ -551,8 +552,9 @@ fn is_home(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn valid_image(image: &str) -> bool {
+pub(crate) fn valid_image(image: &str) -> bool {
     if image.is_empty()
+        || image.len() > 2048
         || !image
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"._:/@-".contains(&byte))

@@ -282,24 +282,105 @@ fn select(options: &ContainerOptions, project: &Path) -> Result<(Native, Vec<Val
     })
 }
 
-pub(crate) fn discover(options: &ContainerOptions, json_output: bool) -> Result<i32> {
-    let project = std::env::current_dir()?.canonicalize()?;
-    let (native, engines) = select(options, &project)?;
-    if json_output {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(
-                &json!({"runtime":"container","selected":native.binding,"engines":engines,"read_only":true,"policy_enforcement":false})
-            )?
-        );
-    } else {
-        println!(
-            "Container: {} ({})",
-            native.binding.engine.name(),
-            native.binding.endpoint
-        );
+pub(crate) fn prepare_service(
+    options: &ContainerOptions,
+    dry_run: bool,
+) -> Result<ContainerOptions> {
+    match resolved_options(options) {
+        Ok(selected) => return Ok(selected),
+        Err(error) if options.engine == Engine::Docker || options.endpoint.is_some() => {
+            return Err(error);
+        }
+        Err(_) => {}
     }
-    Ok(0)
+    let project = std::env::current_dir()?.canonicalize()?;
+    let env = engine_environment(&project)?;
+    if find_executable("podman", env.get(OsStr::new("PATH"))).is_none() {
+        return Err(Error::new(
+            "install rootless Podman or Docker CE, then retry setup",
+        ));
+    }
+    let endpoint = endpoints(Engine::Podman, None).remove(0);
+    let socket = Path::new(endpoint.strip_prefix("unix://").unwrap());
+    match fs::symlink_metadata(socket) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        _ => {
+            return Err(Error::new(
+                "existing Podman socket is unusable or unreadable; inspect it explicitly. Setup does not change permissions or replace sockets",
+            ));
+        }
+    }
+    activate_podman_socket(env, dry_run)?;
+    let selected = ContainerOptions {
+        engine: Engine::Podman,
+        endpoint: Some(endpoint),
+    };
+    if dry_run {
+        Ok(selected)
+    } else {
+        resolved_options(&selected).map_err(|_| Error::new("Podman service is still unavailable after socket activation; activation may have changed user service state. Inspect it explicitly"))
+    }
+}
+
+fn activate_podman_socket(mut env: HashMap<OsString, OsString>, dry_run: bool) -> Result<()> {
+    let uid = unsafe { libc::geteuid() };
+    if uid == 0 {
+        return Err(Error::new(
+            "activate rootless Podman as your normal user, not with sudo",
+        ));
+    }
+    println!(
+        "{}systemctl --user enable --now podman.socket",
+        if dry_run { "Would run: " } else { "Running: " }
+    );
+    if dry_run {
+        return Ok(());
+    }
+    let binary = find_executable("systemctl", env.get(OsStr::new("PATH"))).ok_or_else(|| {
+        Error::new("systemctl is unavailable; start the rootless Podman API service yourself")
+    })?;
+    env.insert("XDG_RUNTIME_DIR".into(), format!("/run/user/{uid}").into());
+    if !query(
+        &binary,
+        &env,
+        &["--user", "enable", "--now", "podman.socket"],
+        Duration::from_secs(30),
+    )
+    .is_some_and(|reply| reply.code == 0)
+    {
+        return Err(Error::new(
+            "Podman socket activation failed or timed out; user service state may have changed. Inspect systemctl --user status podman.socket; no permission changes attempted",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn prepare_image(options: &ContainerOptions, image: &str, dry_run: bool) -> Result<()> {
+    if !crate::config::valid_image(image) {
+        return Err(Error::new("invalid OCI image reference"));
+    }
+    if dry_run {
+        println!(
+            "Would {} image: {image}",
+            if image.starts_with("localhost/") {
+                "verify local"
+            } else {
+                "pull"
+            }
+        );
+        return Ok(());
+    }
+    let (native, _) = select(options, &std::env::current_dir()?.canonicalize()?)?;
+    if !image.starts_with("localhost/") {
+        println!("Pulling image: {image}");
+        native.query(&strings(&["pull", image]), 300)?;
+    }
+    native
+        .query(&strings(&["image", "inspect", image]), 5)
+        .map_err(|_| {
+            Error::new("selected image unavailable; build local images explicitly before setup")
+        })?;
+    Ok(())
 }
 
 pub(crate) fn diagnostic(config: Option<&Config>) -> Result<Value> {
@@ -313,7 +394,7 @@ pub(crate) fn diagnostic(config: Option<&Config>) -> Result<Value> {
     }
     let options = config
         .and_then(|c| c.values.container.clone())
-        .or(crate::runtime::preferences()?.container)
+        .or(crate::runtime::preferences(config.map(|c| c.values.project.as_path()))?.container)
         .unwrap_or_default();
     let project = config
         .map(|c| c.values.project.clone())
@@ -359,7 +440,7 @@ impl RemovalInventory {
 pub(crate) fn removal_inventory(configs: &[Config]) -> Result<RemovalInventory> {
     let mut services = std::collections::BTreeMap::<String, (Native, Vec<String>)>::new();
     if configs.is_empty()
-        && let Some(options) = crate::runtime::preferences()?.container
+        && let Some(options) = crate::runtime::preferences(None)?.container
     {
         let (native, _) = select(&options, &std::env::current_dir()?.canonicalize()?)?;
         services.insert("defaults".into(), (native, vec![]));
@@ -988,5 +1069,45 @@ impl<'a> Runtime<'a> {
     pub(crate) fn run_agent(&self, argv: &[String], tty: bool) -> Result<i32> {
         self.start()?;
         self.execute(argv, tty, GUEST_PROJECT)
+    }
+}
+
+#[cfg(test)]
+mod setup_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn socket_activation_uses_only_the_fixed_user_command_and_dry_run_never_executes() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("activation");
+        let binary = root.path().join("systemctl");
+        fs::write(
+            &binary,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" \"$XDG_RUNTIME_DIR\" > '{}'\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
+        let env = HashMap::from([("PATH".into(), root.path().as_os_str().to_owned())]);
+        let dry = activate_podman_socket(env.clone(), true);
+        assert!(!marker.exists());
+        if unsafe { libc::geteuid() } == 0 {
+            assert!(dry.is_err());
+            assert!(activate_podman_socket(env, false).is_err());
+            assert!(!marker.exists());
+        } else {
+            dry.unwrap();
+            activate_podman_socket(env, false).unwrap();
+            assert_eq!(
+                fs::read_to_string(marker).unwrap(),
+                format!(
+                    "--user enable --now podman.socket\n/run/user/{}\n",
+                    unsafe { libc::geteuid() }
+                )
+            );
+        }
     }
 }

@@ -91,6 +91,24 @@ not a lock against concurrent host path replacement.
 
 ## Local setup
 
+Interactive `setup` requires review/confirmation; unattended mutations require
+`--yes`. Approved setup may enable/start only the user's `podman.socket`, pull
+selected registry images, provision the owned gateway and atomically replace
+defaults for **new** projects. It never installs packages, uses sudo, changes
+permissions or restarts/replaces an existing gateway or project guest. Failed
+setup may leave an activated socket or downloaded images without saved defaults.
+`doctor` and `setup --dry-run` do not activate services or pull images. A fresh
+OpenShell dry-run still requires established default engine storage and a usable
+socket; missing prerequisites are reported, not initialized for a preview.
+
+Both runtimes now default to the upstream base's mutable `latest` tag. Setup
+refreshes the local cache, not running/stopped guests; ordinary creation pulls
+missing images but may reuse a cached tag. A version tag is a convenient selection,
+not immutable content: use an explicit digest for reproducibility. Dungeon's local
+reviewed recipe and historical native results do not attest upstream `latest` or
+guarantee its tool versions/security updates. The OpenShell CLI/gateway remain
+compatibility-pinned independently.
+
 Fresh `setup` enables trusted local gateway driver bind capability by default;
 `setup --copy-only` retains a gateway without bind capability. Setup grants no project mount authority,
 changes no policy and converts no private project configuration. The driver maps

@@ -12,6 +12,8 @@ use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+pub(crate) const GATEWAY_IMAGE: &str = "ghcr.io/nvidia/openshell/gateway@sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645";
+
 #[path = "doctor.rs"]
 mod diagnostics;
 pub(crate) use diagnostics::run as doctor;
@@ -41,13 +43,6 @@ pub(crate) use local_setup::uninstall;
 pub(crate) fn uninstall(_bin_dir: Option<PathBuf>, _dry_run: bool, _yes: bool) -> Result<i32> {
     Err(Error::new(
         "dungeon uninstall supports Linux/rootless Podman only",
-    ))
-}
-
-#[cfg(not(target_os = "linux"))]
-pub(crate) fn setup(_enable_live: bool, _dry_run: bool) -> Result<i32> {
-    Err(Error::new(
-        "dungeon setup supports Linux only (rootless Podman); no MicroVM fallback",
     ))
 }
 

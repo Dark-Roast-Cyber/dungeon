@@ -2,6 +2,59 @@
 
 CI checks formatting, Clippy, locked Rust tests, release compilation, CLI version execution, npm launcher behavior, distribution version synchronization, native archive creation, and full npm package assembly on explicit supported runners.
 
+## Native CI build correction (2026-11-05, source checkout)
+
+[Run 42074857521](https://github.com/Dark-Roast-Cyber/dungeon/actions/runs/42074857521)
+failed both macOS builds and Windows compilation because `Engine::name` was
+compiled without its Linux-only callers and the toolchain action denies build
+warnings. Linux quality/build and npm passed; dependent npm assembly was skipped.
+The helper now compiles only on Linux. Warning gates and the native build matrix
+remain unchanged; that matrix is the cross-platform regression check.
+
+The combined pending setup/image source passed formatting, warnings-denied
+all-target Clippy, **229 locked Rust tests** (142 unit + 87 integration), all
+**26 Node tests on Node 24.22.2**, and warnings-denied locked Linux release
+compilation. Only Linux target libraries are installed locally: corrected
+macOS/Windows builds and hosted npm assembly remain pending, not validated by
+these local checks. No runtime services, images, dependencies or publication
+were changed. Logs and the pre-fix working-tree diff:
+`/tmp/opencode/dungeon-ci-42074857521`.
+
+## Interactive setup and shared image defaults (2026-11-05, source checkout)
+
+Both human runtime paths now use the saved setup image, otherwise upstream
+`ghcr.io/nvidia/openshell-community/sandboxes/base:latest`. Setup reviews the
+runtime/image and requires confirmation or `--yes` before user-socket activation,
+image pulls, owned gateway creation and saved-default replacement. Version tags
+and immutable digests are explicit overrides. OpenShell's CLI/gateway compatibility
+pin and existing project bindings remain unchanged; setup refreshes the image
+cache, not existing guests.
+
+The combined source passed formatting, warnings-denied all-target Clippy,
+**229 locked Rust tests** (142 unit + 87 integration), **26 Node tests**, shell
+syntax checking and locked release compilation. Release setup help exposes the
+new flags. Linux release SHA-256:
+`aadeaed312d20bbc814aa16f12b577043ecde5ebfbe7c3924b1f2ed3e1d07799`.
+Rust fixtures used checkout-local `TMPDIR`; Node was **22.22.2**, not the Node24
+release gate. No package versions or dependencies changed.
+
+Synthetic tests cover wizard selection/case-preserving image input/cancellation,
+all runtime/harness image defaults and pins, fixed user-service activation,
+dry-run/noninteractive approval, registry pulls on both engine adapters, failed
+pull preservation, legacy and updated defaults, selected-project/symlink-alias
+exclusions, compatibility refusal before mutation, and unchanged existing bindings.
+Full-suite checks caught an obsolete uncached-image dry-run assumption; fresh
+previews now permit missing images while still rejecting malformed cached image
+metadata. That correction retains the sanitized native-error regression.
+
+**No live engine pull, socket activation or fresh gateway setup was run for this
+change.** The new service/image preparation paths still need disposable native
+acceptance. Historical gates for pinned images and the optional local recipe do
+not validate mutable upstream `latest`, its current tool versions, authentication,
+or containment. No installed CLI, host service, existing gateway/guest or image
+tag was changed; nothing was published. Local logs:
+`/tmp/opencode/dungeon-setup-{test,clippy,fmt,node,build}.log`.
+
 ## Further adoption and client checks (2026-11-05, source checkout)
 
 - The same release binary passed a disposable user-local install, idempotent

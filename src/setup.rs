@@ -23,8 +23,7 @@ pub(crate) use removal::run as uninstall;
 pub(super) const GATEWAY: &str = "dungeon-local";
 pub(super) const CONTAINER: &str = "openshell-gateway-dungeon-local";
 const ENDPOINT: &str = "https://127.0.0.1:17670";
-pub(super) const IMAGE: &str = "ghcr.io/nvidia/openshell/gateway@sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645";
-pub(super) const AGENT_IMAGE: &str = "localhost/dungeon-agent:0.0.3-dev";
+pub(super) use super::GATEWAY_IMAGE as IMAGE;
 pub(super) const LABEL: &str = "agentarchaeology.ai/dungeon-gateway";
 pub(super) const CONFIG: &str = "[openshell]\nversion = 1\n\n[openshell.drivers.podman]\nnetwork_name = \"dungeon-local\"\ngrpc_endpoint = \"https://openshell-gateway-dungeon-local:8080\"\nimage_pull_policy = \"missing\"\nenable_bind_mounts = false\n";
 pub(super) const LIVE_CONFIG: &str = "[openshell]\nversion = 1\n\n[openshell.drivers.podman]\nnetwork_name = \"dungeon-local\"\ngrpc_endpoint = \"https://openshell-gateway-dungeon-local:8080\"\nimage_pull_policy = \"missing\"\nenable_bind_mounts = true\nuserns = \"keep-id:uid=998,gid=998\"\n";
@@ -1047,6 +1046,27 @@ pub(crate) fn run(enable_live: bool, dry_run: bool) -> Result<i32> {
     )
 }
 
+pub(crate) fn prepare(image: &str, dry_run: bool) -> Result<()> {
+    let cwd = env::current_dir()?.canonicalize()?;
+    let home = env::var_os("HOME").ok_or_else(|| Error::new("HOME required"))?;
+    let project = (cwd != PathBuf::from(home).canonicalize()?).then_some(cwd.as_path());
+    let env = setup_environment(project)?;
+    let openshell = executable("openshell", &env, project)?;
+    let version = query(&openshell, &env, &["--version"], Duration::from_secs(5))
+        .filter(|reply| reply.code == 0)
+        .ok_or_else(|| Error::new("OpenShell version check failed"))?;
+    require_version(&version.text)?;
+    let options = crate::container::prepare_service(
+        &crate::config::ContainerOptions {
+            engine: crate::config::Engine::Podman,
+            endpoint: None,
+        },
+        dry_run,
+    )?;
+    crate::container::prepare_image(&options, IMAGE, dry_run)?;
+    crate::container::prepare_image(&options, image, dry_run)
+}
+
 fn present(path: &Path) -> Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
@@ -1132,21 +1152,8 @@ fn configure_with_output(
     dry_run: bool,
     output: &crate::output::Output,
 ) -> Result<i32> {
-    let image = native_json(
-        &tools.podman(
-            &["image", "inspect", IMAGE, "--format", "{{json .}}"],
-            "pinned gateway image unavailable; pull the documented immutable image explicitly",
-        )?,
-        "invalid gateway image inspection output",
-    )?;
-    if image["Id"]
-        .as_str()
-        .is_none_or(|id| id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()))
-        || keep_id_maps(&tools.mappings).is_none()
-    {
-        return Err(Error::new(
-            "pinned image or rootless identity mapping is unrecognized",
-        ));
+    if keep_id_maps(&tools.mappings).is_none() {
+        return Err(Error::new("rootless identity mapping is unrecognized"));
     }
     let registry = config_root.join("openshell/gateways");
     if !safe_path(state, &[]) || !safe_path(&registry, &[]) {
@@ -1157,6 +1164,24 @@ fn configure_with_output(
         compatible_registration(record)?;
     }
     let existing = exists(tools, "container", CONTAINER)?;
+    let image = if existing || !dry_run || exists(tools, "image", IMAGE)? {
+        let image = native_json(
+            &tools.podman(
+                &["image", "inspect", IMAGE, "--format", "{{json .}}"],
+                "pinned gateway image unavailable; run dungeon setup to prepare it",
+            )?,
+            "invalid gateway image inspection output",
+        )?;
+        if image["Id"]
+            .as_str()
+            .is_none_or(|id| id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            return Err(Error::new("pinned gateway image identity is unrecognized"));
+        }
+        image
+    } else {
+        Value::Null
+    };
     if registration.is_some() != existing {
         return Err(Error::new(
             "incomplete Dungeon gateway state: OpenShell registration and Podman container disagree; inspect and resolve explicitly",
@@ -1471,6 +1496,7 @@ mod tests {
             fs::write(&script, r#"#!/bin/sh
 set -eu
 case "$1 $2" in
+  'image exists') test -f "$FIXTURE/image.json" ;;
   'image inspect') cat "$FIXTURE/image.json" ;;
   'container exists') test -f "$FIXTURE/container.json" ;;
   'container inspect') if [ "$#" -gt 3 ]; then printf '9223372036854775807\n'; else cat "$FIXTURE/container.json"; fi ;;
@@ -1794,6 +1820,16 @@ esac
             "invalid gateway image inspection output"
         );
         assert!(!f.root.path().join("mutations").exists());
+    }
+
+    #[test]
+    fn fresh_dry_run_accepts_an_uncached_gateway_image_without_mutating() {
+        let f = Fixture::new();
+        fs::remove_file(f.root.path().join("image.json")).unwrap();
+        assert_eq!(f.run(true, true).unwrap(), 0);
+        assert!(!f.root.path().join("mutations").exists());
+        assert!(!f.state.exists());
+        assert!(!f.state.parent().unwrap().join("setup.lock").exists());
     }
 
     #[test]

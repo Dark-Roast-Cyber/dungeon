@@ -16,7 +16,7 @@ use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const DEFAULT_IMAGE: &str = "localhost/dungeon-agent:0.0.3-opencode-2.1.2";
+const REVIEWED_IMAGE: &str = "localhost/dungeon-agent:0.0.3-opencode-2.1.2";
 const OPENCODE_TAGS: &str = "https://registry.npmjs.org/-/package/@opencode%2Fcli/dist-tags";
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -31,7 +31,7 @@ enum AuthAgent {
     name = "dungeon",
     version,
     about = "Manage project containers and optional OpenShell environments",
-    after_help = "Quick start (with a usable container service or configured OpenShell):\n  dungeon init                Choose a harness and approve this project's scope\n  dungeon                     Launch it; later launches reuse the project choice\n  dungeon run -- --help        Pass native flags to the selected harness\n  dungeon exec -- cargo test   Run an image-provided tool (after up)\n  dungeon down                Stop, preserving guest state\n\nHarnesses: OpenCode, Claude Code or Codex; no assumed choice.\nUse dungeon COMMAND --help for options; dungeon config --path for your configuration.\nAutomation: dungeon init --yes --agent AGENT; dungeon machine --help",
+    after_help = "Quick start:\n  dungeon setup               Choose a runtime/image and approve local preparation\n  dungeon init                Choose a harness and approve this project's scope\n  dungeon                     Launch it; later launches reuse the project choice\n  dungeon run -- --help        Pass native flags to the selected harness\n  dungeon exec -- cargo test   Run an image-provided tool (after up)\n  dungeon down                Stop, preserving guest state\n\nHarnesses: OpenCode, Claude Code or Codex; no assumed choice.\nUse dungeon COMMAND --help for options; dungeon config --path for your configuration.\nAutomation: dungeon setup --yes --runtime container; dungeon init --yes --agent AGENT; dungeon machine --help",
     subcommand_precedence_over_arg = true
 )]
 struct Cli {
@@ -67,7 +67,7 @@ enum Commands {
         #[arg(long)]
         bin_dir: Option<PathBuf>,
     },
-    /// Discover a container service, or set up the optional OpenShell gateway.
+    /// Choose a runtime and image; prepare the local service and save defaults.
     Setup {
         #[arg(long, value_enum, default_value = "auto")]
         runtime: RuntimeChoice,
@@ -75,6 +75,9 @@ enum Commands {
         engine: Engine,
         #[arg(long)]
         endpoint: Option<String>,
+        /// Default image for new projects; accepts a registry tag or immutable digest.
+        #[arg(long)]
+        image: Option<String>,
         /// Enable project bind capability on a fresh gateway (the default); kept for explicit scripts.
         #[arg(long, conflicts_with = "copy_only")]
         enable_live: bool,
@@ -84,6 +87,9 @@ enum Commands {
         /// Inspect prerequisites and print the capability diff without creating state.
         #[arg(long)]
         dry_run: bool,
+        /// Approve socket activation, image pulls, gateway setup and saved defaults.
+        #[arg(long, conflicts_with = "dry_run")]
+        yes: bool,
     },
     /// Read-only prerequisite and capability diagnostics; never initializes an environment.
     Doctor {
@@ -126,7 +132,7 @@ enum Commands {
         workspace: Option<String>,
         #[arg(
             long,
-            help = "sandbox image (container: pinned public base; OpenShell: reviewed local image, build first)"
+            help = "sandbox image tag or digest (default: setup selection, otherwise upstream base:latest)"
         )]
         image: Option<String>,
         #[arg(
@@ -355,40 +361,27 @@ fn dispatch(cli: Cli) -> Result<i32> {
             runtime,
             engine,
             endpoint,
+            image,
             enable_live,
             copy_only,
             dry_run,
+            yes,
         }) => {
-            if project.is_some() {
+            if project.is_some() || config.is_some() {
                 return Err(Error::new(
-                    "PROJECT is only accepted for direct launch; setup has no project binding",
+                    "setup accepts no PROJECT or --config; it saves defaults for new projects",
                 ));
             }
-            let project = env::current_dir()?.canonicalize()?;
-            let plain = !matches!(runtime, RuntimeChoice::Openshell)
-                && (engine != Engine::Auto
-                    || endpoint.is_some()
-                    || crate::runtime::choose(runtime, &project)?);
-            if plain {
-                if copy_only || enable_live {
-                    return Err(Error::new(
-                        "gateway capability flags require --runtime openshell",
-                    ));
-                }
-                let options = crate::runtime::options(engine, endpoint);
-                crate::runtime::discover(&options, false)?;
-                if !dry_run {
-                    crate::runtime::save_preferences(&options)?;
-                }
-                Ok(0)
-            } else {
-                if engine == Engine::Docker || endpoint.is_some() {
-                    return Err(Error::new(
-                        "managed OpenShell gateway setup currently requires rootless Podman; use --runtime container for Docker CE",
-                    ));
-                }
-                crate::openshell::setup(enable_live || !copy_only, dry_run)
-            }
+            setup(
+                runtime,
+                engine,
+                endpoint,
+                image,
+                enable_live,
+                copy_only,
+                dry_run,
+                yes,
+            )
         }
         Some(Commands::Init {
             runtime,
@@ -552,6 +545,181 @@ fn select_agent(agent: Option<Agent>) -> Result<Agent> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn setup(
+    mut runtime: RuntimeChoice,
+    engine: Engine,
+    endpoint: Option<String>,
+    image: Option<String>,
+    enable_live: bool,
+    copy_only: bool,
+    dry_run: bool,
+    yes: bool,
+) -> Result<i32> {
+    let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
+    if !interactive && !yes && !dry_run {
+        return Err(Error::new(
+            "setup requires a terminal or explicit --yes; use --dry-run for a read-only preview",
+        ));
+    }
+    let preferences = crate::runtime::preferences(None)?;
+    if runtime == RuntimeChoice::Auto {
+        if enable_live || copy_only {
+            runtime = RuntimeChoice::Openshell;
+        } else if engine != Engine::Auto || endpoint.is_some() {
+            runtime = RuntimeChoice::Container;
+        } else if interactive && !yes && !dry_run {
+            println!(
+                "Choose a runtime:\n  1. Plain containers (Podman or Docker; no OpenShell policy)\n  2. OpenShell (policy, copy/export and remote clients; rootless Podman)"
+            );
+            let default = preferences.runtime.unwrap_or(RuntimeChoice::Container);
+            loop {
+                let answer = setup_answer(&format!(
+                    "Runtime [container/openshell; default: {}]: ",
+                    if default == RuntimeChoice::Openshell {
+                        "openshell"
+                    } else {
+                        "container"
+                    }
+                ))?;
+                runtime = match answer.to_ascii_lowercase().as_str() {
+                    "" => default,
+                    "1" | "container" => RuntimeChoice::Container,
+                    "2" | "openshell" => RuntimeChoice::Openshell,
+                    _ => {
+                        println!("Enter 1 or 2 (container or openshell).");
+                        continue;
+                    }
+                };
+                break;
+            }
+        }
+    }
+    let project = env::current_dir()?.canonicalize()?;
+    let plain = crate::runtime::choose(
+        if runtime == RuntimeChoice::Auto {
+            preferences.runtime_choice()
+        } else {
+            runtime
+        },
+        &project,
+    )?;
+    if plain && (enable_live || copy_only) {
+        return Err(Error::new(
+            "gateway capability flags require --runtime openshell",
+        ));
+    }
+    if !plain && (engine == Engine::Docker || endpoint.is_some()) {
+        return Err(Error::new(
+            "managed OpenShell gateway setup requires rootless Podman; use --runtime container for Docker CE",
+        ));
+    }
+    if engine == Engine::Auto && endpoint.is_some() {
+        return Err(Error::new("--endpoint requires --engine podman or docker"));
+    }
+    let options = if engine == Engine::Auto && endpoint.is_none() {
+        preferences.container.unwrap_or_default()
+    } else {
+        ContainerOptions { engine, endpoint }
+    };
+    let default_image = preferences
+        .image
+        .unwrap_or_else(|| crate::runtime::DEFAULT_IMAGE.into());
+    let image = match image {
+        Some(image) => image,
+        None if interactive && !yes && !dry_run => {
+            println!("Use upstream latest, or enter a version tag / digest to pin the image.");
+            let answer = setup_answer(&format!("Image [{default_image}]: "))?;
+            if answer.is_empty() {
+                default_image
+            } else {
+                answer
+            }
+        }
+        None => default_image,
+    };
+    if !crate::config::valid_image(&image) {
+        return Err(Error::new(
+            "use a registry-qualified OCI image tag or digest",
+        ));
+    }
+    println!(
+        "{}",
+        crate::config::review_json(&json!({
+            "runtime": if plain { "container" } else { "openshell" },
+            "container": if plain { Some(&options) } else { None },
+            "image": image,
+            "gateway_image": if plain { None } else { Some(crate::openshell::GATEWAY_IMAGE) },
+            "defaults": binding::preferences_path()?,
+            "dry_run": dry_run,
+        }))?
+    );
+    println!(
+        "Setup may enable/start the user Podman socket, pull the selected image, {}and save defaults for NEW projects. No package installation, sudo, permission changes, project mounts or existing guest replacement.",
+        if plain {
+            ""
+        } else {
+            "pull the compatible pinned gateway image, create/verify dungeon-local, "
+        }
+    );
+    if !plain {
+        println!(
+            "OpenShell {OPEN_SHELL_VERSION} and rootless Podman must already be installed. Existing gateways are never restarted or overwritten."
+        );
+    } else {
+        println!(
+            "Auto discovery prefers usable Podman over Docker CE. Docker daemon access is host-root-equivalent; plain containers do not enforce OpenShell policy."
+        );
+    }
+    if !yes && !dry_run && !confirm("Apply this setup?")? {
+        return Err(Error::new("setup cancelled; no changes made"));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let container = if plain {
+            let options = crate::container::prepare_service(&options, dry_run)?;
+            crate::container::prepare_image(&options, &image, dry_run)?;
+            Some(options)
+        } else {
+            if dry_run {
+                crate::openshell::setup(enable_live || !copy_only, true)?;
+                crate::openshell::local_setup::prepare(&image, true)?;
+            } else {
+                crate::openshell::local_setup::prepare(&image, false)?;
+                crate::openshell::setup(enable_live || !copy_only, false)?;
+            }
+            None
+        };
+        if !dry_run {
+            crate::runtime::save_preferences(&crate::runtime::Preferences {
+                runtime: Some(if plain {
+                    RuntimeChoice::Container
+                } else {
+                    RuntimeChoice::Openshell
+                }),
+                container,
+                image: Some(image),
+            })?;
+            println!(
+                "Setup complete. Existing project bindings are unchanged. Next: cd /path/to/project && dungeon init"
+            );
+        }
+        Ok(0)
+    }
+    #[cfg(not(target_os = "linux"))]
+    Err(Error::new("local setup currently requires Linux"))
+}
+
+fn setup_answer(prompt: &str) -> Result<String> {
+    print!("{prompt}");
+    io::stdout().flush()?;
+    let mut answer = String::new();
+    if io::stdin().read_line(&mut answer)? == 0 {
+        return Err(Error::new("setup cancelled; no changes made"));
+    }
+    Ok(answer.trim().to_owned())
+}
+
 fn run_selection(arguments: &[String]) -> Result<(Option<Agent>, &[String])> {
     let Some(first) = arguments.first() else {
         return Ok((None, arguments));
@@ -585,9 +753,8 @@ fn create_project_binding(project: &Path, agent: Agent) -> Result<Config> {
 }
 
 fn environment_defaults(project: PathBuf, agent: Agent) -> Result<ConfigDoc> {
-    let preferences = crate::runtime::preferences()?;
-    let plain =
-        preferences.container.is_some() || crate::runtime::choose(RuntimeChoice::Auto, &project)?;
+    let preferences = crate::runtime::preferences(Some(&project))?;
+    let plain = crate::runtime::choose(preferences.runtime_choice(), &project)?;
     Ok(ConfigDoc {
         container: if plain {
             Some(preferences.container.unwrap_or_default())
@@ -600,11 +767,9 @@ fn environment_defaults(project: PathBuf, agent: Agent) -> Result<ConfigDoc> {
         workspace: "default".into(),
         project,
         project_transfer: ProjectTransfer::Live,
-        image: if plain {
-            crate::runtime::DEFAULT_CONTAINER_IMAGE.into()
-        } else {
-            DEFAULT_IMAGE.into()
-        },
+        image: preferences
+            .image
+            .unwrap_or_else(|| crate::runtime::DEFAULT_IMAGE.into()),
         agent,
         providers: vec![],
         imports: vec![],
@@ -960,12 +1125,13 @@ fn versions(check: bool, config: Option<&Path>) -> Result<i32> {
         serde_json::to_string_pretty(&json!({
             "host_opencode": host,
             "reviewed_guest_opencode": reviewed,
-            "reviewed_local_image": DEFAULT_IMAGE,
-            "default_container_image": crate::runtime::DEFAULT_CONTAINER_IMAGE,
+            "reviewed_local_image": REVIEWED_IMAGE,
+            "default_image": crate::runtime::DEFAULT_IMAGE,
+            "default_container_image": crate::runtime::DEFAULT_IMAGE,
             "selected_project_image": selected,
             "registry_stable": latest,
             "reviewed_update_available": latest.as_deref().and_then(stable_version).is_some_and(|version| version > reviewed_number),
-            "selection": "new OpenShell bindings use the reviewed local image; plain containers use the pinned public base and may pull it on first use; existing bindings unchanged",
+            "selection": "both runtimes use setup's saved image, otherwise upstream base:latest; reviewed guest versions describe only the optional local recipe, not the upstream image; existing bindings unchanged",
         }))?
     );
     Ok(0)
@@ -1008,7 +1174,6 @@ fn initialize(
             ));
         }
         values.container = None;
-        values.image = DEFAULT_IMAGE.into();
     } else if matches!(runtime, RuntimeChoice::Container)
         || engine != Engine::Auto
         || endpoint.is_some()
@@ -1018,7 +1183,6 @@ fn initialize(
         } else {
             ContainerOptions { engine, endpoint }
         });
-        values.image = crate::runtime::DEFAULT_CONTAINER_IMAGE.into();
     }
     // Explicit OpenShell-only features select that contract during initialization.
     if matches!(runtime, RuntimeChoice::Auto)
@@ -1029,7 +1193,6 @@ fn initialize(
             || !providers.is_empty())
     {
         values.container = None;
-        values.image = DEFAULT_IMAGE.into();
     }
     if let Some(name) = name {
         values.name = name;
@@ -1064,7 +1227,7 @@ fn initialize(
         return Ok(0);
     }
     println!("No runtime was started. Review policy.json and named providers before first up.");
-    if config.values.image == DEFAULT_IMAGE {
+    if config.values.image == REVIEWED_IMAGE {
         println!(
             "Build the reviewed local image before first up (images/agent/README.md). `dungeon versions --check` shows upstream stable updates; nothing is downloaded automatically."
         );
@@ -1471,7 +1634,7 @@ mod tests {
         for invalid in ["2.1", "2.1.2-beta", "2.1.2.3", "2.1.02x", ""] {
             assert_eq!(stable_version(invalid), None);
         }
-        assert!(DEFAULT_IMAGE.ends_with("opencode-2.1.2"));
+        assert!(REVIEWED_IMAGE.ends_with("opencode-2.1.2"));
         assert!(Cli::try_parse_from(["dungeon", "versions", "--check"]).is_ok());
         assert!(Cli::try_parse_from(["dungeon", "versions", "--install"]).is_err());
     }
