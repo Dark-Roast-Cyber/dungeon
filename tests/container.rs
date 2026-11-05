@@ -54,7 +54,7 @@ case "$1 ${{2:-}}" in
   'unpause '*) /bin/cp running.json inspect.json;;
   'stop '*) /bin/cp stopped.json inspect.json;;
   'rm '*) if [ ! -e leave-container ]; then /bin/rm exists; fi; if [ -e fail-after-rm ]; then : > fail-ps; fi;;
-  'exec '*) for a in "$@"; do if [ "$a" = fail-fixture ]; then exit 23; fi; done;;
+  'exec '*) for a in "$@"; do if [ "$a" = fail-fixture ]; then exit 23; fi; if [ "$a" = output-fixture ]; then printf '{{"fixture":true}}\n'; printf 'guest diagnostic\n' >&2; exit 23; fi; done;;
   *) exit 9;;
 esac
 "##,
@@ -134,6 +134,25 @@ esac
     }
     fn state(&self) -> PathBuf {
         self.config.with_file_name("runtime.json")
+    }
+}
+
+#[test]
+fn headless_run_keeps_stdout_clean_on_first_launch_ready_and_resume() {
+    for engine in ["podman", "docker"] {
+        let f = Fixture::new(engine);
+        for phase in ["fresh", "ready", "stopped"] {
+            if phase == "stopped" {
+                f.ok(&["down"]);
+            }
+            let out = f.run(&["run", "codex", "--", "output-fixture"]);
+            assert_eq!(out.status.code(), Some(23), "{engine}/{phase}: {out:?}");
+            assert_eq!(out.stdout, b"{\"fixture\":true}\n", "{engine}/{phase}");
+            assert!(String::from_utf8_lossy(&out.stderr).contains("guest diagnostic"));
+            if phase == "fresh" {
+                assert!(String::from_utf8_lossy(&out.stderr).contains("Container ready"));
+            }
+        }
     }
 }
 

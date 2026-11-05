@@ -8,6 +8,11 @@
     "@openai/codex": "0.156.1"
   },
   "imageTools": {
+    "node": {
+      "version": "22.23.4",
+      "target": "linux-x64",
+      "sha256": "1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce"
+    },
     "neovim": {
       "version": "0.12.5",
       "sha256": "bce0f56eda1f1b1db6eee8f4133d7a38813ea07933837dd1777411ca384c6875"

@@ -1,6 +1,6 @@
 # Contributing
 
-Start with the [CLI build](README.md#1-build-the-cli) and
+Start with the [CLI installation](README.md#installation) and
 [development checks](README.md#development). For ordinary bugs or feedback,
 use the [issue tracker](https://github.com/Dark-Roast-Cyber/dungeon/issues) with
 versions, reproduction steps and sanitized results. Do not post credentials,

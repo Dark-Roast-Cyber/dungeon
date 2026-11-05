@@ -2,6 +2,163 @@
 
 CI checks formatting, Clippy, locked Rust tests, release compilation, CLI version execution, npm launcher behavior, distribution version synchronization, native archive creation, and full npm package assembly on explicit supported runners.
 
+## Further adoption and client checks (2026-11-05, source checkout)
+
+- The same release binary passed a disposable user-local install, idempotent
+  reinstall, different-binary refusal, explicit replacement and binary-only
+  uninstall preserving synthetic configuration/state/project files. The installer
+  invoked rustup's normal automatic bootstrap of the pinned toolchain; first-run
+  builds can therefore download that toolchain.
+- A locally assembled Linux archive extracted to the same binary hash and ran
+  version/help. Staged Linux npm platform/launcher tarballs also ran version/help.
+  Other-platform staging inputs were Linux stand-ins used only for assembly:
+  **they are not distributable platform binaries**. No registry or release was used.
+- All **22 Node tests** passed under official checksum-verified **Node24.22.2**,
+  closing the earlier local Node24 test gap, not the native cross-platform CI gate.
+- The actual installed host OpenCode2.2.5 was refused against guest2.1.2 as
+  expected. A private matching2.1.2 binary extracted from the reviewed image,
+  running with empty isolated HOME/XDG/cwd, passed native `dungeon attach`
+  prompt, real-PTY UI rendering and normal cleanup. A separate guest check found
+  zero remaining OpenCode servers. No host auth/config/database was accessed or
+  installed client replaced; no provider task was submitted through that UI.
+- Native owned SSH/Neovim rendered in a real PTY, accepted an edit after a resize,
+  saved exact bytes visible on the live host project, exited0 and restored the
+  host PTY settings. This is terminal-editor evidence, not VS Code or desktop support.
+
+Local artifacts: `/tmp/opencode/dungeon-real-world-20261105` and
+`/tmp/opencode/dungeon-real-world-20261105-packaging`. The subsequent gates below
+use the newly built security candidate; the earlier image/client checks above
+remain tied to the unchanged `local-test` image.
+
+### Node security candidate and real Claude workflow
+
+The recipe now hash-verifies official Node **22.23.4** and replaces the inherited
+executable at the guardian's exact `/usr/bin/node` path before installers run.
+Agent, Neovim, Rust and pnpm pins/lock are unchanged. Only a separate local tag was
+built: `localhost/dungeon-agent:node22.23.4-test-20261105`, image ID
+`a924b3b89980d097f222c213f3175fa0411ca42a25a4e28a7d31ae74fe44b2d6`.
+Existing tags were not replaced. Official archive/final-binary hashes, seven
+offline image regressions, immutable path/alias checks and full offline tool/layout
+checks passed. Lower layers and distro metadata retain the old package record;
+this is not a complete base-image audit. See [image inputs](../images/agent/README.md).
+
+On that candidate, the user manually completed Claude's guest-owned subscription
+login. Parent checks used the vendor's sanitized logged-in boolean and normal CLI
+results, never credential files or session databases. Actual provider checks passed:
+
+| Gate | Observation |
+| --- | --- |
+| Headless real request | Native JSON result contained the exact requested proof |
+| Edit/test | Native Read/Read/Edit/Bash events, only the intended implementation changed; agent test output and independent guest test passed; test hash unchanged |
+| Restart and session resume | Independently observed Stopped, then same sandbox ID and native session ID; recalled a conversation-only marker absent from the fresh prompt and implementation |
+| Active tool cancellation | Independently observed the real Claude Bash tool's long-running Node process; owned TERM returned143, no matching workload remained |
+| Fresh request after cancellation | Actual provider response and retained project test passed |
+
+These tasks used native permission handling and an exact test-command allowlist,
+not bypass-permissions flags. Each invocation requested `--max-budget-usd 1`, not
+an account-level spending control; reported costs are vendor estimates, not
+subscription balances. Resume usage can
+be session-cumulative and was not summed. Cancelled-request final usage is unknown.
+The first resume probe put its prompt after variadic `--tools`, so Claude consumed
+it as another option value and reported a deferred-marker error without JSON.
+Adding native `--` before the prompt fixed the probe; Dungeon's argv path was unchanged.
+
+Actual OpenShell owned execution/cancellation also passed on the patched runtime:
+expected exit23/streams, machine cleanup confirmed, primary transport verified,
+and independent guest workload absence. Extra raw-container guardian tests exited137
+on both the unchanged base and candidate and remain unexplained, not passed.
+Focused source review found no blockers and accepted the actual OpenShell evidence
+without treating it as an audit or explanation of that raw-container failure.
+
+The final combined source passed **218 Rust tests**, **26 Node tests on Node24.22.2**,
+formatting, warnings-denied all-target Clippy and locked release compilation.
+Final binary SHA-256:
+`84820f088cbd2fa477680014dd1fa10bc8f2729c3908749595563baf9766a3eb`.
+The authenticated synthetic sandbox was left **Stopped**, preserving guest login
+and sessions. All other host container IDs/states/start timestamps matched the
+pre-test inventory. No host credentials, installed binary or existing image tag
+was changed. Long-duration refresh, other harnesses' real-provider workflows and
+desktop integrations remain unproven; the user explicitly skipped browser Remote Control.
+
+### Docker CE follow-up
+
+A disposable Ubuntu **24.04.5** VM, kernel **6.8.0-147-generic**, Docker CE
+**29.9.3**, passed the expanded native container gate with the pinned public base.
+Setup/doctor, saved Docker defaults and refusal with the pinned service stopped
+also passed. It tested the preceding binary `7e2e7a75…1485a95a`; the subsequent
+change included image manifest metadata, not Docker workload behavior.
+
+Evidence limitations are retained: the successful gate record was copied from
+completed tool output after a local tee-wrapper error, and complete post-test
+Docker inventory was not captured. The VM shut down/reaped, its loopback SSH
+listener closed, and its writable disk, synthetic keys and cloud-init data were
+removed. No host engine/service was changed. Raw bounded records and failures:
+`/tmp/opencode/dungeon-real-world-20261105-docker`. This is one native Docker
+scenario, not other-platform support or a containment certification.
+
+## Headless adoption and connection checks (2026-11-05, source checkout)
+
+The changed source passed formatting, locked all-target Clippy with warnings
+denied, **218 locked Rust tests** (140 unit + 78 integration), **22 Node tests**,
+shell syntax checks and locked release compilation. Rust fixtures used
+`target/dungeon-test-tmp`; Node was **22.22.2**, not the Node24 release gate.
+Final Linux release SHA-256:
+`7e2e7a75adab2c2226b4b221e03706075db9d84d3b2858cd4a6473971485a95a`.
+
+Native checks used Linux **7.2.9-201.fc44.x86_64**, rootless Podman **5.8.7**,
+OpenShell **0.0.116**, synthetic projects and the unchanged local test image
+`3947cf4ee2026ad960f3b641656046439708827160527382417dda10581f9dbd`.
+That image contains OpenCode **2.1.2**, Claude Code **2.1.267** and Codex
+**0.156.1**. No host credentials/configuration or native agent databases were
+inputs; the existing gateway was used without reconfiguration.
+
+| Check on final release | Result |
+| --- | --- |
+| Plain Podman and OpenShell, all three harnesses | Version commands and native headless-mode help passed |
+| Both runtimes, non-TTY command transport | Literal multiword/metacharacter argv, finite binary stdin, separate output streams and exit23 passed |
+| Both runtimes, lifecycle | Same-ID stop/resume and retained guest marker passed; startup/resume did not contaminate workload stdout |
+| Both runtimes, actual OpenCode CLI | Headless JSON response from a loopback synthetic model passed; **not real-provider inference/authentication** |
+| OpenShell machine owned execution | Sequential JSONL, decoded stdout/stderr, workload exit23, confirmed cleanup and primary transport passed |
+| OpenShell forwarding | Guest-loopback HTTP proof reached host loopback; interrupt removed host listener; owned service shutdown left guest port closed |
+| OpenShell native owned SSH | Real-PTY command proof and exit23 passed |
+| OpenShell copy/export | Guest-only additions stayed off host until explicit export, then arrived with expected bytes |
+| Explicit cross-runtime doctor | Container diagnostics from an OpenShell binding passed without changing its binding |
+
+The expanded `tests/container-live.sh` also passed with the pinned public base:
+first/resumed harness stdout, stdin, argv, separate streams/exit23, project writes,
+read-only copied theme, state persistence and uninstall. Its harness versions were
+OpenCode1.2.18, Claude2.1.156 and Codex0.117.0, not the reviewed-image pins. This
+gate used preceding release SHA-256
+`7e7079fc690aa5b1656d6f7d05bd62eaab0aba8f6f3341b7e9e47919c496934a`;
+only cross-runtime diagnostic filtering changed afterward. The reviewed-image
+matrix above was rerun on the final release.
+
+Testing found two stdout defects: Dungeon creation messages and native OpenShell
+resume output. Both now use stderr; synthetic regressions cover fresh, Ready and
+Stopped launches, nonzero status, all harnesses and both native engine adapters.
+Doctor now honors explicit runtime selection while retaining selected-project
+exclusions. Review caught loss of that exclusion in an intermediate fix; the
+correction has both-direction explicit-config/unrelated-cwd regression coverage
+and focused independent rereview. Machine protocol and workload streams are unchanged.
+
+One SSH attempt failed after two fixture live bindings mounted the same project:
+the later private SELinux relabel denied the older sandbox access. UID/GID and
+terminal checks still matched. The same SSH command passed in the latest-label
+sandbox; concurrent live environments now explicitly require separate host
+checkouts in the adoption/security guidance. No relabel repair or policy weakening
+was used. An aggregate cleanup command timed out after deleting two fixtures;
+process inspection found no remaining host transport, the final fixture was
+independently observed Stopped and explicitly destroyed. All fixture containers
+were absent afterward, and the full pre-existing container inventory, states and
+start timestamps matched the baseline.
+
+Docker CE was unavailable (the host `docker` is a Podman compatibility CLI and its
+Docker socket was inaccessible). Real-provider login/inference/refresh, host UI
+attachment, vendor remote/desktop modes, GUI editors, other platforms and new
+containment claims remain unvalidated. No installed binary/image tag, existing
+binding, gateway, policy, release or publication was changed. Raw local evidence:
+`/tmp/opencode/dungeon-demo-20261105`.
+
 ## Optional plain containers (2026-10-27, source worktree)
 
 The subsequent recovery/drift changes passed formatting, warnings-denied all-target

@@ -78,8 +78,10 @@ not a change to other commands' configuration-loading contract.
 
 For plain bindings (or no binding), doctor checks local native service readiness
 and, when bound, recorded service/container identity and configuration. Its JSON
-adds `container` instead of `supported_openshell`. Use `doctor --runtime openshell`
-to request gateway diagnostics before initializing an OpenShell binding.
+adds `container` instead of `supported_openshell`. Explicit `--runtime container`
+or `--runtime openshell` requests that runtime's diagnostics, even when the current
+project uses the other runtime. In that case only machine prerequisites are
+queried, not the other runtime's sandbox; the binding is never changed.
 
 The OpenShell diagnostic runtime boundary is Linux, OpenShell **0.0.116** and
 rootless Podman. Other platforms report unsupported without invoking runtime

@@ -671,8 +671,8 @@ case "$1:$2" in
  sandbox:get) test -e "$HOME/phase" || exit 7; sed "s/\"phase\":\"Ready\"/\"phase\":\"$(cat "$HOME/phase")\"/" "$HOME/remote.json";;
  sandbox:upload|sandbox:download) exit 0;;
  sandbox:stop) echo Stopped > "$HOME/phase";;
- sandbox:start) echo Ready > "$HOME/phase";;
- sandbox:exec) while test "$1" != --; do shift; done; shift; printf 'guest-launch:%s\n' "$*";;
+  sandbox:start) echo Ready > "$HOME/phase"; echo 'Started sandbox';;
+  sandbox:exec) while test "$1" != --; do shift; done; shift; printf 'guest-launch:%s\n' "$*"; if test "${2:-}" = fail-fixture; then printf 'guest diagnostic\n' >&2; exit 23; fi;;
  *) exit 93;;
 esac
 "#).unwrap();
@@ -682,6 +682,31 @@ esac
                 command.env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
                 command
             };
+            let out = command()
+                .args(["run", agent, "--", "fail-fixture"])
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(23), "{out:?}");
+            assert_eq!(
+                out.stdout,
+                format!("guest-launch:{agent} fail-fixture\n").as_bytes()
+            );
+            assert!(String::from_utf8_lossy(&out.stderr).contains("Created"));
+            for stopped in [false, true] {
+                if stopped {
+                    assert!(command().arg("down").output().unwrap().status.success());
+                }
+                let out = command()
+                    .args(["run", agent, "--", "fail-fixture"])
+                    .output()
+                    .unwrap();
+                assert_eq!(out.status.code(), Some(23), "{out:?}");
+                assert_eq!(
+                    out.stdout,
+                    format!("guest-launch:{agent} fail-fixture\n").as_bytes()
+                );
+                assert!(String::from_utf8_lossy(&out.stderr).contains("guest diagnostic"));
+            }
             let text = Terminal::spawn(command(), &[]).finish(true);
             assert!(text.contains(&format!("guest-launch:{agent}")), "{text}");
             assert!(!text.contains("Choose this project's harness"));
@@ -746,7 +771,7 @@ esac
                     .lines()
                     .filter(|line| line.starts_with("sandbox start "))
                     .count(),
-                1
+                2
             );
             assert!(!calls.contains(" serve"));
         }

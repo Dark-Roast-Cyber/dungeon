@@ -4,7 +4,7 @@ The Rust `dungeon` binary is the only implementation. Every distribution path mu
 
 ## Current availability
 
-Rust 0.0.2 on main is source-only; follow the [source build](../README.md#1-build-the-cli).
+Rust 0.0.2 on main is source-only; follow the [source installation](../README.md#installation).
 The optional [local install helper](../scripts/install-local.sh) builds that
 same binary with locked Cargo dependencies and installs it to a user bin
 directory. It neither publishes a release nor installs/starts OpenShell.

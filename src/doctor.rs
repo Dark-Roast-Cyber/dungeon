@@ -62,7 +62,7 @@ impl Report {
 pub(crate) fn run(
     explicit: Option<std::path::PathBuf>,
     json: bool,
-    force_openshell: bool,
+    runtime: crate::runtime::RuntimeChoice,
 ) -> Result<i32> {
     #[cfg(target_os = "linux")]
     let selected = linux::select(explicit);
@@ -99,7 +99,13 @@ pub(crate) fn run(
         }
     };
     #[cfg(target_os = "linux")]
-    if !force_openshell && config.as_ref().is_none_or(|c| c.values.container.is_some()) {
+    if match runtime {
+        crate::runtime::RuntimeChoice::Container => true,
+        crate::runtime::RuntimeChoice::Openshell => false,
+        crate::runtime::RuntimeChoice::Auto => {
+            config.as_ref().is_none_or(|c| c.values.container.is_some())
+        }
+    } {
         let diagnostic = if report.exit_code == 0 {
             crate::container::diagnostic(config.as_ref())
         } else {
@@ -140,7 +146,7 @@ pub(crate) fn run(
         return Ok(report.exit_code);
     }
     #[cfg(not(target_os = "linux"))]
-    let _ = force_openshell;
+    let _ = runtime;
     #[cfg(target_os = "linux")]
     linux::collect(&mut report, config.as_ref());
     #[cfg(not(target_os = "linux"))]
@@ -378,7 +384,12 @@ mod linux {
                 )
             )
         });
-        inventory(report, config, &env, &excluded);
+        inventory(
+            report,
+            config.filter(|c| c.values.container.is_none()),
+            &env,
+            &excluded,
+        );
     }
 
     fn inventory(

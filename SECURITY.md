@@ -21,6 +21,9 @@ Only the project is mounted read/write; existing reviewed import selection suppl
 read-only leaves/snapshots. The project and private snapshots use SELinux private
 relabeling; original configuration files are never relabeled. Imported native
 databases, host home and guest engine sockets remain excluded.
+Concurrent live sandboxes must use separate host project directories: private
+SELinux relabeling for a later mount can deny an earlier sandbox access to the
+same directory. Identity checks do not attest continued SELinux access.
 
 Plain guests execute as UID998 with Podman keep-id, or the invoking host UID/GID
 on standard Docker CE. Before first workload execution, a fixed root guest command
@@ -172,7 +175,7 @@ guest-state writability and authentication remain separate validation gates.
 - Guest/session durability is backend-specific.
 - Mutable images/provider content can change without changing Dungeon's fingerprint.
 - Optional Neovim imports capture explicitly selected ordinary user-owned files into a private reviewed snapshot and request a read-only bind on the exact recognized local bind-enabled UID998 gateway. The original source is never mounted or relabeled. Filesystem/name checks are not a secret scanner; inspect all input yourself. Lua may execute inside the guest, never on the host. Read-only enforcement protects **mounted contents only**: the guest can rename writable `/sandbox/.config`, create replacement `/sandbox/.config/nvim`, and select different configuration for later execution. This is not trusted-execution control or an immutable pathname guarantee. No plugins are installed or network policy widened. Source drift does not refresh the snapshot. Snapshot alteration blocks new work but does not block identity-checked status/stop or owned-command cleanup.
-- The [local agent image candidate](images/agent/README.md) pins its base and agent distributions but inherits upstream base layers, including Node 22.22.1 with reported security-update debt. Local testing is not an image audit or publication approval.
+- The [local agent image recipe](images/agent/README.md) now replaces the inherited Node executable with a hash-verified same-major security update. Existing image tags are unchanged until explicitly rebuilt. Lower layers and package metadata still contain the older Node record, and the remaining base packages have not had a comprehensive vulnerability audit. Local testing is not publication approval.
 - Inside the tested OpenShell Podman guest, Codex's inner `bwrap` sandbox could not start. Explicit one-time approval ran the synthetic task outside Codex's sandbox, still within OpenShell's hard policy; do not mistake this for two working layers of containment.
 - Host EDR does not imply guest-process visibility.
 - Telltale integration is intentionally deferred until Telltale 0.7.0/Event4 stabilizes the downstream contract.

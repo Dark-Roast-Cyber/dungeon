@@ -20,6 +20,8 @@ printf 'host\n' > host.txt
 "$dungeon" init --yes --agent opencode --runtime container --engine "$engine" --endpoint "$endpoint" --image "$image" --harness-config copy
 "$dungeon" reload --yes
 "$dungeon" plan > "$HOME/plan.json"
+"$dungeon" run opencode -- --version > "$HOME/first-version.txt"
+test "$(wc -l < "$HOME/first-version.txt")" -eq 1
 "$dungeon" up
 "$dungeon" status > "$HOME/status-before.json"
 "$dungeon" exec -- /bin/sh -c 'test "$(id -u)" != 0; test "$(cat /sandbox/project/host.txt)" = host; printf guest > /sandbox/project/guest.txt; printf retained > "$HOME/session-marker"'
@@ -27,9 +29,22 @@ printf 'host\n' > host.txt
 "$dungeon" run opencode -- --version
 "$dungeon" run claude -- --version
 "$dungeon" run codex -- --version
+printf 'headless stdin\n' > "$HOME/stdin.txt"
+"$dungeon" exec -- cat < "$HOME/stdin.txt" > "$HOME/stdout.txt"
+cmp "$HOME/stdin.txt" "$HOME/stdout.txt"
+"$dungeon" exec -- /bin/sh -c 'test "$1" = "two words; \$(not-a-command)"' dungeon 'two words; $(not-a-command)'
+if "$dungeon" exec -- /bin/sh -c 'printf stdout; printf stderr >&2; exit 23' > "$HOME/command.stdout" 2> "$HOME/command.stderr"; then
+    echo 'expected workload exit 23' >&2
+    exit 1
+else
+    test "$?" -eq 23
+fi
+test "$(cat "$HOME/command.stdout")" = stdout
+test "$(cat "$HOME/command.stderr")" = stderr
 test "$(cat guest.txt)" = guest
 "$dungeon" down
-"$dungeon" up
+"$dungeon" run opencode -- --version > "$HOME/resumed-version.txt"
+cmp "$HOME/first-version.txt" "$HOME/resumed-version.txt"
 "$dungeon" exec -- /bin/sh -c 'test "$(cat "$HOME/session-marker")" = retained'
 "$dungeon" status > "$HOME/status-after.json"
 cmp "$HOME/status-before.json" "$HOME/status-after.json"
@@ -41,4 +56,4 @@ test ! -e "$HOME/.config/dungeon"
 test "$(cat host.txt)" = host
 test "$(cat guest.txt)" = guest
 sha256sum --check "$HOME/import-before.sha256"
-printf 'PASS: native %s lifecycle, project writes, state persistence and uninstall\n' "$engine"
+printf 'PASS: native %s headless I/O, lifecycle, project writes, state persistence and uninstall\n' "$engine"

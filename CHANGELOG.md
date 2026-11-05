@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Pin a hash-verified Node22.23.4 image runtime, including the owned guardian's exact path; preserve other tool pins and refuse stale/shadowed runtimes in image checks. Existing local image tags are not replaced automatically.
+- Keep runtime startup/resume diagnostics on stderr so headless harness stdout remains usable as JSON/JSONL; preserve native workload streams and exit status.
+- Honor explicit `doctor --runtime container|openshell` while retaining selected-project executable exclusions, including diagnosis from another directory.
+- Update adoption instructions for optional OpenShell, native headless harness modes and concurrent-live SELinux limits; expand the native container I/O gate.
 - Ask for a harness on first human initialization instead of assuming OpenCode; persist the project choice and keep host configuration imports opt-in. Noninteractive initialization requires `--agent` as well as `--yes`.
 - Make interactive bare `dungeon` launch the same guest CLI as `dungeon run` for every harness. Host OpenCode attachment is now explicit `dungeon attach`; `run -- NATIVE_FLAGS` uses the configured harness without a host client.
 - Support Linux machine stdout connected Unix stream sockets without changing inherited descriptor flags; preserve FIFO backpressure and cleanup.

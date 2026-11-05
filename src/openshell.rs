@@ -659,11 +659,20 @@ impl<'a> Runtime<'a> {
     }
 
     fn lifecycle_command(&self, action: &str) -> Result<i32> {
-        self.status(&[
-            "sandbox".into(),
-            action.into(),
-            self.config.values.name.clone(),
-        ])
+        let mut command = self.command(
+            &[
+                "sandbox".into(),
+                action.into(),
+                self.config.values.name.clone(),
+            ],
+            true,
+        );
+        self.operation_stdio(&mut command);
+        if !self.output.machine {
+            command.stdout(std::io::stderr());
+        }
+        self.output.mutating();
+        Ok(command.status()?.code().unwrap_or(128))
     }
 
     fn command(&self, args: &[String], scoped: bool) -> Command {

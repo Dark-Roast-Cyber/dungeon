@@ -20,7 +20,7 @@ impl Output {
 
     pub(crate) fn message(&self, text: std::fmt::Arguments<'_>) -> Result<()> {
         if !self.machine {
-            writeln!(std::io::stdout(), "{text}")?;
+            writeln!(std::io::stderr(), "{text}")?;
         }
         Ok(())
     }
@@ -35,7 +35,7 @@ impl Output {
             );
         } else {
             for (path, change) in changes {
-                self.message(format_args!("{change:<9}{}", path.escape_debug()))?;
+                writeln!(std::io::stdout(), "{change:<9}{}", path.escape_debug())?;
             }
         }
         Ok(())

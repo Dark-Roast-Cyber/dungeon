@@ -1,14 +1,15 @@
 # Dungeon adoption cheat sheet (source preview)
 
 Dungeon 0.0.2 is **source-only**. Do not use the published v0.0.1 Python package
-or unpublished npm commands for this Rust workflow. Supported local path:
-Linux, OpenShell **0.0.116**, rootless Podman, and Rust **1.98.1** for building.
-This is not a general containment or platform certification.
+or unpublished npm commands for this Rust workflow. The supported local path is
+Linux with rootless Podman or standard Docker CE, and Rust **1.98.1** for building.
+OpenShell **0.0.116** is optional for policy enforcement, copy/export, SSH and
+forwarding. This is an engineering preview, not containment certification.
 
 ## 1. Install the CLI, not a gateway
 
-Install Git, Rust/cargo, OpenShell 0.0.116 and rootless Podman yourself. From a
-reviewed Dungeon checkout:
+Install Git, Rust/cargo and your container engine yourself. From a reviewed
+Dungeon checkout:
 
 ```sh
 ./scripts/install-local.sh --dry-run
@@ -28,15 +29,33 @@ you intend to run; uncommitted source changes are included. For a one-shell
 trial without installation, use `cargo build --release --locked` followed by
 `export PATH="$PWD/target/release:$PATH"`.
 
-## 2. Inspect, then set up OpenShell
+## 2. Choose the runtime
+
+For the simplest local trial, use an existing container service:
 
 ```sh
-dungeon doctor                   # read-only; inspect individual checks
+dungeon setup --runtime container   # discover Podman first, otherwise Docker CE
+dungeon doctor --runtime container
+```
+
+Setup remembers the engine/socket for new projects. It installs nothing and never
+changes permissions. If rootless Podman's socket is stopped, explicitly start it
+with `systemctl --user enable --now podman.socket`. For Docker CE, start its daemon
+and check access yourself; daemon access is host-root-equivalent. Containers mount
+only the reviewed project/imports, but **do not enforce OpenShell policy or restrict
+outbound networking**. Existing bindings never switch runtime automatically.
+
+### Optional OpenShell
+
+Install the pinned OpenShell CLI and rootless Podman before using this path:
+
+```sh
+dungeon doctor --runtime openshell  # read-only; inspect individual checks
 systemctl --user enable --now podman.socket
 podman pull ghcr.io/nvidia/openshell/gateway@sha256:05cf77bbb022a739aed6f22daa0e7e164415f4ab273b5f84319e46d91eb8f645
-dungeon setup --dry-run
-dungeon setup                    # fresh bind-capable gateway; never mounts a project itself
-dungeon doctor
+dungeon setup --runtime openshell --dry-run
+dungeon setup --runtime openshell   # fresh bind-capable gateway; no project mounted yet
+dungeon doctor --runtime openshell
 ```
 
 `setup` does not repair or restart an existing gateway. If doctor finds the
@@ -44,15 +63,19 @@ dungeon doctor
 mounts, network and port with Podman before explicitly starting it. Do not
 delete its database, register a replacement over it, or use `podman prune`.
 An existing copy-only gateway cannot be turned into a live-capable gateway by
-plain `setup`. Use `setup --copy-only` to verify it and
+plain `setup`. Use `setup --runtime openshell --copy-only` to verify it and
 `init --project-transfer copy` for a new project there; fresh bind capability
 needs an explicit disposal/reprovision decision. Doctor health is not proof of isolation.
 
 ## 3. Choose a project and agent
 
-Build the [reviewed local Linux amd64 image](../images/agent/README.md) before
-the first launch. It includes all three harnesses; its tag names the OpenCode pin,
-not a required harness choice. To use the optional host OpenCode UI, separately install a host client
+Plain containers pull a digest-pinned public base image on first use. That image
+has older harness versions than the reviewed image. For the reviewed tool versions,
+build the [local Linux amd64 image](../images/agent/README.md) and select it with
+`dungeon init --image localhost/dungeon-agent:0.0.3-opencode-2.1.2`. OpenShell defaults to
+that local image, which must be built before launch. Both include all three
+harnesses; the tag names the OpenCode pin, not a required harness choice.
+To use the optional host OpenCode UI, separately install a host client
 matching the guest pin (currently 2.1.2); use `dungeon versions` to compare them.
 Ordinary `dungeon` / `dungeon run` uses the guest CLI and needs no host harness client.
 
@@ -76,26 +99,83 @@ dungeon plan                     # inspect policy and requested mounts
 dungeon                           # first up, then the selected agent
 ```
 
-The image is not published or pulled by Dungeon. `dungeon versions --check`
-reads the registry stable tag but does not download or execute an update.
+The reviewed local image is not published or pulled by Dungeon.
+`dungeon versions --check` reads the registry stable tag but does not download
+or execute an update.
 Existing bindings keep their selected image. Host configuration imports are off
 by default; do not rely on host tools or host auth/config/plugins/themes in the guest.
 Claude/Codex login is guest-owned (`dungeon auth claude|codex` after `up`);
 OpenCode uses its own guest `/connect` flow. Changing image, policy, or scope
 after creation fails identity checks rather than rebuilding in place.
 
-## 4. Daily use and deliberate disposal
+The reviewed Claude CLI also supports an explicit guest-only browser login:
+`dungeon run claude -- auth login --claudeai`. Open its vendor URL on your host;
+if the browser gives a code, paste it into the guest terminal, not a chat or log.
+No guest GUI or host authentication import is needed.
+
+## 4. Headless use
+
+No display, host agent CLI or terminal is required for explicit initialization,
+lifecycle commands, non-TTY execution or native headless agent modes:
+
+```sh
+cd /path/to/project
+dungeon init --yes --runtime container --agent codex
+dungeon plan
+dungeon run codex -- --version       # creates/resumes; no login needed
+dungeon exec -- node -e 'console.log("hello from the guest")'
+dungeon down
+```
+
+Use `--runtime openshell` instead for an already configured OpenShell gateway.
+`--yes` approves the displayed configuration scope; it does not log in or bypass
+the agent's permissions.
+Bare `dungeon`, `attach`, `shell` and interactive login are terminal workflows;
+do not use them in unattended jobs.
+
+After authenticating **inside this guest**, use the harness's native mode:
+
+```sh
+dungeon run opencode -- run --format json "Summarize this project" > result.jsonl
+dungeon run claude -- --print --output-format json -- "Summarize this project" > result.json
+dungeon run codex -- exec --json "Summarize this project" > result.jsonl
+```
+
+These are alternative harness invocations, not an orchestration layer. Check
+`dungeon run AGENT -- --help` for the image's installed version; the reviewed
+OpenCode 2.1.2 also accepts `run --standalone`. Codex may require a trusted Git
+project and its inner sandbox has a known nested-runtime limitation; do not
+disable safeguards just to make a demo pass. Provider calls need guest/vendor
+authentication and, on OpenShell, allowed endpoints. Dungeon does not inherit
+host API keys, native authentication databases or sessions.
+
+Keep the second `--` before the prompt when adding Claude's variadic options such
+as `--tools`: `dungeon run claude -- --print --tools "" -- "Your prompt"`.
+The first separator belongs to Dungeon; the later one is passed to the guest CLI.
+Native Claude `--resume SESSION_ID` keeps the conversation across sandbox restarts;
+Dungeon does not select or copy its history.
+
+Runtime progress goes to stderr; stdout belongs to the workload and its nonzero
+exit status is preserved. `exec` requires an already Ready guest. Ordinary
+execution is not an owned cancellation guarantee; for bounded automated cleanup
+and structured output use [machine execution](machine.md) on OpenShell.
+
+## 5. Daily use and deliberate disposal
 
 For every configured harness, `dungeon` and `dungeon run` launch the same guest
 CLI, creating/resuming its sandbox when needed. Bare `dungeon` requires a terminal;
 explicit `dungeon run -- --help` accepts native flags without one. On an existing
 binding, `dungeon run claude|codex|opencode` overrides only that invocation.
-For automation, initialize explicitly with `dungeon init --yes --agent AGENT`;
-`--yes` never chooses a harness.
+For automation, initialize explicitly as above; `--yes` never chooses a harness.
 
-Optional `dungeon attach` (not bare `dungeon`) starts an authenticated guest
-OpenCode service, opens a temporary
-host-loopback forward and attaches your installed host OpenCode UI. It checks
+Compare harnesses with `run AGENT` in the **same binding**. Use separate project
+checkouts for concurrent live environments: on SELinux, mounting the same host
+directory in another sandbox can change its private label and deny the older
+sandbox access. Do not disable SELinux or relabel host files to work around it.
+
+On OpenShell, optional `dungeon attach` (not bare `dungeon`) starts an authenticated
+guest OpenCode service, opens a temporary host-loopback forward and attaches your
+installed host OpenCode UI. It checks
 that host and guest versions match; it does not install or replace either CLI.
 Dungeon pauses at `Press Enter to open OpenCode` so the startup and connection
 details stay visible before the host UI takes over the terminal. Ctrl-C there
@@ -127,11 +207,11 @@ stops it without deleting its state.
 | Delete a finished bound sandbox | `dungeon down`, then `dungeon destroy` |
 
 **Live is the new CLI default:** after binding review, `up` requests one writable
-mount of the selected project on a compatible bind-enabled gateway. It does not
-mount your home or engine socket. Guest changes reach the host immediately;
+mount of the selected project (on a compatible bind-enabled gateway for OpenShell).
+It does not mount your home or engine socket. Guest changes reach the host immediately;
 upload/export do not apply. For a sandbox copy instead, explicitly choose
-`dungeon init --project-transfer copy`: first `up` uploads once, resumed launches
-do not sync, and `export` is reviewed. Choose before creation. Old configurations
+`dungeon init --runtime openshell --project-transfer copy`: first `up` uploads once,
+resumed launches do not sync, and `export` is reviewed. Choose before creation. Old configurations
 that omit the transfer field remain copy-mode.
 
 `destroy` loses guest files, sessions and auth, but retains private configuration

@@ -304,6 +304,7 @@ pub(crate) fn discover(options: &ContainerOptions, json_output: bool) -> Result<
 
 pub(crate) fn diagnostic(config: Option<&Config>) -> Result<Value> {
     if let Some(config) = config
+        && config.values.container.is_some()
         && fs::symlink_metadata(config.state_path()).is_ok()
     {
         let runtime = Runtime::new(config)?;

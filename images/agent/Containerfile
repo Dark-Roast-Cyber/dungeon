@@ -1,8 +1,28 @@
 FROM ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e AS base
 
-FROM base AS tools
+FROM base AS node-runtime
 USER root
 WORKDIR /usr/lib/node_modules/dungeon-agent
+COPY package.json ./
+# Replace the inherited runtime, including the owned guardian's exact path.
+RUN set -eu; \
+    test "$(uname -m)" = x86_64; \
+    version=$(node -p 'require("./package.json").imageTools.node.version'); \
+    target=$(node -p 'require("./package.json").imageTools.node.target'); \
+    sha256=$(node -p 'require("./package.json").imageTools.node.sha256'); \
+    archive="node-v${version}-${target}.tar.xz"; \
+    curl -fsSL "https://nodejs.org/dist/v${version}/${archive}" -o "/tmp/${archive}"; \
+    echo "${sha256}  /tmp/${archive}" | sha256sum -c -; \
+    mkdir /tmp/dungeon-node; \
+    tar -xJf "/tmp/${archive}" -C /tmp/dungeon-node --strip-components=2 \
+      "node-v${version}-${target}/bin/node"; \
+    rm -f /usr/bin/node /usr/bin/nodejs; \
+    install -o root -g root -m 0755 /tmp/dungeon-node/node /usr/bin/node; \
+    ln -s node /usr/bin/nodejs; \
+    test "$(/usr/bin/node --version)" = "v${version}"; \
+    rm -rf /tmp/dungeon-node "/tmp/${archive}"
+
+FROM node-runtime AS tools
 COPY package.json pnpm-lock.yaml verify.cjs ./
 # Bootstrap the manifest's pnpm version without running a remote installer.
 RUN set -eu; \
@@ -54,7 +74,7 @@ RUN --network=none set -eu; \
     rm -rf /tmp/nvim-linux-x86_64.tar.gz /tmp/rustc /tmp/cargo /tmp/rust-std \
       /tmp/rustc-*.tar.xz /tmp/cargo-*.tar.xz /tmp/rust-std-*.tar.xz
 
-FROM base
+FROM node-runtime
 USER root
 RUN rm -f /usr/bin/opencode /usr/bin/codex /usr/local/bin/claude \
       /usr/bin/nvim /usr/bin/rustc /usr/bin/cargo \

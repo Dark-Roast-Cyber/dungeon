@@ -6,6 +6,27 @@ const { dependencies, imageTools } = require('./package.json');
 
 const verifyRuntimePath = process.argv.includes('--path');
 
+if (verifyRuntimePath) {
+  assert.notEqual(process.getuid(), 0, 'runtime user must be non-root');
+  assert.equal(process.platform, 'linux');
+  assert.equal(process.arch, 'x64');
+  assert.equal(process.versions.node, imageTools.node.version);
+  assert.equal(process.execPath, '/usr/bin/node');
+  verifyImageOwnedPath('node', '/usr/bin/node');
+  verifyImmutable('/usr/bin');
+  for (const directory of new Set(['/usr/bin', '/usr/local/bin', ...process.env.PATH.split(path.delimiter)])) {
+    for (const command of ['node', 'nodejs']) {
+      const candidate = path.join(directory, command);
+      if (fs.existsSync(candidate)) {
+        assert.equal(fs.realpathSync(candidate), '/usr/bin/node', `${candidate} must use the reviewed runtime`);
+      }
+    }
+  }
+  const actual = execFileSync('/usr/bin/node', ['--version'], { encoding: 'utf8', timeout: 30000 }).trim();
+  assert.equal(actual, `v${imageTools.node.version}`);
+  console.log(`${actual} (/usr/bin/node; root-owned, non-writable)`);
+}
+
 for (const [command, name, prefix, suffix] of [
   ['opencode', '@opencode/cli', 'opencode v', ''],
   ['claude', '@anthropic-ai/claude-code', '', ' (Claude Code)'],
@@ -88,8 +109,6 @@ for (const pathname of [
 }
 
 assert.equal(process.env.HOME, '/sandbox', 'HOME must remain guest-private');
-
-assert.notEqual(process.getuid(), 0, 'runtime user must be non-root');
 
 for (const socket of [
   '/var/run/docker.sock',

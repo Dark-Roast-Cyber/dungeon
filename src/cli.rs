@@ -126,7 +126,7 @@ enum Commands {
         workspace: Option<String>,
         #[arg(
             long,
-            help = "sandbox image (default: reviewed local agent image; build first)"
+            help = "sandbox image (container: pinned public base; OpenShell: reviewed local image, build first)"
         )]
         image: Option<String>,
         #[arg(
@@ -349,7 +349,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     "doctor accepts --config or the existing current-directory binding, not PROJECT",
                 ));
             }
-            crate::openshell::doctor(config, json, matches!(runtime, RuntimeChoice::Openshell))
+            crate::openshell::doctor(config, json, runtime)
         }
         Some(Commands::Setup {
             runtime,
@@ -965,7 +965,7 @@ fn versions(check: bool, config: Option<&Path>) -> Result<i32> {
             "selected_project_image": selected,
             "registry_stable": latest,
             "reviewed_update_available": latest.as_deref().and_then(stable_version).is_some_and(|version| version > reviewed_number),
-            "selection": "new bindings use the reviewed versioned local image; existing bindings unchanged; no automatic pull, install or migration",
+            "selection": "new OpenShell bindings use the reviewed local image; plain containers use the pinned public base and may pull it on first use; existing bindings unchanged",
         }))?
     );
     Ok(0)

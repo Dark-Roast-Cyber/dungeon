@@ -4,7 +4,7 @@ Development-preview contract for external harnesses. One Rust Runtime and the
 existing policy, identity, transfer and owned-process checks remain authoritative.
 This is not an SDK, daemon, remote execution protocol or orchestrator.
 
-After [building the CLI and setting up the gateway](../README.md#quick-start), build
+After [installing the CLI and setting up the gateway](../README.md#installation), build
 the [local agent image](../images/agent/README.md) before selecting it below.
 Run these examples from a project directory, not your home or filesystem root.
 The `--yes` flags are explicit demonstration approvals: first `up` uploads the
@@ -14,7 +14,7 @@ project and `export --yes` applies reviewed guest changes to the host.
 PRIVATE="$HOME/.config/dungeon/demo"
 dungeon machine --schema 1 resolve --project "$PWD"
 dungeon machine --schema 1 init --yes --directory "$PRIVATE" --project "$PWD" \
-  --name demo --gateway dungeon-local --image localhost/dungeon-agent:0.0.3-dev
+  --name demo --gateway dungeon-local --image localhost/dungeon-agent:0.0.3-opencode-2.1.2
 dungeon --config "$PRIVATE/dungeon.json" machine --schema 1 up --yes
 dungeon --config "$PRIVATE/dungeon.json" machine --schema 1 status
 ```
