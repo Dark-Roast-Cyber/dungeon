@@ -18,11 +18,7 @@ pub(crate) struct Preferences {
 
 impl Preferences {
     pub(crate) fn runtime_choice(&self) -> RuntimeChoice {
-        self.runtime.unwrap_or(if self.container.is_some() {
-            RuntimeChoice::Container
-        } else {
-            RuntimeChoice::Auto
-        })
+        self.runtime.unwrap_or(RuntimeChoice::Container)
     }
 }
 

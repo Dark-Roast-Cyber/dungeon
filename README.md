@@ -109,24 +109,29 @@ automatically built. Its validation does not attest the mutable upstream image.
 
 ## Using Dungeon
 
-### Initialize once, launch normally
+### Review once, launch normally
 
 From your project directory:
 
 ```sh
 cd /path/to/project
-dungeon init          # choose OpenCode, Claude Code or Codex; approve scope
-dungeon plan          # optional: inspect the resolved policy and mounts
-dungeon               # create/resume the environment and launch the saved agent
+dungeon               # first run: choose agent, review image/access, approve and launch
+dungeon exec -- cargo test
+dungeon down           # keep guest login, sessions and files
 ```
 
-`init` saves private configuration, starts nothing and imports no host harness
-configuration by default. Add `--agent opencode` or `--agent claude` to choose
-explicitly. Later launches reuse the project's choice without another wizard.
-No host agent installation is needed for ordinary guest CLI use.
+First run offers an optional reviewed copy of OpenCode configuration, **off by
+default**. One scope approval saves that exact snapshot and launches; no separate
+`init`, `reload` or `up` is required. Copies can expose credentials and execute
+plugins; native login/session databases are never shared. Later launches reuse
+the saved choices. No host agent installation is needed for guest CLI use.
 
-Runtime selection uses saved setup defaults, otherwise installed OpenShell,
-otherwise plain containers. Use `init --runtime container` or
+Use `dungeon init` to review/save without starting, `dungeon plan` to inspect, or
+`dungeon config --edit` to change an uncreated environment. The editor has guided
+choices and explicit flags for automation; bare `dungeon config` stays read-only.
+
+Runtime selection uses saved setup defaults, otherwise plain containers, even if
+OpenShell is installed. Use `init --runtime container` or
 `init --runtime openshell` to be explicit. Existing bindings never switch runtime
 or service when a dependency disappears.
 
@@ -189,6 +194,7 @@ flags. See [headless examples](docs/adoption.md#4-headless-use).
 | Inspect the current environment | `dungeon status` |
 | List project bindings / all private bindings | `dungeon list` / `dungeon list -a` |
 | Inspect configuration / its path | `dungeon config` / `dungeon config --path` |
+| Review changes before first guest creation | `dungeon config --edit` |
 | Compare reviewed/host OpenCode versions | `dungeon versions --check` |
 | Stop, keeping guest files, login and sessions | `dungeon down` |
 | Delete a stopped guest, keeping its configuration | `dungeon destroy` |
@@ -207,7 +213,8 @@ See [transfer and recovery](docs/configuration.md).
 ## Configuration options
 
 Set these at `init`, before creating the sandbox. Use `dungeon COMMAND --help`
-for complete flags.
+for complete flags. Common choices can also be changed with `config --edit`;
+runtime/service/project identity changes still require separate initialization.
 
 | Option | Purpose |
 | --- | --- |
@@ -219,7 +226,7 @@ for complete flags.
 | `--project PATH`, `--name NAME` | Override the current project and generated environment name |
 | `--gateway NAME`, `--workspace NAME` | Select an existing OpenShell gateway/workspace |
 | `--provider NAME` | Attach an existing named OpenShell provider; repeatable, never a secret |
-| `--harness-config disabled\|read-only\|copy` | Experimental opt-in OpenCode host configuration imports; disabled by default |
+| `--harness-config disabled\|copy\|read-only` | Opt-in OpenCode imports; copy is reviewed/saved in the same operation; original-source read-only is advanced |
 | `--directory PATH` | Custom private configuration directory; use `dungeon --config PATH/dungeon.json COMMAND` afterward |
 
 Normal configuration lives under

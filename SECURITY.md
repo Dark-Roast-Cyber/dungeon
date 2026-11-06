@@ -84,9 +84,12 @@ projects are not silently rebound.
 
 Human `init` requires one scope confirmation or explicit `--yes` before writing
 private configuration. It never starts a sandbox or uploads files. Implicit
-first-use launch binding still requires a terminal. `plan` and `config` only
-inspect existing configuration and cannot create authority. Initialization
-validates config and resolved destination scope before creating files; this is
+first-use launch binding still requires a terminal. `plan`, bare `config` and
+`config --path` only inspect existing configuration and cannot create authority.
+Explicit `config --edit` requires scope approval or `--yes` and refuses every
+runtime binding marker. It shares environment admission and import locks with
+creation, validates the existing schema/policy and never starts/replaces a guest.
+Initialization validates config and resolved destination scope before creating files; this is
 not a lock against concurrent host path replacement.
 
 ## Local setup
@@ -142,18 +145,24 @@ they do not add containment or guarantee final event delivery. See the
 
 OpenShell providers can grant authority even when raw secrets are brokered. `dungeon auth` starts vendor-owned login inside the guest. Resulting OAuth credentials live in guest-controlled state. Dungeon does not inspect, copy, refresh, escrow, or synchronize them.
 
-New bindings disable host harness imports. Explicit OpenCode
+New bindings disable host harness imports unless explicitly selected in first-run
+review or by flags. Explicit OpenCode
 `--harness-config read-only|copy` proposes access to selected native config
 files, plugins/themes and legacy `auth.json` in the initialization review.
 Existing bindings and machine initialization do not gain access automatically.
+Human initialization and unbound `config --edit` can capture/review a snapshot
+in the same scope approval; ordinary configuration edits retain selected snapshots
+without reopening original sources.
 Read-only prevents guest writes to mounted contents, **not reading, using or
 exfiltrating credentials**. Plugins/configuration execute inside the guest with
 its authority. Neither mode scans arbitrary content for secrets.
 
 The source-only first slice derives individual file mounts, never a host home,
 config parent or data-directory mount. Live sources are not relabeled; SELinux
-denial is not permission to disable enforcement. Copy mode captures private
-files after explicit `reload` approval and may relabel only those private copies.
+denial is not permission to disable enforcement. After explicit opt-in, copy mode
+stages private bytes for review; final initialization/edit/reload approval
+publishes those copies. Only private copies may be relabeled. Interrupted review
+can leave private staging files; this is not secure erasure.
 Excluded and known credential/native-state paths, including all `.env` names,
 are skipped before content reads. Auth exclusion conservatively omits whole
 OpenCode JSON config files that could mix credentials with ordinary settings;
@@ -166,8 +175,8 @@ copy and disabled selections do not require that check. Status/stop/owned cleanu
 remain import-independent; image-owned native parents stay guest-private/writable.
 Human launch may offer a copy/disabled/cancel review before first creation; it
 uses the same locked reload transaction, requires typed approval and never
-changes a bound guest. Headless mode changes require explicit
-`reload --harness-config copy|disabled --yes`; no fallback is automatic.
+changes a bound guest. Headless import changes require explicit `init`,
+`config --edit` or `reload` flags and `--yes`; no fallback is automatic.
 
 OpenCode 2.1.2 stores current credentials in its native database. That database
 is never mounted, copied, queried or synchronized by this feature. Legacy

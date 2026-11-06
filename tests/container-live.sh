@@ -17,8 +17,7 @@ install -m 755 "$binary" "$HOME/bin/dungeon"
 dungeon=$HOME/bin/dungeon
 cd "$HOME/project"
 printf 'host\n' > host.txt
-"$dungeon" init --yes --agent opencode --runtime container --engine "$engine" --endpoint "$endpoint" --image "$image" --harness-config read-only
-"$dungeon" reload --harness-config copy --yes
+"$dungeon" init --yes --agent opencode --runtime container --engine "$engine" --endpoint "$endpoint" --image "$image" --harness-config copy
 "$dungeon" plan > "$HOME/plan.json"
 "$dungeon" run opencode -- --version > "$HOME/first-version.txt"
 test "$(wc -l < "$HOME/first-version.txt")" -eq 1

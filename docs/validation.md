@@ -2,6 +2,48 @@
 
 CI checks formatting, Clippy, locked Rust tests, release compilation, CLI version execution, npm launcher behavior, distribution version synchronization, native archive creation, and full npm package assembly on explicit supported runners.
 
+## Unified first run and configuration editing (2026-11-05, source checkout)
+
+First use now reviews agent/image/project access and optional OpenCode copies,
+then saves/launches after one scope approval. Human copy initialization captures
+and saves the exact reviewed bytes without a separate reload. `config --edit`
+provides guided choices or explicit headless flags for an uncreated environment,
+using schema2 and existing environment/import locks. Bare config/plan remain
+read-only, imports default off, and any runtime marker refuses edits. New human
+environments default to plain containers unless saved defaults or explicit
+OpenShell features select otherwise; existing bindings never change runtime.
+
+The combined source passed **244 locked Rust tests** (143 unit +101 integration),
+formatting, warnings-denied all-target Clippy, **26 Node tests on Node24.22.2**,
+shell syntax checking and locked release compilation. Linux release SHA-256:
+`98b2ff87832a1a22b4fa51813152f1e884a7cd9599104b794bb47b995b80a550`.
+
+Regressions cover exact staged bytes despite source drift, opt-in warnings,
+cancellation, source-independent edits, exclusions, mode changes, invalid/bound
+markers, concurrent binding, custom destinations under a root-owned sticky
+temporary parent and admission even without existing imports. Tests
+caught private staging permissions and cross-mode snapshot reset; both were
+corrected. Existing runtime-selection and initialization-lock assumptions were
+updated without weakening native-error sanitization or live-transfer refusal.
+
+On enforcing SELinux/rootless Podman5.8.7, the final release passed actual
+OpenCode2.1.2 launch through real-PTY first-run approval and headless unbound
+editing. Original import bytes/SELinux labels stayed unchanged. Ready/stopped
+edit refusal, JSON machine status, JSON workload stdout/separate stderr/exit23,
+a host-visible result file and same-ID stop/resume with retained guest state
+passed. The updated native container gate passed one-step copy init, all three
+harness version commands, stdin/argv/output, project writes, persistence and
+uninstall. Fixtures used the existing patched local test image, not upstream
+latest; no real-provider inference/authentication was attempted.
+
+All fixture guests were removed. Concurrent host activity invalidated the broad
+initial inventory comparison; engine events showed a transient runner completing
+before the first native tests. A fresh final native-phase inventory matched all
+**19** pre-existing container IDs/states/start timestamps afterward. No installed
+CLI, gateway, policy, image tag or release was changed. Native OpenShell, Docker,
+other platforms and desktop clients were not rerun. Logs, probes and inventory
+evidence: `/tmp/opencode/dungeon-simple-configuration`.
+
 ## Guided import recovery and headless checks (2026-11-05, source checkout)
 
 SELinux-incompatible original-source imports now offer a copy/disabled/cancel

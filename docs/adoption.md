@@ -94,14 +94,18 @@ dungeon run claude              # review binding, choose Claude as default
 dungeon run codex               # choose Codex for this invocation on an existing binding
 ```
 
-First use asks for OpenCode, Claude Code or Codex (no assumed choice), then scope
-approval. Later launches reuse that project's choice without prompting again.
+First use asks for OpenCode, Claude Code or Codex (no assumed choice), reviews the
+image/project access and offers an optional OpenCode configuration copy (default
+no). One scope approval saves the exact reviewed snapshot and launches, without
+a separate reload. Copies can expose credentials; native auth/session databases
+are never imported. Later launches reuse that project's choices without prompting.
 First use requires a terminal for review. `dungeon init` writes the private
 config without starting anything; use it **before** first launch to choose an
 image, transfer mode, gateway, or provider:
 
 ```sh
-dungeon init                     # choose harness; other settings use setup defaults
+dungeon init                     # same review, save only; no guest started
+dungeon config --edit            # optional guided changes before first guest creation
 dungeon plan                     # inspect policy and requested mounts
 dungeon                           # first up, then the selected agent
 ```
@@ -135,6 +139,10 @@ dungeon down
 ```
 
 Use `--runtime openshell` instead for an already configured OpenShell gateway.
+For optional headless OpenCode imports, add `--harness-config copy` to `init`;
+the snapshot is captured/approved in that operation. Common unbound settings can
+also be changed with `dungeon config --edit --yes --image OCI_REFERENCE` or
+`--harness-config copy`. No implicit imports or runtime switching occurs.
 `--yes` approves the displayed configuration scope; it does not log in or bypass
 the agent's permissions.
 Bare `dungeon`, `attach`, `shell` and interactive login are terminal workflows;

@@ -3,7 +3,7 @@
 ## Runtime and engine selection
 
 OpenShell is optional. Fresh human initialization uses saved setup defaults,
-otherwise installed OpenShell, otherwise a plain container. Existing configurations
+otherwise a plain container, even if OpenShell is installed. Existing configurations
 without a `container` field retain OpenShell. Existing runtime bindings never switch
 engine or service when a dependency disappears.
 
@@ -178,15 +178,17 @@ dungeon config
 dungeon plan
 ```
 
-`init` asks for a harness (OpenCode, Claude Code or Codex) if `--agent` is omitted,
-then shows the resolved scope and asks for one confirmation, rather than
-prompting for each field. The choice is saved per project; there is no assumed
-harness or global preference registry. It writes only private configuration and the starter
-policy; it does not contact OpenShell, create/start a sandbox, stage imports or
-upload files. Override values with flags before confirming:
+`dungeon` reviews a new project's agent, image/access and optional OpenCode copy,
+asks for one scope confirmation, then saves and launches. `init` uses the same
+review but saves without starting. Explicit flags skip the corresponding choices;
+`--yes` suppresses all prompts. No harness is assumed or inferred from installed
+tools. Imports stay off unless selected explicitly. Optional snapshots are staged
+before the final review and saved with the configuration; ordinary initialization
+does not contact a runtime or upload the project. Override values with flags:
 
 Explicit `init` and implicit first use resolve the same defaults; flags override
-only the selected values. Omitted options never add host configuration imports.
+only the selected values. Headless initialization never adds host imports without
+`--harness-config`; the interactive copy question defaults to no.
 
 | Flag | Default |
 | --- | --- |
@@ -196,17 +198,17 @@ only the selected values. Omitted options never add host configuration imports.
 | `--gateway NAME` | `dungeon-local` |
 | `--workspace NAME` | `default` |
 | `--agent opencode\|claude\|codex` | Ask once for this project; required without a terminal |
-| `--image OCI_REFERENCE` | `localhost/dungeon-agent:0.0.3-opencode-2.1.2` (build first) |
+| `--image OCI_REFERENCE` | Saved setup image, otherwise upstream base:latest |
 | `--project-transfer copy\|live` | `live` for new human CLI bindings |
 | `--provider NAME` (repeatable) | No providers; names refer to existing OpenShell providers |
-| `--harness-config read-only\|copy\|disabled` | `disabled`; host imports require explicit opt-in |
+| `--harness-config disabled\|copy\|read-only` | `disabled`; reviewed copy is the normal opt-in, original-source mounts are advanced |
 | `--yes` | Off; explicitly approve saving without a terminal |
 
 `--non-interactive` is an alias for `--yes`, not a harness choice. For automation,
-use `dungeon init --yes --agent opencode|claude|codex`. The versioned default image is a
-[reviewed local build](../images/agent/README.md), not a published image; build
-it before the first `up`. `dungeon versions --check` checks the official stable
-tag read-only. There is no automatic image pull, tool installer or policy expansion.
+use `dungeon init --yes --agent opencode|claude|codex`. The optional
+[reviewed local image](../images/agent/README.md) must be built explicitly.
+`dungeon versions --check` checks the official stable tag read-only. Missing
+registry images are pulled on first use; no tool installer or policy expansion is added.
 
 Without `--directory`, `init --project PATH` creates the same binding that later
 commands resolve from that project. An explicit directory is never scanned or
@@ -223,6 +225,27 @@ an existing config, never initialize one and never contact OpenShell. They do no
 print provider credentials. `plan` also requires an existing config and never
 initializes a missing binding. These are human CLI conveniences; machine callers
 should use the [versioned machine contract](machine.md).
+
+`dungeon config --edit` guides changes to the agent, image, OpenShell live/copy
+project access and optional OpenCode snapshot for an **uncreated** environment.
+It preserves project/runtime/service identity and policy. Other validated schema
+options remain available through `init` flags and private JSON; there is no new
+configuration format or external editor command. Headless examples:
+
+```sh
+dungeon config --edit --yes --image ghcr.io/example/agent:1.2.3
+dungeon config --edit --yes --harness-config copy --exclude-provider-auth
+```
+
+Explicit import changes recapture/review a snapshot in that operation. Unrelated
+edits keep the selected snapshot without reopening sources. Any runtime marker
+(including stopped, invalid, directory or dangling state) refuses edits; use
+separate initialization to preserve existing guests. Edits share the environment
+admission/import locks with creation, recheck configuration/policy and publish
+the validated configuration atomically. Cancellation leaves the saved config
+unchanged. Interrupted/hard-killed snapshot review can leave a private temporary
+`harness-review-*` directory under an existing configuration ancestor; inspect
+such copies deliberately, especially when credential-inclusive.
 
 Edit `dungeon.json` and adjacent `policy.json` before creating a sandbox. Changes
 to a bound configuration or policy do not automatically recreate the environment:
@@ -711,7 +734,9 @@ version pair is not a matched-version validation. See the
 
 ## Harness configuration (OpenCode first slice)
 
-New bindings disable host configuration imports. Explicit OpenCode
+New bindings disable host configuration imports. Interactive first run offers an
+optional reviewed private copy (default no), then approves it with the rest of
+the environment. Explicit OpenCode
 `init --agent opencode --harness-config read-only|copy` proposes host configuration
 in the existing scope review. `init --yes --agent opencode` with that flag
 explicitly approves the displayed scope; it still
@@ -721,7 +746,7 @@ retain no harness import. Codex and Claude Code sharing follow separately.
 | Choice | Behavior |
 | --- | --- |
 | `--harness-config read-only` | Select individual existing native files; derive read-only original-source binds without relabeling |
-| `--harness-config copy` | Declare sources, then use `dungeon reload` to capture/review a private snapshot before first `up`; snapshot files are mounted read-only |
+| `--harness-config copy` | Capture/review a private snapshot in the same initialization/edit approval; no separate reload; snapshot files are mounted read-only |
 | `--harness-config disabled` (default) | No harness mounts or source inventory |
 | `--exclude-provider-auth` | Omit legacy auth and entire `opencode.json`, `opencode.jsonc`, `cli.json` files that may mix credentials with settings |
 | `--harness-exclude PATH` (repeatable) | Omit an exact config-relative file/subtree, not a glob; legacy auth is controlled separately |
@@ -784,8 +809,9 @@ To change an enabled import selection before first creation, use
 mode in the same operation, preserving source paths and exclusions; copy captures
 its snapshot without a second reload. Omit `--yes` for interactive typed approval.
 Missing approval in a headless call refuses before source inventory/capture.
-Disabled/undeclared imports cannot be enabled through reload; initialize a separate
-configuration for that scope. `--harness-config` belongs to `init`/`reload`, not
+Disabled/undeclared imports cannot be enabled through reload; use reviewed
+`dungeon config --edit --harness-config copy` before creation instead.
+`--harness-config` belongs to `init`, `config --edit` and `reload`, not
 `run`; agent arguments after `--` remain native workload data.
 
 Creation uses the existing exact recognized local bind-enabled UID998 gateway

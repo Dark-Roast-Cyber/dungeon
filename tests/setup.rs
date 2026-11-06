@@ -145,7 +145,7 @@ fi
         .env_clear()
         .env("HOME", &home)
         .env("PATH", &tools)
-        .args(["setup", "--dry-run"])
+        .args(["setup", "--runtime", "openshell", "--dry-run"])
         .output()
         .unwrap();
     assert_eq!(result.status.code(), Some(1));

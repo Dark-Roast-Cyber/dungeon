@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink};
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
@@ -99,6 +99,178 @@ impl Fixture {
     fn plan(&self) -> Value {
         serde_json::from_slice(&self.success(&["plan"]).stdout).unwrap()
     }
+}
+
+#[test]
+fn one_step_copy_init_accepts_a_new_private_directory_under_root_owned_tmp() {
+    use std::os::unix::fs::MetadataExt;
+    let meta = fs::metadata("/tmp").unwrap();
+    if meta.uid() != 0 || meta.mode() & 0o1000 == 0 {
+        eprintln!("root-owned sticky temporary parent unavailable");
+        return;
+    }
+    let f = Fixture::new();
+    let reservation = tempfile::Builder::new()
+        .prefix("dungeon-config-fixture-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let directory = reservation.path().to_path_buf();
+    reservation.close().unwrap();
+    let out = f.run(&[
+        "init",
+        "--yes",
+        "--agent",
+        "opencode",
+        "--harness-config",
+        "copy",
+        "--directory",
+        directory.to_str().unwrap(),
+    ]);
+    let config_path = directory.join("dungeon.json");
+    let saved = fs::read(&config_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    let has_snapshot = saved
+        .as_ref()
+        .and_then(|v| v["harness"]["snapshot"].as_str())
+        .is_some_and(|digest| {
+            directory
+                .join("harness")
+                .join(digest)
+                .join("manifest.json")
+                .is_file()
+        });
+    if directory.exists() {
+        fs::remove_dir_all(&directory).unwrap();
+    }
+    assert!(out.status.success(), "{out:?}");
+    assert!(has_snapshot);
+}
+
+#[test]
+fn headless_config_edit_uses_existing_schema_and_preserves_policy_and_sources() {
+    let f = Fixture::new();
+    f.success(&["init", "--yes", "--agent", "opencode"]);
+    let path = f.config_path();
+    let policy = fs::read(path.with_file_name("policy.json")).unwrap();
+    f.success(&[
+        "config",
+        "--edit",
+        "--yes",
+        "--image",
+        "ghcr.io/example/agent:Reviewed",
+        "--project-transfer",
+        "copy",
+        "--harness-config",
+        "copy",
+        "--exclude-provider-auth",
+        "--harness-exclude",
+        "themes",
+    ]);
+    let values = &f.config()["values"];
+    assert_eq!(values["schema"], 2);
+    assert_eq!(values["image"], "ghcr.io/example/agent:Reviewed");
+    assert_eq!(f.config()["project_transfer"], "copy");
+    assert_eq!(
+        values["harness"]["files"],
+        json!(["config/plugins/local/index.js"])
+    );
+    assert!(values["harness"]["snapshot"].is_string());
+    assert_eq!(
+        fs::read(path.with_file_name("policy.json")).unwrap(),
+        policy
+    );
+    let harness = values["harness"].clone();
+    // Ordinary edits and inspection must keep a snapshot without reopening sources.
+    symlink(
+        "/unavailable-synthetic-plugin",
+        f.source.join("plugins/bad"),
+    )
+    .unwrap();
+    f.success(&["config", "--edit", "--yes", "--agent", "claude"]);
+    assert_eq!(f.config()["values"]["agent"], "claude");
+    assert_eq!(f.config()["values"]["harness"], harness);
+    f.success(&["config", "--edit", "--yes", "--harness-config", "disabled"]);
+    assert_eq!(f.plan()["harness"]["mounts"], json!([]));
+    assert!(f.source.join("plugins/bad").is_symlink());
+}
+
+#[test]
+fn config_edit_refuses_missing_approval_invalid_values_and_every_binding_marker() {
+    for marker in ["none", "invalid", "directory", "dangling"] {
+        let f = Fixture::new();
+        f.success(&["init", "--yes", "--agent", "opencode"]);
+        let path = f.config_path();
+        let before = fs::read(&path).unwrap();
+        let state = path.with_file_name("runtime.json");
+        match marker {
+            "invalid" => fs::write(&state, "invalid synthetic binding").unwrap(),
+            "directory" => fs::create_dir(&state).unwrap(),
+            "dangling" => symlink("/unavailable-synthetic-binding", &state).unwrap(),
+            _ => {}
+        }
+        symlink(
+            "/unavailable-synthetic-plugin",
+            f.source.join("plugins/bad"),
+        )
+        .unwrap();
+        let mut args = vec!["config", "--edit", "--harness-config", "copy"];
+        if marker != "none" {
+            args.push("--yes");
+        }
+        let out = f.run(&args);
+        assert!(!out.status.success(), "{out:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(if marker == "none" {
+                "requires a terminal"
+            } else {
+                "bound sandbox"
+            }),
+            "{out:?}"
+        );
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert!(!path.with_file_name("harness").exists());
+        if marker == "none" {
+            for extra in [
+                vec!["--image", "unqualified"],
+                vec!["--harness-exclude", "themes"],
+            ] {
+                let mut args = vec!["config", "--edit", "--yes"];
+                args.extend(extra);
+                assert!(!f.run(&args).status.success());
+                assert_eq!(fs::read(&path).unwrap(), before);
+            }
+        }
+    }
+}
+
+#[test]
+fn config_edit_shares_creation_admission_even_without_existing_imports() {
+    let f = Fixture::new();
+    f.success(&["init", "--yes", "--agent", "opencode"]);
+    let path = f.config_path();
+    let before = fs::read(&path).unwrap();
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path.with_file_name("transfer.lock"))
+        .unwrap();
+    lock.lock().unwrap();
+    symlink(
+        "/unavailable-synthetic-plugin",
+        f.source.join("plugins/bad"),
+    )
+    .unwrap();
+    let out = f.run(&["config", "--edit", "--yes", "--harness-config", "copy"]);
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("owns"),
+        "{out:?}"
+    );
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert!(!path.with_file_name("harness").exists());
 }
 
 #[test]
@@ -386,7 +558,7 @@ fn mistaken_run_option_has_actionable_recovery_before_runtime_contact() {
 }
 
 #[test]
-fn copy_reload_captures_private_bytes_and_source_drift_does_not_refresh_them() {
+fn copy_init_approves_private_bytes_and_only_explicit_reload_refreshes_them() {
     let f = Fixture::new();
     f.success(&[
         "init",
@@ -396,7 +568,7 @@ fn copy_reload_captures_private_bytes_and_source_drift_does_not_refresh_them() {
         "--harness-config",
         "copy",
     ]);
-    assert!(f.config()["values"]["harness"]["snapshot"].is_null());
+    assert!(f.config()["values"]["harness"]["snapshot"].is_string());
     let path = f.config_path();
     let before = fs::read(&path).unwrap();
     let refused = f.run(&["reload"]);
@@ -534,6 +706,11 @@ fn serialized_mount_budget_refuses_before_scope_approval_or_snapshot_capture() {
                 mode,
             ]);
         }
+        let before = if mode == "copy" {
+            Some(f.config())
+        } else {
+            None
+        };
         for i in 0..300 {
             fs::write(
                 f.source
@@ -564,9 +741,9 @@ fn serialized_mount_budget_refuses_before_scope_approval_or_snapshot_capture() {
             assert!(!f.home.join("config/dungeon").exists());
         } else {
             let config = f.config();
-            assert!(config["values"]["harness"]["snapshot"].is_null());
+            assert_eq!(config, before.unwrap());
             let parent = f.config_path().parent().unwrap().to_path_buf();
-            assert!(!parent.join("harness").exists());
+            assert!(parent.join("harness").exists());
             assert!(!fs::read_dir(parent).unwrap().any(|p| {
                 p.unwrap()
                     .file_name()

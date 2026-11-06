@@ -89,8 +89,8 @@ independently useful contract: plain containers do not require OpenShell.
 
 ### Plain-container selection and lifetime
 
-New bindings use saved setup defaults, otherwise installed OpenShell or plain
-containers, unless explicitly selected with `--runtime`. Existing schema-2 configs
+New human bindings use saved setup defaults, otherwise plain containers, unless
+explicitly selected with `--runtime` or OpenShell-only options. Existing schema-2 configs
 without `container` remain OpenShell with unchanged serialization/fingerprints.
 `container` holds the requested engine and optional local Unix endpoint. First
 creation discovers usable services (Podman first), then records engine, endpoint,
@@ -274,9 +274,22 @@ The choice is stored in the project binding, without a global preference registr
 Host harness imports are disabled by default; read-only/copy access is opt-in.
 Human explicit and implicit initialization share one configuration-default
 constructor; CLI options are overrides rather than a second set of defaults.
+Without saved defaults, human setup/initialization recommends plain containers;
+installed OpenShell is not configuration authority. Explicit OpenShell options
+and saved selections retain that runtime; existing bindings never downgrade.
 The same config writer and validator serve direct binding and machine
 initialization. `config` exposes resolved values/paths without a new registry;
-`config` and `plan` never initialize missing bindings or contact OpenShell.
+bare `config` and `plan` never initialize missing bindings or contact OpenShell.
+Explicit `config --edit` reviews common schema fields for an unbound environment.
+It keeps the runtime, service, project identity and policy, using the same atomic
+configuration replacement as reload under existing environment/import locks.
+No editor shell snippets, new schema, registry or backend abstraction is added.
+
+Interactive first use selects an agent, image/project access and optional OpenCode
+snapshot, then approves once before saving/launch. Human `init --harness-config
+copy` stages and saves its reviewed snapshot without a separate reload. Snapshot
+preparation/publication is shared with edit/reload; original-source mounts remain
+an advanced explicit choice. Machine initialization remains import-free.
 
 Bare `dungeon` is interactive-only for every harness and reuses `run`'s guest-CLI
 launch path, with no host harness client requirement. Explicit `run` accepts

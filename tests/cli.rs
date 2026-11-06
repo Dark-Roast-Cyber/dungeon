@@ -48,6 +48,20 @@ impl Fixture {
 }
 
 #[test]
+fn configuration_mutation_options_require_explicit_edit_and_conflict_with_path() {
+    let f = Fixture::new();
+    for args in [
+        vec!["config", "--yes"],
+        vec!["config", "--image", "ghcr.io/example/agent:1"],
+        vec!["config", "--path", "--edit"],
+        vec!["config", "--edit", "--harness-config", "automatic"],
+    ] {
+        assert!(!f.run(&args).status.success(), "{args:?}");
+        assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
+    }
+}
+
+#[test]
 fn default_init_binds_current_project_and_offline_commands_do_not_need_openshell() {
     let f = Fixture::new();
     // Repository content cannot change the selected transfer, image or provider.
@@ -163,6 +177,31 @@ fn every_runtime_and_harness_uses_the_same_image_default_and_accepts_pins() {
             }
         }
     }
+}
+
+#[test]
+fn installed_openshell_does_not_override_plain_new_project_defaults() {
+    let f = Fixture::new();
+    let tools = f.root.path().join("tools");
+    fs::create_dir(&tools).unwrap();
+    fs::write(
+        tools.join("openshell"),
+        "synthetic executable is not configuration authority",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(tools.join("openshell"), fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let out = f
+        .command()
+        .env("PATH", &tools)
+        .args(["init", "--yes", "--agent", "opencode"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert!(f.config()["values"]["container"].is_object());
 }
 
 #[test]
@@ -604,6 +643,16 @@ mod terminal {
             self.master.write_all(text.as_bytes()).unwrap();
         }
 
+        fn default_configuration(&mut self, opencode: bool) {
+            self.until("Image [");
+            self.send("\n");
+            if opencode {
+                self.until("Use a reviewed copy of your OpenCode configuration?");
+                self.send("\n");
+            }
+            self.until("Save this private configuration and continue?");
+        }
+
         fn finish(mut self, success: bool) -> String {
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
@@ -629,6 +678,99 @@ mod terminal {
                 let _ = self.child.kill();
             }
             let _ = self.child.wait();
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn first_run_reviews_and_saves_snapshot_without_reload() {
+        for approve in [false, true] {
+            let f = Fixture::new();
+            let source = f.home.join("config/opencode/themes");
+            fs::create_dir_all(&source).unwrap();
+            fs::write(source.join("synthetic.json"), "{\"fixture\":1}").unwrap();
+            let mut terminal =
+                Terminal::spawn(f.command(), &["run", "opencode", "--", "--version"]);
+            terminal.until("Image [");
+            terminal.send("ghcr.io/example/agent:Reviewed\n");
+            terminal.until("Use a reviewed copy of your OpenCode configuration?");
+            assert!(terminal.text.contains("can expose credentials"));
+            terminal.send("y\n");
+            terminal.until("Save this private configuration and continue?");
+            assert!(terminal.text.contains("\"snapshot\": \""));
+            assert!(!f.home.join("config/dungeon").exists());
+            // The saved copy must be the reviewed bytes, not later source contents.
+            fs::write(source.join("synthetic.json"), "{\"fixture\":2}").unwrap();
+            terminal.send(if approve { "y\n" } else { "n\n" });
+            terminal.finish(false); // No engine is on this fixture's PATH.
+            if approve {
+                let config = f.config();
+                assert_eq!(config["values"]["image"], "ghcr.io/example/agent:Reviewed");
+                let h = &config["values"]["harness"];
+                assert_eq!(h["mode"], "copy");
+                let path = PathBuf::from(config["config"].as_str().unwrap());
+                let copied = path
+                    .parent()
+                    .unwrap()
+                    .join("harness")
+                    .join(h["snapshot"].as_str().unwrap())
+                    .join("config/themes/synthetic.json");
+                assert_eq!(fs::read_to_string(copied).unwrap(), "{\"fixture\":1}");
+                assert!(!path.with_file_name("runtime.json").exists());
+            } else {
+                assert!(!f.home.join("config/dungeon").exists());
+            }
+            assert!(!fs::read_dir(f.home.join("config")).unwrap().any(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("harness-review-")
+            }));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guided_editor_reviews_changes_and_preserves_config_on_cancel_or_new_binding() {
+        for action in ["save", "cancel", "concurrent"] {
+            let f = Fixture::new();
+            assert!(
+                f.run(&[
+                    "init",
+                    "--yes",
+                    "--agent",
+                    "claude",
+                    "--runtime",
+                    "openshell"
+                ])
+                .status
+                .success()
+            );
+            let path = PathBuf::from(f.config()["config"].as_str().unwrap());
+            let before = fs::read(&path).unwrap();
+            let mut terminal = Terminal::spawn(f.command(), &["config", "--edit"]);
+            terminal.until("Agent [");
+            terminal.send("codex\n");
+            terminal.until("Image [");
+            terminal.send("ghcr.io/example/agent:Editor\n");
+            terminal.until("Project access [");
+            terminal.send("copy\n");
+            terminal.until("Save this private configuration and continue?");
+            assert_eq!(fs::read(&path).unwrap(), before);
+            if action == "concurrent" {
+                fs::write(path.with_file_name("runtime.json"), "synthetic binding").unwrap();
+            }
+            terminal.send(if action == "cancel" { "n\n" } else { "y\n" });
+            terminal.finish(action == "save");
+            if action == "save" {
+                let config = f.config();
+                assert_eq!(config["values"]["agent"], "codex");
+                assert_eq!(config["values"]["image"], "ghcr.io/example/agent:Editor");
+                assert_eq!(config["project_transfer"], "copy");
+            } else {
+                assert_eq!(fs::read(&path).unwrap(), before);
+            }
         }
     }
 
@@ -764,7 +906,7 @@ mod terminal {
         for agent in ["opencode", "claude", "codex"] {
             let f = Fixture::new();
             let mut terminal = Terminal::spawn(f.command(), &["run", agent]);
-            terminal.until("Save this private configuration and continue?");
+            terminal.default_configuration(agent == "opencode");
             terminal.send("y\n");
             terminal.finish(false);
             let implicit = f.config();
@@ -804,7 +946,7 @@ mod terminal {
             terminal.until("Enter 1, 2 or 3");
             assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
             terminal.send(&format!("{input}\n"));
-            terminal.until("Save this private configuration and continue?");
+            terminal.default_configuration(agent == "opencode");
             assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
             terminal.send("y\n");
             terminal.finish(true);
@@ -824,7 +966,7 @@ mod terminal {
             let mut terminal = Terminal::spawn(f.command(), &args);
             terminal.until("Harness [1-3 or name; no default]:");
             terminal.send("claude\n");
-            terminal.until("Save this private configuration and continue?");
+            terminal.default_configuration(false);
             terminal.send("y\n");
             terminal.finish(false);
             assert_eq!(f.config()["values"]["agent"], "claude");
@@ -836,7 +978,7 @@ mod terminal {
         ] {
             let f = Fixture::new();
             let mut terminal = Terminal::spawn(f.command(), &args);
-            terminal.until("Save this private configuration and continue?");
+            terminal.default_configuration(args == ["run", "opencode"] || args == ["attach"]);
             assert!(!terminal.text.contains("Choose this project's harness"));
             terminal.send("n\n");
             terminal.finish(false);
@@ -857,7 +999,7 @@ mod terminal {
             terminal.until("Harness [1-3 or name; no default]:");
             if select {
                 terminal.send("codex\n");
-                terminal.until("Save this private configuration and continue?");
+                terminal.default_configuration(false);
             }
             terminal.send(cancel);
             terminal.finish(false);
