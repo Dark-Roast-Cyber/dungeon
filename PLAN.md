@@ -4,6 +4,92 @@ Goal: host-native clients/editors, isolated agent execution, and visible local
 project edits without weakening the boundary. Validation does not authorize
 tool upgrades, client installation, release/tagging, or publication.
 
+## Next batch: a supported install-to-agent path (2026-11-06)
+
+Status: **proposed, not implementation approval**. Keep this ahead of new remote,
+shared-login or orchestration features. Reuse adoption Issue #18; no new issue,
+installation, service change or runtime upgrade is authorized by this plan.
+
+### What the user experience exposed
+
+- Doctor lists dependent unknowns as separate blockers, repeating the same link,
+  instead of identifying the missing prerequisite and one next action.
+- Offline init saves an OpenShell binding and recommends launch even when the
+  runtime is absent. The later refusal does not explain the supported install path.
+- Dungeon requires 0.0.116, but upstream's normal installer delivered stable
+  0.1.7. Installing successfully therefore led straight to another refusal.
+- Raw `openshell sandbox create` is not Dungeon setup. Upstream 0.1.x deliberately
+  defaults to minimal Ubuntu without an agent; the missing `opencode` is expected.
+- The transcript's local-image default and cancel-to-customize message suggest an
+  older Dungeon build than this branch. Confirm executable/build identity before
+  assuming current source improvements have reached that machine.
+
+The 0.1.7 [README](https://github.com/NVIDIA/OpenShell/blob/v0.1.7/README.md)
+and [0.1.0 upgrade guide](https://github.com/NVIDIA/OpenShell/blob/v0.1.7/docs/upgrade/0-1-0.mdx)
+confirm breaking deployment/policy/API changes and no in-place local 0.0.x upgrade.
+This is not a version-string-only fix. No upstream installer was executed here.
+
+### Ordered, bounded work
+
+1. **Resolve the supported OpenShell target.** Assess 0.1.7 as the candidate,
+   using a disposable Debian fixture matching the reported installation path.
+   Check native gateway ownership/service/port, CLI JSON and canonical resource
+   identity, schema-v2 gateway config, policy enforcement, live mounts/UID mapping,
+   image availability, transfer and execution/cleanup boundaries. Produce a go/no-go
+   and the smallest concrete adapter change before implementing the cutover.
+   Prefer one reviewed current target over a multi-version compatibility layer.
+   Never just relax the version guard. Old guests/config/auth stay untouched;
+   document recovery with the retained old binary rather than automatic conversion.
+   Any replacement/export/recovery operation needs explicit approval. Do not run
+   old/new peers against one database or replace an existing gateway on port17670.
+
+2. **Make diagnostics short and actionable.** Default human doctor to readiness,
+   installed/supported versions, the independent root blockers and one next action.
+   Mark dependent checks skipped rather than suggesting each is a separate failure.
+   Keep complete observations in `--verbose` and existing JSON, preserving blocking
+   exit semantics, safe query boundaries and read-only behavior. Show the selected
+   Dungeon executable/build identity so a stale or shadowed install is recognizable.
+   Compatibility errors must report both installed and required versions, not just
+   repeat the pin. Provide one version-specific reviewed setup/recovery link.
+
+3. **Unify the ordinary setup handoff.** Target `dungeon setup`, then `dungeon`
+   in a project: choose runtime/image, review scope, prepare approved resources,
+   launch the chosen guest agent. Human review should be a short scope summary,
+   not a raw command/policy dump. Do not recommend `init -> plan -> up` as mandatory
+   ceremony; retain these as advanced/offline inspection and headless interfaces.
+   Keep explicit offline init usable, but distinguish saved configuration from
+   runtime readiness and give its actual next step. First-launch prerequisites
+   should fail before unnecessary prompts or new project bindings. Keep plain
+   containers an explicit simpler choice, never a silent fallback from OpenShell.
+
+4. **Close the image/agent gap.** Always pass the reviewed selected image, never
+   rely on OpenShell's default guest. Verify the configured agent's executable and
+   version through the selected runtime before calling the launch ready. Missing
+   tools need an image-specific remedy, not a generic shell or host installation.
+   If a guest was already created, preserve it and explain explicit recovery;
+   do not silently rebuild it, install arbitrary tools or overwrite sessions.
+   Reuse the existing image recipe and writer, not a package manager or framework.
+
+### Acceptance and remaining blockers
+
+- Fresh Debian install-to-agent test using the supported release and actual guest
+  OpenCode, plus headless equivalents; help/version output alone is not acceptance.
+- Missing engine/CLI, wrong CLI, stale Dungeon executable, tool-less image and
+  foreign/conflicting gateway each produce a short diagnosis and actionable remedy
+  before unsafe mutation. Old bindings and existing runtime state remain unchanged.
+- Human review remains explicit; JSON automation stays stable; doctor never installs,
+  starts services, reads credentials or claims containment from inventory alone.
+- Actual new/edited-script execution, edit/test and same-ID resume must pass;
+  verify documented cancellation semantics without promising owned cleanup for
+  plain containers. The current raw-Podman exit137 failure remains an independent P0
+  blocker requiring host/runtime/security telemetry, not a security bypass.
+  Retain the live gate and track intermittent ownership-test failures separately;
+  do not expand this batch into a cleanup/transport redesign.
+- No automatic sudo, latest-install shell pipeline, host credential import,
+  policy widening, service takeover or guest/data migration. The compatibility
+  assessment must identify any necessary change to the existing security contract
+  before runtime implementation is approved.
+
 ## Progress and evidence
 
 Validated on the recorded Fedora/OpenShell 0.0.116/rootless-Podman combination
