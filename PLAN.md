@@ -4,91 +4,312 @@ Goal: host-native clients/editors, isolated agent execution, and visible local
 project edits without weakening the boundary. Validation does not authorize
 tool upgrades, client installation, release/tagging, or publication.
 
-## Next batch: a supported install-to-agent path (2026-11-06)
+## Active handoff: forward-compatible OpenShell and simple onboarding (2026-11-06)
 
-Status: **proposed, not implementation approval**. Keep this ahead of new remote,
-shared-login or orchestration features. Reuse adoption Issue #18; no new issue,
-installation, service change or runtime upgrade is authorized by this plan.
+**Read this section first after compaction.** It supersedes the earlier exact-pin
+proposal for the next batch. The history below remains evidence, not a current
+claim that the new runtime works. This turn is planning only; start implementation
+when the user starts the next phase. No installer, runtime upgrade or service
+change was performed while preparing this handoff.
 
-### What the user experience exposed
+### 1. Outcome and user-selected compatibility policy
 
-- Doctor lists dependent unknowns as separate blockers, repeating the same link,
-  instead of identifying the missing prerequisite and one next action.
-- Offline init saves an OpenShell binding and recommends launch even when the
-  runtime is absent. The later refusal does not explain the supported install path.
-- Dungeon requires 0.0.116, but upstream's normal installer delivered stable
-  0.1.7. Installing successfully therefore led straight to another refusal.
-- Raw `openshell sandbox create` is not Dungeon setup. Upstream 0.1.x deliberately
-  defaults to minimal Ubuntu without an agent; the missing `opencode` is expected.
-- The transcript's local-image default and cancel-to-customize message suggest an
-  older Dungeon build than this branch. Confirm executable/build identity before
-  assuming current source improvements have reached that machine.
+Deliver one practical path from a supported installation to the chosen guest
+agent: `dungeon setup`, then `dungeon` in a project. Keep advanced/headless options.
+Do not add a daemon, backend trait, multi-version adapter, installer framework,
+credential copier, policy language or agent orchestration layer.
 
-The 0.1.7 [README](https://github.com/NVIDIA/OpenShell/blob/v0.1.7/README.md)
-and [0.1.0 upgrade guide](https://github.com/NVIDIA/OpenShell/blob/v0.1.7/docs/upgrade/0-1-0.mdx)
-confirm breaking deployment/policy/API changes and no in-place local 0.0.x upgrade.
-This is not a version-string-only fix. No upstream installer was executed here.
+The user explicitly accepts some forward-compatibility risk:
 
-### Ordered, bounded work
+- Port the existing adapter to **OpenShell 0.1.7 as the initial minimum**.
+- Accept newer stable versions by default, including later minor/major versions.
+  Do not impose an exact Dungeon pin, arbitrary upper bound or per-version override.
+- This means **attempt newer releases**, not certify all future behavior. Required
+  response, identity and enforcement checks still fail closed on incompatible data.
+- Test the minimum and the current stable release. If they are the same release,
+  record that honestly; synthetic future-version tests prove admission logic only.
+- Check CLI/gateway/driver compatibility separately. Prefer a matching release
+  pair unless documented negotiation establishes compatibility. Do not accept an
+  old gateway merely because a newer CLI passes the minimum-version check.
+- Provision only a reviewed compatible gateway artifact for the selected CLI,
+  not a permanently hardcoded 0.0.116 image or a blindly floating gateway tag.
+  Ordinary launch must not install/update the CLI, refresh services or migrate data.
+- Prerelease, malformed and unrecognized version output remain unsupported in this
+  batch. Diagnostics must distinguish an old version from an unparseable response.
 
-1. **Resolve the supported OpenShell target.** Assess 0.1.7 as the candidate,
-   using a disposable Debian fixture matching the reported installation path.
-   Check native gateway ownership/service/port, CLI JSON and canonical resource
-   identity, schema-v2 gateway config, policy enforcement, live mounts/UID mapping,
-   image availability, transfer and execution/cleanup boundaries. Produce a go/no-go
-   and the smallest concrete adapter change before implementing the cutover.
-   Prefer one reviewed current target over a multi-version compatibility layer.
-   Never just relax the version guard. Old guests/config/auth stay untouched;
-   document recovery with the retained old binary rather than automatic conversion.
-   Any replacement/export/recovery operation needs explicit approval. Do not run
-   old/new peers against one database or replace an existing gateway on port17670.
+Do not implement this by deleting the current version check. The 0.1.x boundary
+changes deployment, policy, resource identity and APIs, not just a version string.
 
-2. **Make diagnostics short and actionable.** Default human doctor to readiness,
-   installed/supported versions, the independent root blockers and one next action.
-   Mark dependent checks skipped rather than suggesting each is a separate failure.
-   Keep complete observations in `--verbose` and existing JSON, preserving blocking
-   exit semantics, safe query boundaries and read-only behavior. Show the selected
-   Dungeon executable/build identity so a stale or shadowed install is recognizable.
-   Compatibility errors must report both installed and required versions, not just
-   repeat the pin. Provide one version-specific reviewed setup/recovery link.
+### 2. Resume checkpoint and existing evidence
 
-3. **Unify the ordinary setup handoff.** Target `dungeon setup`, then `dungeon`
-   in a project: choose runtime/image, review scope, prepare approved resources,
-   launch the chosen guest agent. Human review should be a short scope summary,
-   not a raw command/policy dump. Do not recommend `init -> plan -> up` as mandatory
-   ceremony; retain these as advanced/offline inspection and headless interfaces.
-   Keep explicit offline init usable, but distinguish saved configuration from
-   runtime readiness and give its actual next step. First-launch prerequisites
-   should fail before unnecessary prompts or new project bindings. Keep plain
-   containers an explicit simpler choice, never a silent fallback from OpenShell.
+- Checkout: `/home/christian/github/dungeon`; branch
+  `feat/setup-wizard-shared-images`. Preserve its published history and local work.
+- Runtime fixes already committed: `dfaa449` (fallible output/pre-creation errors),
+  `7f49910` (container machine init), `5f6f556` (live-written-script native gate).
+  `46aff11` was the previous planning commit; this section replaces its proposal.
+  Those four commits had not been pushed when this handoff was prepared.
+- Worktree audit: `git worktree list --porcelain` listed only this main checkout;
+  `git worktree prune --dry-run --verbose` found no stale registrations. Nothing
+  needed deletion. Do not remove the main checkout or delete branches as cleanup.
+- Existing implementation still requires OpenShell **0.0.116**. It has not yet
+  been ported or validated against 0.1.7.
+- Last source release SHA-256:
+  `d31078e016f35131e5af1de3c1bed5dab991b52fac4cf0ce7f6824cdc28e1566`.
+  The installed `~/.local/bin/dungeon` remained the older
+  `98b2ff87832a1a22b4fa51813152f1e884a7cd9599104b794bb47b995b80a550` binary.
+  Validate a newly built `target/release/dungeon`, not an assumed PATH installation.
+- Last combined checks: 249 Rust tests passed with serialized execution, 26 Node24
+  tests passed, plus fmt/Clippy/release build and 40 native non-TTY smoke commands.
+  Earlier ownership-test failures were intermittent and are not claimed fixed.
+- **Native edit/test is still blocked on the current Podman host by exit137**.
+  New/edited JavaScript fails on both cached images and in a Podman-only control.
+  Existing scripts and inline Node pass; no cgroup OOM kills were recorded. The
+  available logs did not identify the cause. An active security sensor is not proof
+  that it caused the kill. No bypass, relabel repair or fallback was introduced.
+- Evidence: `docs/validation.md#headless-follow-up-2026-11-06-source-checkout`,
+  `/tmp/opencode/dungeon-headless-fixes/` and `/tmp/opencode/dungeon-headless-audit/`.
+  The audit's `live-file-probe.py` is the detailed reproducer; the fixes directory's
+  `native-control.py` reproduces outside Dungeon. Keep failed gate results visible.
 
-4. **Close the image/agent gap.** Always pass the reviewed selected image, never
-   rely on OpenShell's default guest. Verify the configured agent's executable and
-   version through the selected runtime before calling the launch ready. Missing
-   tools need an image-specific remedy, not a generic shell or host installation.
-   If a guest was already created, preserve it and explain explicit recovery;
-   do not silently rebuild it, install arbitrary tools or overwrite sessions.
-   Reuse the existing image recipe and writer, not a package manager or framework.
+The user's separate Debian-machine experience was: verbose doctor with many
+dependent blockers; offline init appeared to promise readiness; upstream install
+delivered 0.1.7; raw `openshell sandbox create` produced a guest without OpenCode;
+Dungeon then rejected 0.1.7. Its old local-image default/customization text suggests
+an older Dungeon build too, but confirm executable identity rather than assume it.
 
-### Acceptance and remaining blockers
+Primary sources already checked:
 
-- Fresh Debian install-to-agent test using the supported release and actual guest
-  OpenCode, plus headless equivalents; help/version output alone is not acceptance.
-- Missing engine/CLI, wrong CLI, stale Dungeon executable, tool-less image and
-  foreign/conflicting gateway each produce a short diagnosis and actionable remedy
-  before unsafe mutation. Old bindings and existing runtime state remain unchanged.
-- Human review remains explicit; JSON automation stays stable; doctor never installs,
-  starts services, reads credentials or claims containment from inventory alone.
-- Actual new/edited-script execution, edit/test and same-ID resume must pass;
-  verify documented cancellation semantics without promising owned cleanup for
-  plain containers. The current raw-Podman exit137 failure remains an independent P0
-  blocker requiring host/runtime/security telemetry, not a security bypass.
-  Retain the live gate and track intermittent ownership-test failures separately;
-  do not expand this batch into a cleanup/transport redesign.
-- No automatic sudo, latest-install shell pipeline, host credential import,
-  policy widening, service takeover or guest/data migration. The compatibility
-  assessment must identify any necessary change to the existing security contract
-  before runtime implementation is approved.
+- [0.1.7 release](https://github.com/NVIDIA/OpenShell/releases/tag/v0.1.7), stable,
+  published 2026-11-03; recheck the current stable release when implementation starts.
+- [0.1.7 README](https://github.com/NVIDIA/OpenShell/blob/v0.1.7/README.md): the
+  installer sets up a CLI/local gateway; the default guest is minimal Ubuntu with
+  **no agent**. A raw demo guest is not Dungeon setup.
+- [0.1.0 upgrade guide](https://github.com/NVIDIA/OpenShell/blob/v0.1.7/docs/upgrade/0-1-0.mdx):
+  local 0.0.x cannot upgrade in place; persisted sandboxes must be recreated;
+  gateway config is schema2; identities, policy and request/deletion semantics change.
+  Mixed old/new peers and databases are not an upgrade strategy.
+
+### 3. Read first and inspect the existing owners
+
+Read `AGENTS.md`, `README.md`, `SECURITY.md`, `docs/architecture.md`,
+`docs/validation.md` and the recent local `.opencode/decision-log.md` tail.
+Use synthetic fixtures only. Never read `.env` variants or real credential/session
+stores. Reuse adoption Issue #18 rather than create a second issue tracker here.
+
+| Responsibility | Existing owner / main regression locations |
+| --- | --- |
+| Runtime version check and sole OpenShell subprocess boundary | `src/openshell.rs::Runtime::new`, `src/main.rs::OPEN_SHELL_VERSION` |
+| Gateway setup/version/health/storage/ownership checks | `src/setup.rs::require_version`, `gateway_health`, setup predicates and embedded tests |
+| Read-only diagnostics and human/JSON rendering | `src/doctor.rs` and embedded tests |
+| Configuration validation, fingerprints and runtime markers | `src/config.rs`, `src/binding.rs`, `src/export.rs` locks |
+| Guided init/setup/launch, summaries and versions | `src/cli.rs`, `src/runtime.rs`, `tests/cli.rs`, `tests/setup.rs` |
+| Policy and runtime identity | `src/policy.rs`, `src/openshell.rs`, `tests/lifecycle.rs` |
+| Imports and their bounded mount contract | `src/imports.rs`, `src/harness.rs`, `tests/harness.rs` |
+| Owned execution, SSH, streaming and attachment | `src/owned.rs`, `src/owned.cjs`, `src/owned_ssh.rs`, `src/stream.rs`, `src/remote.rs`, `tests/machine.rs` |
+| Machine wire contract / plain-container regression | `src/machine.rs`, `src/container.rs`, `tests/container.rs`, `docs/machine.md` |
+| Image requirements and local installation | `images/agent/`, `scripts/install-local.sh`, `tests/install_local.rs`, `tests/container-live.sh` |
+
+**Identity trap:** `src/config.rs` hashes `OPEN_SHELL_VERSION` into every config
+fingerprint, including plain containers. Separate the minimum accepted runtime
+version from persisted adapter/config identity before replacing that constant.
+Raising the admission floor later must not invalidate already-created compatible
+guests. Preserve old plain-container fingerprints. Legacy OpenShell bindings must
+be recognized/refused with recovery guidance, not silently sent to a new runtime.
+Use a minimal persisted contract marker only if needed to make that distinction;
+do not build a migration framework or keep a second executable legacy adapter.
+
+### 4. Ordered implementation slices
+
+#### A. Establish the modern contract before production changes
+
+In a disposable Debian fixture, inspect the pinned 0.1.7 CLI/source/docs and actual
+JSON outputs. Record the CLI/gateway/artifact versions and selected compute driver.
+Do not run the upstream installer on this host or against an existing gateway.
+
+Map each current operation to its supported native counterpart:
+
+- Gateway discovery/registration, health, mTLS, ownership, workspace selection and
+  service/port conflicts. Determine how to use an explicitly reviewed native local
+  gateway without starting a competing Dungeon-managed gateway on port17670.
+- Create/get/start/stop/delete, canonical name + workspace selectors, persistent
+  runtime identity, labels and policy readback. Distinguish async deletion or an
+  uncertain mutation outcome from completion; do not blindly retry creates.
+- Schema2 gateway config, bind admission, host-project scope, UID/GID mapping and
+  selected read-only imports. Do not assume old `driver_config` JSON still grants
+  the same bounded contract, or enable broader mounts to recover convenience.
+- Upload/download filtering and copy baselines; native exec/stdin/exit behavior;
+  SSH/forwarding and the existing owned cleanup/receipt path.
+- Existing starter policy/image compatibility, including hard enforcement, native
+  parent-directory writability and the chosen agent's real entrypoint.
+
+Append a small mapping/status table under this section as evidence. Then choose
+the smallest concrete port. If a required security/identity/import/cleanup contract
+cannot be preserved, stop for a scoped decision; do not silently remove a feature
+or report unsupported behavior as working. UX-only corrections can ship separately
+from a blocked port, but must not advertise 0.1.x support prematurely.
+
+#### B. Implement minimum-version admission and stable persisted identity
+
+- One bounded version parser/checker, owned by the existing OpenShell boundary,
+  shared by runtime, setup and doctor. No duplicated string gates or capability
+  registry. Reuse existing helpers where they actually meet this contract.
+- Accept normal `openshell VERSION` / `openshell vVERSION` output and stable
+  semantic versions, including valid build metadata; reject malformed, overflowing,
+  control-bearing, prerelease or below-floor values with sanitized diagnostics.
+- Unit cases: 0.0.116 and 0.1.6 refuse; 0.1.7, 0.1.8, 0.2.0 and 1.0.0 admit to
+  contract verification. Synthetic future-version admission is not native support
+  evidence. A numerically newer CLI with incompatible required fields still fails.
+- Report observed version, minimum and tested baseline. Newer-than-tested status
+  is informational, not a repeated approval prompt or hard upper-version gate.
+- Test CLI/gateway mismatch and the separation of admission version, selected
+  gateway artifact and configuration identity. Preserve identity on restart and
+  later minimum-floor changes; fail safely on legacy OpenShell state.
+
+#### C. Port the one adapter and setup path
+
+Update the existing concrete OpenShell implementation, policy owner and setup
+predicates to the verified modern native contract. Keep direct Podman/Docker
+execution separate and unchanged; npm remains distribution-only.
+
+- Keep explicit canonical project scope, service identity, policy verification,
+  manual approvals, `--no-auto-providers` semantics and import exclusions. If a
+  native flag disappears, verify the replacement behavior instead of dropping it.
+- Prefer native lifecycle/identity guarantees over another Dungeon registry. Keep
+  unknown output, partial creation and mismatched identity conservative. Preserve
+  truthful effect classification and the existing no-replacement recovery posture.
+- Preserve machine schema1 and workload-byte/exit semantics. Adapt internal native
+  response parsing; do not change the external wire contract to match every vendor
+  release. Do not add plain-container JSONL/owned transport in this batch.
+- Reuse only an explicitly selected, compatible local gateway after ownership,
+  endpoint/auth and driver checks. Never switch the user's active gateway, overwrite
+  foreign config or restart a native systemd service as an incidental repair.
+- If fresh provisioning is necessary, use a verified artifact compatible with the
+  discovered CLI and existing explicit setup approval. Do not install host packages
+  or introduce a generalized package installer. Unknown provisioning paths must
+  produce a precise manual prerequisite, not a shell pipeline executed by Dungeon.
+- Preserve all old data. Document use of a retained old binary for legacy export/
+  recovery; actually exporting, deleting or recreating legacy guests needs separate
+  explicit authority. Do not mix old/new gateways against one database.
+
+#### D. Make human diagnostics and first-run flow small
+
+- Default doctor: readiness, selected runtime, installed/minimum/tested versions,
+  independent root blockers, one next command/action and one relevant guide link.
+  No long policy dump, repeated links or historical integration checklist by default.
+- `doctor --verbose` retains the full observations; JSON retains complete findings,
+  existing meanings and blocking exit status. Dependent checks may render as skipped
+  for humans without suppressing failures or inventing healthy results.
+- Reuse the same bounded read-only predicates for launch preflight. Check missing/
+  incompatible prerequisites before first-launch questions or new project binding
+  writes. Doctor must not create engine storage, activate sockets, pull images,
+  launch workloads or read credentials. Do not turn it into a dynamic containment test.
+- Explicit offline `init` stays usable without runtime contact, including `--yes`;
+  say **configuration saved; runtime readiness not checked**, with the next setup/
+  launch action. Do not add native probes or assert unobserved readiness merely to
+  improve this message. Launch preflight, not offline init, owns readiness checks.
+- Human setup/init review becomes a short summary of runtime, image, agent, project
+  access and optional imports, followed by one explicit approval. Keep `plan`'s
+  detailed JSON and bare `config` read-only; stop prescribing `init -> plan -> up`
+  as the normal workflow. Retain unbound-only edit and headless behavior.
+- Surface the selected Dungeon executable path and build revision when available
+  through the existing version/diagnostic path and installation output. Do not add
+  an updater daemon or run arbitrary project Git commands to obtain this metadata.
+- Distinguish runtime unavailability from image/tool unavailability. Every error
+  should explain what is wrong, whether anything changed and the next useful action.
+  Escape untrusted paths/output and retain fallible output writes.
+
+#### E. Verify the image and chosen agent, not just a running guest
+
+- Always use the explicitly resolved image. Keep the user's existing upstream
+  image default and tag/digest overrides unless a separate decision changes them.
+  Never fall back to OpenShell's minimal Ubuntu default or silently switch runtimes.
+- Through the selected runtime, verify the chosen agent's actual executable/version
+  before announcing a successful agent launch. Probe only that configured agent;
+  do not require all harnesses or every language toolchain in a custom image.
+- Report a missing agent/tool with the selected image and an image-specific remedy.
+  Do not install arbitrary guest tools automatically. Missing Cargo/pnpm does not
+  mean a host installation will help; keep language tools image-owned.
+- A failed post-create check must preserve the inspectable guest/config and explain
+  deliberate recovery, not silently rebuild or overwrite guest auth/sessions. Keep
+  config edits refused after binding. Stop/destroy/reinitialize remain explicit.
+- Revalidate the existing reviewed recipe and native parent layout on 0.1.x; old
+  image or `--version` success alone does not prove supervisor/policy compatibility.
+
+### 5. Regression and acceptance matrix
+
+Implementer runs focused checks per slice, then verifies the combined result:
+
+| Gate | Required observation |
+| --- | --- |
+| Version policy | Minimum/newer admission, invalid/prerelease/old refusal, and meaningful installed-versus-required messages |
+| Required native contract | Wrong/missing fields, unknown identity, gateway mismatch, policy drift and uncertain native outcomes fail safely |
+| Persistence | Existing plain fingerprints unchanged; legacy OpenShell never retargeted; modern same-ID resume retains guest files/sessions |
+| Read-only behavior | Doctor, verbose/JSON diagnosis and previews leave HOME/project/storage/services/images/config unchanged |
+| Human first run | Real PTY: supported setup, short review, one approval, selected agent launches; cancel leaves scope unchanged |
+| Error UX | Missing engine/CLI, wrong CLI, stale Dungeon path, tool-less image and foreign/port-conflicting gateway each have one useful remedy |
+| Headless | Explicit flags/approval, no terminal reads, clean JSON or native stdout/stderr as appropriate, binary stdin, literal argv and nonzero exit preserved |
+| Images/imports | Actual selected agent runs; project remains sole writable host bind; approved snapshots/read-only bytes and source labels remain correct |
+| Edit/test | Host/guest-created scripts, in-place/atomic edits, real tests and post-launch Cargo doctests on the Rust image execute, not merely inline Node |
+| Lifecycle/cleanup | Stop/resume preserves identity/state; owned OpenShell cleanup retains its evidence contract; ordinary container interruption remains documented as degraded |
+| Containment boundary | Native expected file/network denials and engine-socket/home exclusions; no claim of desktop/EDR or general platform certification |
+
+Use fresh Debian fixtures for the reported installation path and the actual
+minimum/current stable runtime pair(s). Record host/kernel, engine/driver, CLI,
+gateway and image versions/digests. No real-provider login/inference or real host
+config is needed: use synthetic projects and a loopback provider where the approved
+fixture policy permits it. A preseeded provider probe is not an edit/test gate.
+Keep actual failures separate from mocked protocol tests and skipped prerequisites.
+Verify plain Podman behavior after shared identity/config changes; use an available
+disposable Docker gate for changed shared behavior, otherwise record that gap.
+
+Repository-owned checks remain:
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked
+cargo build --release --locked
+node --test npm/launcher/test/platform.test.mjs npm/test/stage-packages.test.mjs \
+  tests/owned.test.cjs images/agent/verify-layout.test.cjs \
+  scripts/probe-opencode-identity.test.cjs
+sh -n tests/container-live.sh
+```
+
+Use the documented Node24 gate, uv for Python and pnpm for Node package operations.
+Capture noisy output under a new task-specific `/tmp/opencode/` directory. Read
+failures and preserve flaky-test evidence; do not weaken assertions/deadlines or
+retry indefinitely until green. Serialized Rust execution can diagnose contention,
+but must be labeled. Preserve cross-platform compile/warning gates.
+
+**Exit137 is a separate P0 investigation, not permission to weaken enforcement.**
+Identify the kill source from host/runtime/security telemetry or a controlled
+comparison before selecting a fix. Do not disable EDR, SELinux, seccomp or policy,
+use `node -e` as an execution workaround, or remove/skip the live-written-file gate.
+Passing a disposable Debian fixture does not close a failure on the original host.
+If it remains blocked, report that host boundary explicitly and do not claim full
+native edit/test acceptance. Keep ownership-test flakiness separate from this cause.
+
+### 6. Delivery, stop conditions and first action after compaction
+
+- Continue the cohesive adoption workstream; inspect current Git/PR state before
+  adding a branch or PR. Use meaningful implementation/test/doc commits, not one
+  PR per slice. Local commit authority from the previous task is not a new push,
+  merge, release, host-installation or runtime-migration grant.
+- Update authoritative README/configuration/architecture/security/machine docs with
+  changed behavior, and `docs/validation.md` with exact passed/failed native evidence.
+  Keep implementation planning here; append important accepted decisions to the
+  ignored main-checkout `.opencode/decision-log.md` without rewriting its history.
+- Stop for a decision if the port requires wider mounts/network policy, credential
+  access, host service takeover, destructive migration, a new backend or a materially
+  different enforcement contract. Do not silently narrow existing advertised features.
+- Do not upgrade or replace this host's working 0.0.116 gateway, stopped authenticated
+  guests, installed Dungeon, OpenCode shared service or existing image tags. Only
+  newly authorized disposable resources may be removed; inventory before/after.
+- **First action:** inspect `git status`, current log/worktrees and guidance; read
+  the sources in section3; then perform sliceA's bounded native-contract assessment.
+  Summarize the concrete port/identity/setup decisions before changing production
+  runtime behavior. Do not begin by bumping `OPEN_SHELL_VERSION` or executing an
+  upstream `curl | sh` installer on the user's machine.
 
 ## Progress and evidence
 
