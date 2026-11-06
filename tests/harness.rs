@@ -274,6 +274,54 @@ fn config_edit_shares_creation_admission_even_without_existing_imports() {
 }
 
 #[test]
+fn closed_reload_review_preserves_selected_configuration_and_snapshot() {
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+    let f = Fixture::new();
+    f.success(&[
+        "init",
+        "--yes",
+        "--agent",
+        "opencode",
+        "--harness-config",
+        "copy",
+    ]);
+    let path = f.config_path();
+    let before = fs::read(&path).unwrap();
+    let snapshot = f.config()["values"]["harness"]["snapshot"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let artifacts = path.with_file_name("harness");
+    fs::write(
+        f.source.join("themes/dungeon.json"),
+        "{\"synthetic\":\"changed\"}",
+    )
+    .unwrap();
+    let (writer, reader) = UnixStream::pair().unwrap();
+    drop(reader);
+    let out = Command::new(env!("CARGO_BIN_EXE_dungeon"))
+        .env_clear()
+        .env("HOME", &f.home)
+        .env("XDG_CONFIG_HOME", f.home.join("config"))
+        .env("XDG_DATA_HOME", f.home.join("data"))
+        .env("PATH", "")
+        .current_dir(&f.project)
+        .stdin(Stdio::null())
+        .args(["reload", "--yes"])
+        .stdout(Stdio::from(OwnedFd::from(writer)))
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("panicked"));
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert!(artifacts.join(snapshot).join("manifest.json").is_file());
+    assert_eq!(fs::read_dir(artifacts).unwrap().count(), 1);
+    assert!(!path.with_file_name("runtime.json").exists());
+}
+
+#[test]
 fn default_opencode_init_does_not_inventory_host_configuration() {
     let f = Fixture::new();
     symlink(
@@ -837,6 +885,15 @@ fn selinux_preflight_precedes_runtime_contact_and_preserves_control_independence
                         "{out:?}"
                     );
                 }
+            } else if matches!(command[0], "start" | "exec") {
+                assert!(
+                    !marker.exists(),
+                    "uncreated work must refuse before runtime lookup"
+                );
+                assert!(
+                    String::from_utf8_lossy(&out.stderr).contains("has not been created"),
+                    "{out:?}"
+                );
             } else {
                 assert!(marker.exists(), "{mode}: {command:?}: {out:?}");
                 fs::remove_file(&marker).unwrap();
@@ -844,6 +901,15 @@ fn selinux_preflight_precedes_runtime_contact_and_preserves_control_independence
             assert_eq!(fs::read(&path).unwrap(), before);
             assert!(!path.with_file_name("runtime.json").exists());
         }
+        fs::write(
+            path.with_file_name("runtime.json"),
+            json!({
+                "schema":1,"id":"synthetic-bound-sandbox","config":f.plan()["fingerprint"],
+                "observed_policy":"synthetic-observed-policy"
+            })
+            .to_string(),
+        )
+        .unwrap();
         for command in [
             vec!["status"],
             vec!["down"],
@@ -859,6 +925,7 @@ fn selinux_preflight_precedes_runtime_contact_and_preserves_control_independence
             );
             fs::remove_file(&marker).unwrap();
         }
+        fs::remove_file(path.with_file_name("runtime.json")).unwrap();
         f.success(&["plan"]);
         assert_eq!(fs::read(&path).unwrap(), before);
     }

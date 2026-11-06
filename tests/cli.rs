@@ -48,6 +48,122 @@ impl Fixture {
 }
 
 #[test]
+fn configured_but_uncreated_commands_explain_the_next_step_before_runtime_discovery() {
+    for runtime in ["container", "openshell"] {
+        let f = Fixture::new();
+        assert!(
+            f.run(&["init", "--yes", "--agent", "opencode", "--runtime", runtime])
+                .status
+                .success()
+        );
+        let config = f.config();
+        let path = PathBuf::from(config["config"].as_str().unwrap());
+        let before = fs::read(&path).unwrap();
+        for args in [
+            vec!["status"],
+            vec!["exec", "--", "true"],
+            vec!["start"],
+            vec!["down"],
+            vec!["shell"],
+        ] {
+            let out = f.run(&args);
+            assert_eq!(out.status.code(), Some(1), "{runtime}: {out:?}");
+            let error = String::from_utf8(out.stderr).unwrap();
+            assert!(
+                error.contains("has not been created") && error.contains("dungeon up"),
+                "{error}"
+            );
+        }
+        let state = path.with_file_name("runtime.json");
+        assert!(!state.exists());
+        fs::write(&state, "{\"synthetic_invalid_state\":true}").unwrap();
+        let out = f.run(&["status"]);
+        assert!(!out.status.success());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("has not been created"));
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert_eq!(
+            fs::read_to_string(&state).unwrap(),
+            "{\"synthetic_invalid_state\":true}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn closed_output_consumers_are_errors_not_panics() {
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+    for runtime in ["container", "openshell"] {
+        let f = Fixture::new();
+        assert!(
+            f.run(&["init", "--yes", "--agent", "opencode", "--runtime", runtime])
+                .status
+                .success()
+        );
+        let config = f.config();
+        let path = PathBuf::from(config["config"].as_str().unwrap());
+        let before = fs::read(&path).unwrap();
+        for args in [
+            vec!["list", "-a"],
+            vec!["config"],
+            vec!["config", "--path"],
+            vec!["plan"],
+            vec!["versions"],
+            vec![
+                "config",
+                "--edit",
+                "--yes",
+                "--image",
+                "ghcr.io/example/agent:1",
+            ],
+            vec!["machine", "--schema", "1", "resolve"],
+        ] {
+            let (writer, reader) = UnixStream::pair().unwrap();
+            drop(reader);
+            let out = f
+                .command()
+                .args(&args)
+                .stdout(Stdio::from(OwnedFd::from(writer)))
+                .stderr(Stdio::piped())
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(1), "{args:?}: {out:?}");
+            assert!(
+                !String::from_utf8_lossy(&out.stderr).contains("panicked"),
+                "{out:?}"
+            );
+        }
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert!(!path.with_file_name("runtime.json").exists());
+        let directory = f.home.join("unpublished");
+        let (writer, reader) = UnixStream::pair().unwrap();
+        drop(reader);
+        let out = f
+            .command()
+            .args([
+                "init",
+                "--yes",
+                "--agent",
+                "opencode",
+                "--runtime",
+                runtime,
+                "--directory",
+                directory.to_str().unwrap(),
+            ])
+            .stdout(Stdio::from(OwnedFd::from(writer)))
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("panicked"));
+        assert!(
+            !directory.exists(),
+            "failed review output must not publish configuration"
+        );
+    }
+}
+
+#[test]
 fn configuration_mutation_options_require_explicit_edit_and_conflict_with_path() {
     let f = Fixture::new();
     for args in [

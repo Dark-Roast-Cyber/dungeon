@@ -185,7 +185,16 @@ pub(crate) fn read_runtime_state(path: &Path) -> Result<RuntimeState> {
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
-    let file = options.open(path)?;
+    let file = options.open(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            Error::refusal(
+                crate::ErrorCode::Unbound,
+                "sandbox has not been created; run `dungeon up` first (or `dungeon run AGENT`)",
+            )
+        } else {
+            error.into()
+        }
+    })?;
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(Error::new("invalid runtime state file"));

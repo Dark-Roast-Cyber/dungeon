@@ -56,7 +56,7 @@ struct EditOptions {
     name = "dungeon",
     version,
     about = "Manage project containers and optional OpenShell environments",
-    after_help = "Quick start:\n  dungeon setup               Choose a runtime/image once per machine\n  dungeon                     First run: review, approve and launch; later runs resume\n  dungeon exec -- cargo test   Run an image-provided tool\n  dungeon down                Stop, preserving guest state\n\nConfiguration:\n  dungeon init                Review/save only, without starting a guest\n  dungeon config --edit        Review changes before first guest creation\n  dungeon config --path        Find the private configuration\n  dungeon run -- --help        Pass native flags to the selected harness\n\nHarnesses: OpenCode, Claude Code or Codex; no assumed choice.\nUse dungeon COMMAND --help for advanced options.\nAutomation: dungeon setup --yes --runtime container; dungeon init --yes --agent AGENT; dungeon machine --help",
+    after_help = "Quick start:\n  dungeon setup               Choose a runtime/image once per machine\n  dungeon                     First run: review, approve and launch; later runs resume\n  dungeon exec -- node --version  Run an image-provided tool\n  dungeon down                Stop, preserving guest state\n\nConfiguration:\n  dungeon init                Review/save only, without starting a guest\n  dungeon config --edit        Review changes before first guest creation\n  dungeon config --path        Find the private configuration\n  dungeon run -- --help        Pass native flags to the selected harness\n\nHarnesses: OpenCode, Claude Code or Codex; no assumed choice.\nUse dungeon COMMAND --help for advanced options.\nAutomation: dungeon setup --yes --runtime container; dungeon init --yes --agent AGENT; dungeon machine --help",
     subcommand_precedence_over_arg = true
 )]
 struct Cli {
@@ -376,7 +376,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
             } else {
                 binding::list_scoped(&env::current_dir()?.canonicalize()?)?
             };
-            println!("{}", serde_json::to_string_pretty(&entries)?);
+            writeln!(io::stdout(), "{}", serde_json::to_string_pretty(&entries)?)?;
             Ok(0)
         }
         Some(Commands::Versions { check }) => {
@@ -483,9 +483,10 @@ fn dispatch(cli: Cli) -> Result<i32> {
                 return edit_environment(&config, options);
             }
             if path {
-                println!("{}", config.path.display());
+                writeln!(io::stdout(), "{}", config.path.display())?;
             } else {
-                println!(
+                writeln!(
+                    io::stdout(),
                     "{}",
                     crate::config::review_json(&json!({
                         "config": config.path,
@@ -493,7 +494,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
                         "values": config.values,
                         "project_transfer": config.values.project_transfer,
                     }))?
-                );
+                )?;
             }
             Ok(0)
         }
@@ -984,7 +985,10 @@ fn edit_environment(config: &Config, mut options: EditOptions) -> Result<i32> {
     crate::imports::harness::update(config, values, refresh, |candidate| {
         approve_environment(candidate, options.yes)
     })?;
-    println!("Configuration saved. No guest was started or replaced.");
+    writeln!(
+        io::stdout(),
+        "Configuration saved. No guest was started or replaced."
+    )?;
     Ok(0)
 }
 
@@ -1041,10 +1045,11 @@ fn environment_defaults(project: PathBuf, agent: Agent) -> Result<ConfigDoc> {
 
 fn print_plan(config: &Config) -> Result<i32> {
     if config.values.container.is_some() {
-        println!(
+        writeln!(
+            io::stdout(),
             "{}",
             crate::config::review_json(&crate::runtime::container_plan(config))?
-        );
+        )?;
         return Ok(0);
     }
     let imports = crate::imports::plan(config)?;
@@ -1068,7 +1073,8 @@ fn print_plan(config: &Config) -> Result<i32> {
         config.values.workspace.clone(),
     ];
     command.extend(plan_create_arguments(config, &config.policy_path));
-    println!(
+    writeln!(
+        io::stdout(),
         "{}",
         crate::config::review_json(&json!({
             "adapter": "openshell",
@@ -1090,7 +1096,7 @@ fn print_plan(config: &Config) -> Result<i32> {
             "project_transfer": project_transfer_plan(config),
             "verification": "plan only; no backend contacted or enforcement verified"
         }))?
-    );
+    )?;
     Ok(0)
 }
 
@@ -1164,6 +1170,17 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         require_attach_terminal()?;
     }
 
+    if !matches!(
+        &command,
+        Commands::Create
+            | Commands::Up
+            | Commands::Run { .. }
+            | Commands::Attach
+            | Commands::Upload { .. }
+            | Commands::Export { .. }
+    ) {
+        crate::config::read_runtime_state(&config.state_path())?;
+    }
     let runtime = Runtime::new(config)?;
     match command {
         Commands::Create => runtime.create(),
@@ -1201,7 +1218,8 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         }
         Commands::Status => {
             let remote = runtime.inspect_bound()?;
-            println!(
+            writeln!(
+                io::stdout(),
                 "{}",
                 serde_json::to_string_pretty(&serde_json::json!({
                     "id": remote["id"],
@@ -1213,7 +1231,7 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
                     "engine": remote["engine"],
                     "policy_enforcement": remote["policy_enforcement"],
                 }))?
-            );
+            )?;
             Ok(0)
         }
         Commands::Upload { yes: true } => runtime.upload(),
@@ -1435,7 +1453,8 @@ fn versions(check: bool, config: Option<&Path>) -> Result<i32> {
     } else {
         binding::load(&project)?.map(|config| config.values.image)
     };
-    println!(
+    writeln!(
+        io::stdout(),
         "{}",
         serde_json::to_string_pretty(&json!({
             "host_opencode": host,
@@ -1448,7 +1467,7 @@ fn versions(check: bool, config: Option<&Path>) -> Result<i32> {
             "reviewed_update_available": latest.as_deref().and_then(stable_version).is_some_and(|version| version > reviewed_number),
             "selection": "both runtimes use setup's saved image, otherwise upstream base:latest; reviewed guest versions describe only the optional local recipe, not the upstream image; existing bindings unchanged",
         }))?
-    );
+    )?;
     Ok(0)
 }
 
@@ -1545,31 +1564,43 @@ fn initialize(
     )?;
     let config = save_environment(directory, values, yes)?;
 
-    println!("Configuration: {:?}", config.path);
+    writeln!(io::stdout(), "Configuration: {:?}", config.path)?;
     if config.values.container.is_some() {
-        println!("Next: dungeon up. Missing registry images are pulled on first use.");
+        writeln!(
+            io::stdout(),
+            "Next: dungeon up. Missing registry images are pulled on first use."
+        )?;
         return Ok(0);
     }
-    println!("No runtime was started. Review policy.json and named providers before first up.");
+    writeln!(
+        io::stdout(),
+        "No runtime was started. Review policy.json and named providers before first up."
+    )?;
     if config.values.image == REVIEWED_IMAGE {
-        println!(
+        writeln!(
+            io::stdout(),
             "Build the reviewed local image before first up (images/agent/README.md). `dungeon versions --check` shows upstream stable updates; nothing is downloaded automatically."
-        );
+        )?;
     }
     if project_binding {
-        println!(
+        writeln!(
+            io::stdout(),
             "Next: dungeon plan to inspect policy; dungeon to start {}. No host harness client required.",
             config.values.agent.as_str()
-        );
+        )?;
     } else {
-        println!("Next: run plan, then launch dungeon, using --config with the path above.");
+        writeln!(
+            io::stdout(),
+            "Next: run plan, then launch dungeon, using --config with the path above."
+        )?;
     }
     Ok(0)
 }
 
 fn approve_environment(config: &Config, yes: bool) -> Result<()> {
     let values = &config.values;
-    println!(
+    writeln!(
+        io::stdout(),
         "{}",
         crate::config::review_json(&json!({
             "config": config.path,
@@ -1586,39 +1617,45 @@ fn approve_environment(config: &Config, yes: bool) -> Result<()> {
             "runtime": if values.container.is_some() {"container"} else {"openshell"},
             "container": values.container,
         }))?
-    );
+    )?;
     if values.container.is_some() {
-        println!(
+        writeln!(
+            io::stdout(),
             "Plain container: project read/write; selected configuration mounts read-only; normal container networking, no OpenShell policy enforcement."
-        );
+        )?;
     } else {
         match values.project_transfer {
-            ProjectTransfer::Copy => println!(
+            ProjectTransfer::Copy => writeln!(
+                io::stdout(),
                 "Copy mode: first up uploads the project; guest changes reach the host only through reviewed export. No writable host mounts."
-            ),
-            ProjectTransfer::Live => println!(
+            )?,
+            ProjectTransfer::Live => writeln!(
+                io::stdout(),
                 "Live mode: the guest can read and WRITE the selected host project immediately at /sandbox/project. Only this project is writable; separately reviewed harness files may be read-only. No upload/export. Requires a bind-enabled gateway. Choose --project-transfer copy for reviewed return of changes."
-            ),
+            )?,
         }
     }
-    println!(
+    writeln!(
+        io::stdout(),
         "Review project contents before first up; all files within a live project become guest-visible, including secrets. Transfer is not a secret scanner."
-    );
+    )?;
     if let Some(h) = values
         .harness
         .as_ref()
         .filter(|h| h.mode != HarnessMode::Disabled)
     {
-        println!("{}", crate::imports::harness::WARNING);
+        writeln!(io::stdout(), "{}", crate::imports::harness::WARNING)?;
         if h.mode == HarnessMode::Copy {
-            println!(
+            writeln!(
+                io::stdout(),
                 "The reviewed private snapshot will be saved with this configuration; no separate reload is needed."
-            );
+            )?;
         }
         if h.exclude_provider_auth {
-            println!(
+            writeln!(
+                io::stdout(),
                 "Auth exclusion omits legacy auth.json and entire opencode.json/jsonc/cli.json files. It is not a secret scanner for plugins or other content."
-            );
+            )?;
         }
     }
     if !yes {

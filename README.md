@@ -116,7 +116,7 @@ From your project directory:
 ```sh
 cd /path/to/project
 dungeon               # first run: choose agent, review image/access, approve and launch
-dungeon exec -- cargo test
+dungeon exec -- node --version
 dungeon down           # keep guest login, sessions and files
 ```
 
@@ -129,6 +129,11 @@ the saved choices. No host agent installation is needed for guest CLI use.
 Use `dungeon init` to review/save without starting, `dungeon plan` to inspect, or
 `dungeon config --edit` to change an uncreated environment. The editor has guided
 choices and explicit flags for automation; bare `dungeon config` stays read-only.
+
+Commands run tools supplied by the selected image. The cached upstream base used
+in validation has Node but no Cargo, Rust compiler or pnpm. For Rust tests, select
+the [reviewed local image](images/agent/README.md) or your own toolchain image
+before creating the guest; Dungeon does not install missing tools automatically.
 
 Runtime selection uses saved setup defaults, otherwise plain containers, even if
 OpenShell is installed. Use `init --runtime container` or
@@ -189,7 +194,7 @@ flags. See [headless examples](docs/adoption.md#4-headless-use).
 | --- | --- |
 | Launch the saved agent / override it once | `dungeon` / `dungeon run AGENT` |
 | Create or resume without launching an agent | `dungeon up` |
-| Run tests or another image-provided tool | `dungeon exec -- cargo test` |
+| Run an image-provided tool | `dungeon exec -- node --version` (or `cargo test` with a Rust image) |
 | Open Bash / an interactive tool | `dungeon shell` / `dungeon exec --tty -- nvim file.txt` |
 | Inspect the current environment | `dungeon status` |
 | List project bindings / all private bindings | `dungeon list` / `dungeon list -a` |

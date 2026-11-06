@@ -735,14 +735,18 @@ mod linux {
         }
         h.mode = mode.unwrap_or(h.mode);
         update(config, values, true, |candidate| {
-            println!(
+            writeln!(
+                std::io::stdout(),
                 "{}",
                 crate::config::review_json(
                     &json!({"harness":candidate.values.harness, "warning":WARNING, "effect":"select files for an unbound environment only; no runtime contact or guest auth refresh"})
                 )?
-            );
+            )?;
             if !yes {
-                print!("Approve this harness configuration selection? Type yes: ");
+                write!(
+                    std::io::stdout(),
+                    "Approve this harness configuration selection? Type yes: "
+                )?;
                 std::io::stdout().flush()?;
                 let mut answer = String::new();
                 std::io::stdin().read_line(&mut answer)?;
@@ -752,9 +756,10 @@ mod linux {
             }
             Ok(())
         })?;
-        println!(
+        writeln!(
+            std::io::stdout(),
             "Harness selection approved; no sandbox changed. Guest authentication refresh is not implied."
-        );
+        )?;
         Ok(0)
     }
 
