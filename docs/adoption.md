@@ -177,7 +177,9 @@ and structured output use [machine execution](machine.md) on OpenShell.
 
 For an AI validation loop, start with `dungeon exec -- <test command>`: capture
 stdout/stderr and check the exit code. Use `dungeon machine --schema 1 resolve`
-and `status` for JSON configuration/runtime observations. OpenShell machine
+and `status` for JSON configuration/runtime observations. Machine `init --runtime
+container --yes` also initializes plain environments without OpenShell; see its
+[explicit directory/image options](machine.md#selection-and-operations). OpenShell machine
 `exec --owned` adds JSONL output and confirmed-cleanup reporting; plain containers
 support ordinary headless `run`/`exec`, not that streaming contract. Return files
 through the live project, or explicit reviewed `export` in OpenShell copy mode.

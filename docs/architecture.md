@@ -284,6 +284,10 @@ Explicit `config --edit` reviews common schema fields for an unbound environment
 It keeps the runtime, service, project identity and policy, using the same atomic
 configuration replacement as reload under existing environment/import locks.
 No editor shell snippets, new schema, registry or backend abstraction is added.
+Machine initialization uses that same writer with explicit runtime/engine/endpoint
+selection. Its omitted runtime retains the schema-1 OpenShell/copy contract;
+explicit containers use live access. Machine streaming/ownership remains
+OpenShell-only, not a second container execution protocol.
 
 Interactive first use selects an agent, image/project access and optional OpenCode
 snapshot, then approves once before saving/launch. Human `init --harness-config

@@ -291,7 +291,8 @@ See [integration options and status](docs/integrations.md) and
 ## Automation, limits and further reading
 
 - [`dungeon machine --schema 1 ...`](docs/machine.md) exposes lifecycle JSON and,
-  on OpenShell, workload-byte JSONL. External harnesses own orchestration.
+  on OpenShell, workload-byte JSONL. Machine `init --runtime container --yes`
+  supports explicit plain-container setup. External harnesses own orchestration.
 - [Validation](docs/validation.md) records exact tested combinations, including
   real Claude guest workflows, native engines and connection checks. It does not
   establish every provider, token-refresh, desktop or platform combination.

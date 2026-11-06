@@ -1,4 +1,7 @@
-use crate::config::{Agent, Config, ConfigDoc, ProjectTransfer, canonical_project, load_config};
+use crate::config::{
+    Agent, Config, ConfigDoc, ContainerOptions, Engine, ProjectTransfer, canonical_project,
+    load_config,
+};
 use crate::openshell::GUEST_PROJECT;
 use crate::runtime::Runtime;
 use crate::{Error, ErrorCode, Result};
@@ -34,6 +37,13 @@ enum Operation {
         project: Option<PathBuf>,
     },
     Init {
+        /// Explicit runtime; omitted retains schema 1's OpenShell default.
+        #[arg(long, value_parser = ["container", "openshell"], default_value = "openshell")]
+        runtime: String,
+        #[arg(long, value_enum, default_value = "auto")]
+        engine: Engine,
+        #[arg(long)]
+        endpoint: Option<String>,
         #[arg(long)]
         directory: PathBuf,
         #[arg(long)]
@@ -41,11 +51,14 @@ enum Operation {
         #[arg(long)]
         name: String,
         #[arg(long)]
-        gateway: String,
+        gateway: Option<String>,
         #[arg(long)]
         image: String,
-        #[arg(long, default_value = "copy", value_enum)]
-        project_transfer: ProjectTransfer,
+        /// Defaults to live for containers, copy for OpenShell.
+        #[arg(long, value_enum)]
+        project_transfer: Option<ProjectTransfer>,
+        #[arg(long, value_enum, default_value = "opencode")]
+        agent: Agent,
         #[arg(long)]
         yes: bool,
     },
@@ -322,12 +335,16 @@ fn dispatch(explicit: Option<PathBuf>, operation: Operation) -> Response {
     let mut review = Value::Null;
     let run = (|| -> Result<(i32, Option<Value>)> {
         if let Operation::Init {
+            runtime,
+            engine,
+            endpoint,
             directory,
             project,
             name,
             gateway,
             image,
             project_transfer,
+            agent,
             yes,
         } = operation
         {
@@ -338,18 +355,33 @@ fn dispatch(explicit: Option<PathBuf>, operation: Operation) -> Response {
                 ));
             }
             approve(yes)?;
+            let container = match runtime.as_str() {
+                "container" if gateway.is_none() => Some(ContainerOptions { engine, endpoint }),
+                "openshell" if engine == Engine::Auto && endpoint.is_none() => None,
+                _ => {
+                    return Err(Error::refusal(
+                        ErrorCode::InvalidRequest,
+                        "Select an explicit runtime with compatible options.",
+                    ));
+                }
+            };
+            let project_transfer = project_transfer.unwrap_or(if container.is_some() {
+                ProjectTransfer::Live
+            } else {
+                ProjectTransfer::Copy
+            });
             let config = crate::cli::write_environment(
                 directory,
                 ConfigDoc {
-                    container: None,
+                    container,
                     schema: 2,
                     name,
-                    gateway,
+                    gateway: gateway.unwrap_or_else(|| "dungeon-local".into()),
                     workspace: "default".into(),
                     image,
                     project: canonical_project(&project)?,
                     project_transfer,
-                    agent: Agent::Opencode,
+                    agent,
                     providers: vec![],
                     imports: vec![],
                     harness: None,

@@ -164,6 +164,128 @@ fn closed_output_consumers_are_errors_not_panics() {
 }
 
 #[test]
+fn machine_init_selects_plain_containers_without_contact_or_host_imports() {
+    for engine in ["podman", "docker", "auto"] {
+        let f = Fixture::new();
+        let directory = f.home.join("machine-private");
+        let mut args = vec![
+            "machine",
+            "--schema",
+            "1",
+            "init",
+            "--yes",
+            "--runtime",
+            "container",
+            "--engine",
+            engine,
+            "--directory",
+            directory.to_str().unwrap(),
+            "--project",
+            f.project.to_str().unwrap(),
+            "--name",
+            "machine-test",
+            "--image",
+            "ghcr.io/example/agent:1",
+            "--agent",
+            "claude",
+        ];
+        if engine != "auto" {
+            args.extend(["--endpoint", "unix:///synthetic/unavailable.sock"]);
+        }
+        let out = f.run(&args);
+        assert!(out.status.success(), "{out:?}");
+        assert!(out.stderr.is_empty());
+        let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(result["result"]["environment"]["runtime"], "container");
+        assert_eq!(result["result"]["policy"], "unenforced");
+        assert_eq!(result["result"]["phase"], "uncreated");
+        let values: Value =
+            serde_json::from_slice(&fs::read(directory.join("dungeon.json")).unwrap()).unwrap();
+        assert_eq!(values["container"]["engine"], engine);
+        assert_eq!(values["project_transfer"], "live");
+        assert_eq!(values["agent"], "claude");
+        assert!(values["harness"].is_null());
+        assert!(!directory.join("runtime.json").exists());
+        assert!(!directory.join("harness").exists());
+    }
+}
+
+#[test]
+fn machine_init_keeps_legacy_defaults_and_refuses_conflicts_before_writes() {
+    for extra in [
+        vec![],
+        vec!["--runtime", "openshell"],
+        vec!["--runtime", "container", "--project-transfer", "copy"],
+        vec!["--runtime", "container", "--gateway", "local"],
+        vec!["--runtime", "openshell", "--engine", "docker"],
+        vec![
+            "--runtime",
+            "container",
+            "--endpoint",
+            "unix:///synthetic.sock",
+        ],
+        vec!["--runtime", "auto"],
+    ] {
+        let f = Fixture::new();
+        let directory = f.home.join("machine-private");
+        let mut args = vec![
+            "machine",
+            "--schema",
+            "1",
+            "init",
+            "--yes",
+            "--directory",
+            directory.to_str().unwrap(),
+            "--project",
+            f.project.to_str().unwrap(),
+            "--name",
+            "machine-test",
+            "--image",
+            "ghcr.io/example/agent:1",
+        ];
+        args.extend_from_slice(&extra);
+        let out = f.run(&args);
+        assert!(out.stderr.is_empty());
+        let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+        if extra.is_empty() || extra == ["--runtime", "openshell"] {
+            assert!(out.status.success(), "{out:?}");
+            assert_eq!(result["result"]["environment"]["runtime"], "openshell");
+            assert_eq!(result["result"]["environment"]["project_transfer"], "copy");
+            let saved: Value =
+                serde_json::from_slice(&fs::read(directory.join("dungeon.json")).unwrap()).unwrap();
+            assert!(saved["container"].is_null());
+            assert_eq!(saved["gateway"], "dungeon-local");
+        } else {
+            assert_eq!(out.status.code(), Some(1), "{extra:?}: {out:?}");
+            assert_eq!(result["ok"], false);
+            assert!(!directory.exists());
+        }
+    }
+    let f = Fixture::new();
+    let directory = f.home.join("unapproved");
+    let out = f.run(&[
+        "machine",
+        "--schema",
+        "1",
+        "init",
+        "--runtime",
+        "container",
+        "--directory",
+        directory.to_str().unwrap(),
+        "--project",
+        f.project.to_str().unwrap(),
+        "--name",
+        "machine-test",
+        "--image",
+        "ghcr.io/example/agent:1",
+    ]);
+    let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["error"]["code"], "approval_required");
+    assert_eq!(result["error"]["effects"], "none");
+    assert!(!directory.exists());
+}
+
+#[test]
 fn configuration_mutation_options_require_explicit_edit_and_conflict_with_path() {
     let f = Fixture::new();
     for args in [
