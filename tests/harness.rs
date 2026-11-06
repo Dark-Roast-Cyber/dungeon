@@ -256,6 +256,136 @@ fn exclusions_omit_whole_mixed_credential_configs_and_do_not_open_excluded_links
 }
 
 #[test]
+fn headless_mode_recovery_captures_and_preserves_exclusions_in_one_approval() {
+    let f = Fixture::new();
+    f.success(&[
+        "init",
+        "--yes",
+        "--agent",
+        "opencode",
+        "--harness-config",
+        "read-only",
+        "--exclude-provider-auth",
+        "--harness-exclude",
+        "themes",
+    ]);
+    let original = fs::read(f.source.join("plugins/local/index.js")).unwrap();
+    let out = f.success(&["reload", "--harness-config", "copy", "--yes"]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Harness selection approved"));
+    let h = &f.config()["values"]["harness"];
+    assert_eq!(h["mode"], "copy");
+    assert_eq!(h["exclude_provider_auth"], true);
+    assert_eq!(h["exclude"], json!(["themes"]));
+    assert_eq!(h["files"], json!(["config/plugins/local/index.js"]));
+    assert!(h["snapshot"].is_string());
+    let mount = &f.plan()["harness"]["mounts"][0];
+    assert_eq!(mount["read_only"], true);
+    assert_eq!(mount["selinux_label"], "private");
+    assert_eq!(
+        fs::read(mount["source"].as_str().unwrap()).unwrap(),
+        original
+    );
+    assert_eq!(
+        fs::read(f.source.join("plugins/local/index.js")).unwrap(),
+        original
+    );
+    assert!(!f.config_path().with_file_name("runtime.json").exists());
+}
+
+#[test]
+fn headless_disable_does_not_reopen_unsafe_original_sources() {
+    let f = Fixture::new();
+    f.success(&[
+        "init",
+        "--yes",
+        "--agent",
+        "opencode",
+        "--harness-config",
+        "read-only",
+    ]);
+    fs::rename(&f.source, f.source.with_file_name("old-source")).unwrap();
+    symlink("/unavailable-synthetic-source", &f.source).unwrap();
+    fs::remove_file(&f.auth).unwrap();
+    f.success(&["reload", "--harness-config", "disabled", "--yes"]);
+    let h = &f.config()["values"]["harness"];
+    assert_eq!(h["mode"], "disabled");
+    assert_eq!(h["files"], json!([]));
+    assert!(h["snapshot"].is_null());
+    assert_eq!(f.plan()["harness"]["mounts"], json!([]));
+    assert!(!f.config_path().with_file_name("harness").exists());
+    // Disabled imports cannot be reenabled by reload on a concurrent launch path.
+    assert!(
+        !f.run(&["reload", "--harness-config", "copy", "--yes"])
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn recovery_requires_approval_and_refuses_every_binding_marker_before_capture() {
+    for marker in ["none", "invalid", "directory", "dangling"] {
+        for mode in ["copy", "disabled"] {
+            let f = Fixture::new();
+            f.success(&[
+                "init",
+                "--yes",
+                "--agent",
+                "opencode",
+                "--harness-config",
+                "read-only",
+            ]);
+            let path = f.config_path();
+            let before = fs::read(&path).unwrap();
+            let state = path.with_file_name("runtime.json");
+            match marker {
+                "invalid" => fs::write(&state, "invalid synthetic binding").unwrap(),
+                "directory" => fs::create_dir(&state).unwrap(),
+                "dangling" => symlink("/unavailable-synthetic-binding", &state).unwrap(),
+                "none" => {}
+                _ => unreachable!(),
+            }
+            // Neither refusal may inventory or capture these now-unsafe sources.
+            symlink(
+                "/unavailable-synthetic-plugin",
+                f.source.join("plugins/bad"),
+            )
+            .unwrap();
+            let mut args = vec!["reload", "--harness-config", mode];
+            if marker != "none" {
+                args.push("--yes");
+            }
+            let out = f.run(&args);
+            assert!(!out.status.success(), "{marker}/{mode}: {out:?}");
+            let error = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                error.contains(if marker == "none" {
+                    "approval requires"
+                } else {
+                    "bound sandbox"
+                }),
+                "{out:?}"
+            );
+            assert_eq!(fs::read(&path).unwrap(), before);
+            assert!(!path.with_file_name("harness").exists());
+        }
+    }
+}
+
+#[test]
+fn mistaken_run_option_has_actionable_recovery_before_runtime_contact() {
+    let f = Fixture::new();
+    for flag in ["--harness-config", "--harness-config=copy"] {
+        let out = f.run(&["run", "opencode", flag]);
+        assert!(!out.status.success());
+        assert!(
+            String::from_utf8_lossy(&out.stderr)
+                .contains("dungeon reload --harness-config copy --yes")
+        );
+        assert!(!f.home.join("config/dungeon").exists());
+    }
+}
+
+#[test]
 fn copy_reload_captures_private_bytes_and_source_drift_does_not_refresh_them() {
     let f = Fixture::new();
     f.success(&[

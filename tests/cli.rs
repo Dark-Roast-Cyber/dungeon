@@ -632,6 +632,97 @@ mod terminal {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    fn selinux_fixture() -> Option<Fixture> {
+        if fs::read("/sys/fs/selinux/enforce").ok().as_deref() != Some(b"1") {
+            eprintln!("guided SELinux recovery requires an enforcing Linux host");
+            return None;
+        }
+        let f = Fixture::new();
+        let source = f.home.join("config/opencode/themes");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("synthetic.json"), "{}").unwrap();
+        let out = f.run(&[
+            "init",
+            "--yes",
+            "--runtime",
+            "openshell",
+            "--agent",
+            "opencode",
+            "--harness-config",
+            "read-only",
+            "--exclude-provider-auth",
+        ]);
+        assert!(out.status.success(), "{out:?}");
+        Some(f)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guided_selinux_recovery_reviews_choice_and_continues_launch() {
+        for (choice, mode) in [("1", "copy"), ("2", "disabled")] {
+            let Some(f) = selinux_fixture() else { return };
+            let config = f.config();
+            let path = PathBuf::from(config["config"].as_str().unwrap());
+            let before = fs::read(&path).unwrap();
+            let mut terminal =
+                Terminal::spawn(f.command(), &["run", "opencode", "--", "--version"]);
+            terminal.until("Harness configuration [1-3;");
+            terminal.send("invalid\n");
+            terminal.until("Enter 1, 2 or 3");
+            assert_eq!(fs::read(&path).unwrap(), before);
+            terminal.send(&format!("{choice}\n"));
+            terminal.until("Approve this harness configuration selection? Type yes:");
+            assert_eq!(fs::read(&path).unwrap(), before);
+            terminal.send("yes\n");
+            // No runtime is installed in the fixture: reaching its lookup proves continuation.
+            let text = terminal.finish(false);
+            assert!(text.contains("install the OpenShell"), "{text}");
+            let selected = f.config();
+            assert_eq!(selected["values"]["harness"]["mode"], mode);
+            assert_eq!(
+                selected["values"]["harness"]["snapshot"].is_string(),
+                mode == "copy"
+            );
+            assert!(!path.with_file_name("runtime.json").exists());
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guided_selinux_cancellation_and_concurrent_binding_preserve_config() {
+        for action in ["cancel", "reject", "bound", "concurrent"] {
+            let Some(f) = selinux_fixture() else { return };
+            let path = PathBuf::from(f.config()["config"].as_str().unwrap());
+            let before = fs::read(&path).unwrap();
+            if action == "bound" {
+                fs::write(path.with_file_name("runtime.json"), "synthetic binding").unwrap();
+            }
+            let mut terminal = Terminal::spawn(f.command(), &["run", "opencode"]);
+            if action != "bound" {
+                terminal.until("Harness configuration [1-3;");
+                if action == "cancel" {
+                    terminal.send("\n");
+                } else {
+                    terminal.send("1\n");
+                    terminal.until("Approve this harness configuration selection? Type yes:");
+                    if action == "concurrent" {
+                        fs::write(path.with_file_name("runtime.json"), "synthetic binding")
+                            .unwrap();
+                    }
+                    terminal.send(if action == "reject" { "no\n" } else { "yes\n" });
+                }
+            }
+            let text = terminal.finish(false);
+            assert_eq!(fs::read(&path).unwrap(), before, "{action}: {text}");
+            assert!(!path.with_file_name("harness").exists());
+            if action == "bound" {
+                assert!(text.contains("runtime state"));
+                assert!(!text.contains("Harness configuration [1-3;"));
+            }
+        }
+    }
+
     #[test]
     fn setup_wizard_reviews_runtime_and_preserves_image_case_before_approval() {
         for runtime in ["1", "OpenShell"] {

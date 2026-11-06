@@ -229,6 +229,11 @@ bound scope/policy changes fail identity checks rather than silently rebuilding.
 Read-only imports can still expose secrets; native authentication/session
 databases are never imported. See [configuration](docs/configuration.md).
 
+On enforcing SELinux, launching with original-source imports offers to review a
+private copy or disable imports before first creation. For headless recovery use
+`dungeon reload --harness-config copy --yes` (or `disabled`), then repeat `run`.
+Existing guests are never reconfigured; their login and sessions are preserved.
+
 ## Remotes and host clients
 
 These connection features require an **OpenShell environment**. They let a host

@@ -167,6 +167,20 @@ exit status is preserved. `exec` requires an already Ready guest. Ordinary
 execution is not an owned cancellation guarantee; for bounded automated cleanup
 and structured output use [machine execution](machine.md) on OpenShell.
 
+For an AI validation loop, start with `dungeon exec -- <test command>`: capture
+stdout/stderr and check the exit code. Use `dungeon machine --schema 1 resolve`
+and `status` for JSON configuration/runtime observations. OpenShell machine
+`exec --owned` adds JSONL output and confirmed-cleanup reporting; plain containers
+support ordinary headless `run`/`exec`, not that streaming contract. Return files
+through the live project, or explicit reviewed `export` in OpenShell copy mode.
+These paths need no terminal and do not automate guest login or bypass native
+agent permission prompts.
+
+If original-source imports are blocked by SELinux before guest creation, run
+`dungeon reload --harness-config copy --yes` (or `disabled`), then retry. This is
+explicit scope approval, not an automatic fallback. It refuses any existing guest
+binding to preserve its login/sessions; see [import recovery](configuration.md#harness-configuration-opencode-first-slice).
+
 ## 5. Daily use and deliberate disposal
 
 For every configured harness, `dungeon` and `dungeon run` launch the same guest

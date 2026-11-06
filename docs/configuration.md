@@ -778,6 +778,16 @@ bytes; additions are not selected automatically, and atomic file replacement can
 leave an old inode mounted. `plan` displays saved scope without reading/hashing
 harness inputs, so it is not a live drift detector.
 
+To change an enabled import selection before first creation, use
+`dungeon reload --harness-config copy --yes` or
+`dungeon reload --harness-config disabled --yes`. This reviews and saves the new
+mode in the same operation, preserving source paths and exclusions; copy captures
+its snapshot without a second reload. Omit `--yes` for interactive typed approval.
+Missing approval in a headless call refuses before source inventory/capture.
+Disabled/undeclared imports cannot be enabled through reload; initialize a separate
+configuration for that scope. `--harness-config` belongs to `init`/`reload`, not
+`run`; agent arguments after `--` remain native workload data.
+
 Creation uses the existing exact recognized local bind-enabled UID998 gateway
 check and shared import lock. No gateway migration occurs. Original files are
 never SELinux-relabeled. Nonempty original-source selections conservatively
@@ -789,6 +799,12 @@ is not kernel attestation or a lock against enforcement changes. Choose an
 explicit copy/disabled binding instead; there is no fallback or enforcement change.
 Empty selections do not need this gate. Saving/reloading a live selection and
 offline `plan` remain possible; starting new work is refused.
+Interactive `run`, bare launch, `up`, `create` and OpenShell `attach` offer a
+copy/disabled/cancel choice when this check fails for an unbound environment.
+After the selection review and typed approval, the original command continues.
+Cancel is the default. A bound environment gets separate-environment guidance
+instead; no guest is destroyed or migrated. Noninteractive calls never prompt or
+change mode automatically: use the explicit reload command above, then retry.
 Missing/unsafe live files or changed snapshot contents
 block new work, not identity-checked status/stop/owned cleanup. Read-only protects
 mounted contents only, not writable guest ancestor paths or subsequent execution

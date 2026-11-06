@@ -164,6 +164,10 @@ unknown/unreadable enforcement state before runtime contact; custom labels are
 not an exception. No automatic copy fallback or host relabeling occurs. Empty,
 copy and disabled selections do not require that check. Status/stop/owned cleanup
 remain import-independent; image-owned native parents stay guest-private/writable.
+Human launch may offer a copy/disabled/cancel review before first creation; it
+uses the same locked reload transaction, requires typed approval and never
+changes a bound guest. Headless mode changes require explicit
+`reload --harness-config copy|disabled --yes`; no fallback is automatic.
 
 OpenCode 2.1.2 stores current credentials in its native database. That database
 is never mounted, copied, queried or synchronized by this feature. Legacy

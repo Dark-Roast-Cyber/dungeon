@@ -2,6 +2,37 @@
 
 CI checks formatting, Clippy, locked Rust tests, release compilation, CLI version execution, npm launcher behavior, distribution version synchronization, native archive creation, and full npm package assembly on explicit supported runners.
 
+## Guided import recovery and headless checks (2026-11-05, source checkout)
+
+SELinux-incompatible original-source imports now offer a copy/disabled/cancel
+review during interactive launch before first creation. Headless recovery uses
+`reload --harness-config copy|disabled --yes`; both reuse the locked unbound
+reload transaction and preserve sources/exclusions. Any runtime marker refuses
+mode changes, including stopped, invalid or dangling state. Cancellation and a
+binding appearing during review preserve the saved configuration.
+
+The source passed formatting, warnings-denied all-target Clippy, **236 locked
+Rust tests** (143 unit + 93 integration), **26 Node tests on Node24.22.2**, shell
+syntax checking and locked release compilation. Linux release SHA-256:
+`c97be1bacd776a55c5fa9b4f6fc56e3587ba471578ced7a7966fa51abb32fbd8`.
+
+On enforcing SELinux with rootless Podman **5.8.7**, a disposable real-PTY run
+reviewed/captured a copy and launched actual OpenCode2.1.2 successfully. Original
+bytes and SELinux labels were unchanged. Native headless checks passed JSON
+resolve/status, JSON workload stdout with separate stderr/exit23, a live
+`result.json`, explicit refusal of plain-container machine streaming, and same-ID
+stop/resume with retained guest state. The updated native container gate also
+passed mode recovery, all three harness version commands, stdin/argv/output,
+project writes, persistence and uninstall. These used the existing patched test
+image, not mutable upstream latest; no real-provider inference/login was tested.
+
+Two probe-only failures (ANSI version output and JavaScript newline escaping)
+were corrected before a clean rerun. Fixture guests were removed, and all **49**
+pre-existing container IDs/states/start timestamps matched the baseline. No host
+credentials, installed CLI, gateway, policy, image tag or release was changed.
+Other platforms and native OpenShell execution were not rerun for this change.
+Logs, probes and synthetic artifacts: `/tmp/opencode/dungeon-harness-recovery`.
+
 ## Native CI build correction (2026-11-05, source checkout)
 
 [Run 42074857521](https://github.com/Dark-Roast-Cyber/dungeon/actions/runs/42074857521)

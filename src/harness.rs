@@ -238,7 +238,7 @@ pub(crate) fn plan(config: &Config) -> Value {
         "mounts":mounts(config),
         "warning":WARNING,
         "auth_exclusion": "exclude_provider_auth omits legacy auth.json and entire opencode.json/jsonc/cli.json files, not a secret scanner for arbitrary code or other files",
-        "refresh": "reload reselects unbound files/snapshots only; bound runtime refresh is refused; live file replacement may leave an old inode mounted",
+        "refresh": "reload reselects unbound files/snapshots only; --harness-config copy|disabled explicitly changes import mode; bound runtime refresh is refused; live file replacement may leave an old inode mounted",
         "selinux": "nonempty original-source imports refuse enforcing or unreadable/invalid SELinux enforcement state before runtime contact; choose copy explicitly, never relabel originals or weaken enforcement",
         "native_paths": "selected image must supply empty guest-owned config/data/state/cache parents under /sandbox; external file:// plugins, host commands, environment and paths are not imported",
         "source_observation": "not read; plan never inventories or hashes harness source contents",
@@ -247,7 +247,12 @@ pub(crate) fn plan(config: &Config) -> Value {
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) use linux::{discover, reload, verify};
+pub(crate) use linux::{discover, original_sources_compatible, reload, verify};
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn original_sources_compatible(_: &Config) -> Result<()> {
+    Ok(())
+}
 
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn discover(_: &HarnessConfig) -> Result<Vec<String>> {
@@ -262,7 +267,7 @@ pub(crate) fn verify(config: &Config) -> Result<()> {
     }
 }
 #[cfg(not(target_os = "linux"))]
-pub(crate) fn reload(_: &Config, _: bool) -> Result<i32> {
+pub(crate) fn reload(_: &Config, _: Option<HarnessMode>, _: bool) -> Result<i32> {
     Err(Error::new("harness imports require Linux"))
 }
 
@@ -400,16 +405,16 @@ mod linux {
             Ok(bytes) if bytes == b"0" => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Ok(bytes) if bytes == b"1" => Err(Error::new(
-                "original-source harness imports are unsupported with enforcing SELinux; initialize a separate environment with --harness-config copy and approve reload, or select disabled; originals are never relabeled and no fallback is automatic",
+                "original-source harness imports are unsupported with enforcing SELinux; for an unbound environment run `dungeon reload --harness-config copy --yes` (or disabled); bound guests require a separate environment to preserve login/sessions; originals are never relabeled and no fallback is automatic",
             )),
             _ => Err(Error::new(
-                "cannot establish SELinux compatibility for original-source harness imports; choose explicitly reviewed copy or disabled mode; enforcement is never weakened",
+                "cannot establish SELinux compatibility for original-source harness imports; for an unbound environment run `dungeon reload --harness-config copy --yes` (or disabled); bound guests require a separate environment; enforcement is never weakened",
             )),
         }
     }
 
-    fn verify_original_sources(h: &HarnessConfig) -> Result<()> {
-        if !h.files.is_empty() {
+    fn check_original_sources(h: &HarnessConfig) -> Result<()> {
+        if h.mode == HarnessMode::ReadOnly && !h.files.is_empty() {
             let state = (|| {
                 let mut bytes = Vec::new();
                 File::open("/sys/fs/selinux/enforce")?
@@ -419,6 +424,18 @@ mod linux {
             })();
             original_source_compatibility(state)?;
         }
+        Ok(())
+    }
+
+    pub(crate) fn original_sources_compatible(config: &Config) -> Result<()> {
+        if let Some(h) = &config.values.harness {
+            check_original_sources(h)?;
+        }
+        Ok(())
+    }
+
+    fn verify_original_sources(h: &HarnessConfig) -> Result<()> {
+        check_original_sources(h)?;
         for file in &h.files {
             source_file(h, file)?;
         }
@@ -502,7 +519,7 @@ mod linux {
         Err(error())
     }
 
-    pub(crate) fn reload(config: &Config, yes: bool) -> Result<i32> {
+    pub(crate) fn reload(config: &Config, mode: Option<HarnessMode>, yes: bool) -> Result<i32> {
         let h = config
             .values
             .harness
@@ -517,13 +534,22 @@ mod linux {
                 "reload refused for a bound sandbox; preserve guest auth/sessions and initialize a separate environment; active refresh is not implemented",
             ));
         }
+        if !yes && (!std::io::stdin().is_terminal() || !std::io::stdout().is_terminal()) {
+            return Err(Error::new(
+                "reload approval requires a terminal and typed yes, or --yes; configuration unchanged",
+            ));
+        }
         let (parent, _lock) = locked(config)?;
         if present(&parent, "runtime.json")? {
             return Err(error());
         }
-        let files = discover(h)?;
         let mut next = h.clone();
-        next.files = files;
+        next.mode = mode.unwrap_or(h.mode);
+        next.files = if next.mode == HarnessMode::Disabled {
+            vec![]
+        } else {
+            discover(&next)?
+        };
         next.snapshot = None;
         let mut candidate = config.clone();
         candidate.values.harness = Some(next.clone());
@@ -538,7 +564,7 @@ mod linux {
             0,
         )?;
         staged.set_permissions(fs::Permissions::from_mode(0o700))?;
-        if h.mode == HarnessMode::Copy {
+        if next.mode == HarnessMode::Copy {
             let mut hashes = BTreeMap::new();
             let mut total = 0;
             for path in &next.files {

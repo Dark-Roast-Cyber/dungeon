@@ -175,6 +175,10 @@ enum Commands {
     Plan,
     /// Review/reselect unbound harness files or capture a copy; never restarts active work.
     Reload {
+        /// Change import mode for this unbound environment in the same approval.
+        #[arg(long, value_enum)]
+        harness_config: Option<HarnessMode>,
+        /// Approve the displayed selection without prompting (also supports headless use).
         #[arg(long)]
         yes: bool,
     },
@@ -736,6 +740,15 @@ fn run_selection(arguments: &[String]) -> Result<(Option<Agent>, &[String])> {
         }
     };
     let native = &arguments[1..];
+    if native
+        .iter()
+        .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| arg == "--harness-config" || arg.starts_with("--harness-config="))
+    {
+        return Err(Error::new(
+            "--harness-config is an init/reload option, not a run option; use `dungeon reload --harness-config copy --yes` (or disabled) for an unbound environment; put native agent arguments after --",
+        ));
+    }
     let native = if native.first().is_some_and(|arg| arg == "--") {
         &native[1..]
     } else {
@@ -849,8 +862,12 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         }
         return Err(crate::runtime::openshell_feature_error());
     }
-    if let Commands::Reload { yes } = command {
-        return crate::imports::harness::reload(config, yes);
+    if let Commands::Reload {
+        harness_config,
+        yes,
+    } = command
+    {
+        return crate::imports::harness::reload(config, harness_config, yes);
     }
     if let Commands::Imports {
         command: ImportCommands::Stage { yes },
@@ -858,6 +875,16 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
     {
         return crate::imports::stage(config, yes);
     }
+    let prepared;
+    let config = if matches!(
+        &command,
+        Commands::Run { .. } | Commands::Up | Commands::Create | Commands::Attach
+    ) {
+        prepared = prepare_launch(config)?;
+        &prepared
+    } else {
+        config
+    };
     if !matches!(
         &command,
         Commands::Down | Commands::Stop | Commands::Status | Commands::Destroy { .. }
@@ -1005,6 +1032,45 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         | Commands::Plan
         | Commands::Upload { yes: false } => unreachable!(),
     }
+}
+
+fn prepare_launch(config: &Config) -> Result<Config> {
+    let Err(error) = crate::imports::harness::original_sources_compatible(config) else {
+        return Ok(config.clone());
+    };
+    // Any binding marker, including an invalid file or dangling link, preserves the guest.
+    match std::fs::symlink_metadata(config.state_path()) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        _ => {
+            return Err(Error::new(format!(
+                "{error}\nThis environment has runtime state; no configuration changed. Preserve its guest login/sessions and initialize a separate environment with `dungeon init --directory PATH --name NEW_NAME --agent opencode --harness-config copy`, then use --config PATH/dungeon.json for reload and launch."
+            )));
+        }
+    }
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() || !io::stderr().is_terminal() {
+        return Err(error);
+    }
+    eprintln!(
+        "Cannot use original-source OpenCode configuration with this host's SELinux state. Original files will not be relabeled.\n\nChoose how to continue for this uncreated environment:\n  1. Review a private copy (recommended; may expose credentials)\n  2. Continue without host configuration\n  3. Cancel (default)"
+    );
+    let mode = loop {
+        eprint!("Harness configuration [1-3; default: cancel]: ");
+        io::stderr().flush()?;
+        let mut answer = String::new();
+        if io::stdin().read_line(&mut answer)? == 0 {
+            return Err(Error::new("launch cancelled; configuration unchanged"));
+        }
+        match answer.trim().to_ascii_lowercase().as_str() {
+            "1" | "copy" => break HarnessMode::Copy,
+            "2" | "disabled" => break HarnessMode::Disabled,
+            "" | "3" | "cancel" => {
+                return Err(Error::new("launch cancelled; configuration unchanged"));
+            }
+            _ => eprintln!("Enter 1, 2 or 3 (copy, disabled or cancel)."),
+        }
+    };
+    crate::imports::harness::reload(config, Some(mode), false)?;
+    load_config(&config.path)
 }
 
 fn attach_opencode(runtime: &Runtime<'_>) -> Result<i32> {
@@ -1448,6 +1514,16 @@ mod tests {
             assert_eq!(native, arguments);
         }
         assert!(run_selection(&["unknown".into()]).is_err());
+    }
+
+    #[test]
+    fn explicit_native_separator_preserves_harness_config_as_workload_data() {
+        let args = ["opencode", "--", "--harness-config", "copy"].map(String::from);
+        let (agent, native) = run_selection(&args).unwrap();
+        assert_eq!(agent, Some(Agent::Opencode));
+        assert_eq!(native, ["--harness-config", "copy"]);
+        let args = ["--harness-config", "copy"].map(String::from);
+        assert_eq!(run_selection(&args).unwrap().1, args);
     }
 
     #[test]
