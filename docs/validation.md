@@ -2,6 +2,56 @@
 
 CI checks formatting, Clippy, locked Rust tests, release compilation, CLI version execution, npm launcher behavior, distribution version synchronization, native archive creation, and full npm package assembly on explicit supported runners.
 
+## Headless follow-up (2026-11-06, source checkout)
+
+**Edit/test acceptance remains blocked on the tested Podman host.** Identical
+JavaScript runs when present before container creation but exits137 when newly
+written or edited afterward, on both cached upstream and reviewed images. A fresh
+container created and executed directly with Podman (without Dungeon, using
+standard engine security defaults) reproduces this. Guest-private fresh scripts
+also fail. Readability, matching SELinux categories and zero cgroup OOM counters
+do not identify the cause; available local journals did not identify the killer.
+No security setting, execution workaround, automatic fallback or image change was
+introduced. Host/runtime/security telemetry is needed before selecting a fix.
+
+`tests/container-live.sh` now executes pre-existing, host-created, guest-created,
+in-place-edited and atomically replaced JavaScript. It retains a failed status
+and cleans only its recorded fixture guest. The expanded gate **fails137** on
+both images here; version commands and inline Node are not edit/test validation.
+Earlier passing native gates did not exercise this boundary and must not be used
+to claim it works.
+
+The code follow-up adds explicit plain-container machine initialization through
+the existing config writer, with agent/engine/endpoint selection. Omitted machine
+runtime retains OpenShell/copy; streaming/owned cleanup is still OpenShell-only.
+Human pre-creation commands explain `dungeon up` before dependency discovery,
+without changing transfer-lock ordering or treating invalid state as uncreated.
+Read-only CLI results and configuration review propagate output errors instead
+of panicking. README/help examples now distinguish image-provided tools from
+host tools; the cached upstream image has no Cargo/Rust/pnpm.
+
+Final checks passed formatting, warnings-denied all-target Clippy, locked release
+compilation, **249 Rust tests** (143 unit +106 integration, `--test-threads=1`),
+and **26 Node tests on Node24.22.2**. Earlier runs caught the transfer-lock ordering
+regression, now corrected, and an obsolete import-control fixture assumption,
+now tested with a binding. There were also intermittent guardian/PTY/cleanup
+test failures (including one serialized run); the final isolated full Rust run
+and full Node retry passed without changing those ownership implementations or
+weakening assertions. Those failures remain in the logs, not claimed fixed.
+
+The final release passed **40 non-TTY native smoke commands** across both cached
+images: machine container init/up/status/close/start, clean stdout/stderr, binary
+stdin, literal argv/exit23, broken output consumers, pre-creation guidance and
+same-ID resume. The final expanded native edit gate still failed137 on each
+image and cleaned its guest. All **18** pre-existing container IDs/states/start
+timestamps matched afterward. No host credentials, installed CLI, services,
+enforcement or image tags were changed; no publication occurred. Native Docker,
+OpenShell and real-provider inference were not rerun. Linux release SHA-256:
+`d31078e016f35131e5af1de3c1bed5dab991b52fac4cf0ce7f6824cdc28e1566`.
+
+Evidence and disposable fixtures: `/tmp/opencode/dungeon-headless-fixes`;
+the original 101-command audit remains in `/tmp/opencode/dungeon-headless-audit`.
+
 ## Unified first run and configuration editing (2026-11-05, source checkout)
 
 First use now reviews agent/image/project access and optional OpenCode copies,

@@ -188,6 +188,10 @@ exit codes propagate. The first `--` belongs to Dungeon; subsequent separators
 are passed to the agent. Agents own session selection, including native resume
 flags. See [headless examples](docs/adoption.md#4-headless-use).
 
+**Known unresolved native failure:** new/edited JavaScript exits 137 on the tested
+Podman host, including without Dungeon. Edit/test acceptance is blocked there;
+see [current findings](docs/validation.md#headless-follow-up-2026-11-06-source-checkout).
+
 ### Commands to remember
 
 | Task | Command |
