@@ -1,5 +1,5 @@
 //! Harness-specific imports under the existing import authority and lock.
-use crate::config::{Agent, Config, HarnessConfig, HarnessMode};
+use crate::config::{Agent, Config, ConfigDoc, HarnessConfig, HarnessMode};
 use crate::{Error, Result};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -154,8 +154,13 @@ pub(crate) fn defaults(
     project: &Path,
     config: &Path,
 ) -> Result<Option<HarnessConfig>> {
-    if agent != Agent::Opencode || mode == HarnessMode::Disabled {
+    if mode == HarnessMode::Disabled {
         return Ok(None);
+    }
+    if agent != Agent::Opencode {
+        return Err(Error::new(
+            "host configuration imports currently support OpenCode only",
+        ));
     }
     let home = home()?;
     let root = |key: &str, fallback: &str| -> Result<PathBuf> {
@@ -238,7 +243,7 @@ pub(crate) fn plan(config: &Config) -> Value {
         "mounts":mounts(config),
         "warning":WARNING,
         "auth_exclusion": "exclude_provider_auth omits legacy auth.json and entire opencode.json/jsonc/cli.json files, not a secret scanner for arbitrary code or other files",
-        "refresh": "reload reselects unbound files/snapshots only; bound runtime refresh is refused; live file replacement may leave an old inode mounted",
+        "refresh": "reload reselects unbound files/snapshots only; --harness-config copy|disabled explicitly changes import mode; bound runtime refresh is refused; live file replacement may leave an old inode mounted",
         "selinux": "nonempty original-source imports refuse enforcing or unreadable/invalid SELinux enforcement state before runtime contact; choose copy explicitly, never relabel originals or weaken enforcement",
         "native_paths": "selected image must supply empty guest-owned config/data/state/cache parents under /sandbox; external file:// plugins, host commands, environment and paths are not imported",
         "source_observation": "not read; plan never inventories or hashes harness source contents",
@@ -247,7 +252,41 @@ pub(crate) fn plan(config: &Config) -> Value {
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) use linux::{discover, reload, verify};
+pub(crate) use linux::{discover, original_sources_compatible, prepare, reload, update, verify};
+
+pub(crate) struct Prepared {
+    pub(crate) config: Config,
+    #[cfg(target_os = "linux")]
+    snapshot: Option<tempfile::TempDir>,
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn prepare(config: Config, _: bool) -> Result<Prepared> {
+    verify(&config)?;
+    Ok(Prepared { config })
+}
+
+#[cfg(not(target_os = "linux"))]
+impl Prepared {
+    pub(crate) fn publish(&mut self, _: &Config) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn update(
+    _: &Config,
+    _: ConfigDoc,
+    _: bool,
+    _: impl FnOnce(&Config) -> Result<()>,
+) -> Result<Config> {
+    Err(Error::new("configuration editing currently requires Linux"))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn original_sources_compatible(_: &Config) -> Result<()> {
+    Ok(())
+}
 
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn discover(_: &HarnessConfig) -> Result<Vec<String>> {
@@ -262,7 +301,7 @@ pub(crate) fn verify(config: &Config) -> Result<()> {
     }
 }
 #[cfg(not(target_os = "linux"))]
-pub(crate) fn reload(_: &Config, _: bool) -> Result<i32> {
+pub(crate) fn reload(_: &Config, _: Option<HarnessMode>, _: bool) -> Result<i32> {
     Err(Error::new("harness imports require Linux"))
 }
 
@@ -400,16 +439,16 @@ mod linux {
             Ok(bytes) if bytes == b"0" => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Ok(bytes) if bytes == b"1" => Err(Error::new(
-                "original-source harness imports are unsupported with enforcing SELinux; initialize a separate environment with --harness-config copy and approve reload, or select disabled; originals are never relabeled and no fallback is automatic",
+                "original-source harness imports are unsupported with enforcing SELinux; for an unbound environment run `dungeon reload --harness-config copy --yes` (or disabled); bound guests require a separate environment to preserve login/sessions; originals are never relabeled and no fallback is automatic",
             )),
             _ => Err(Error::new(
-                "cannot establish SELinux compatibility for original-source harness imports; choose explicitly reviewed copy or disabled mode; enforcement is never weakened",
+                "cannot establish SELinux compatibility for original-source harness imports; for an unbound environment run `dungeon reload --harness-config copy --yes` (or disabled); bound guests require a separate environment; enforcement is never weakened",
             )),
         }
     }
 
-    fn verify_original_sources(h: &HarnessConfig) -> Result<()> {
-        if !h.files.is_empty() {
+    fn check_original_sources(h: &HarnessConfig) -> Result<()> {
+        if h.mode == HarnessMode::ReadOnly && !h.files.is_empty() {
             let state = (|| {
                 let mut bytes = Vec::new();
                 File::open("/sys/fs/selinux/enforce")?
@@ -419,6 +458,18 @@ mod linux {
             })();
             original_source_compatibility(state)?;
         }
+        Ok(())
+    }
+
+    pub(crate) fn original_sources_compatible(config: &Config) -> Result<()> {
+        if let Some(h) = &config.values.harness {
+            check_original_sources(h)?;
+        }
+        Ok(())
+    }
+
+    fn verify_original_sources(h: &HarnessConfig) -> Result<()> {
+        check_original_sources(h)?;
         for file in &h.files {
             source_file(h, file)?;
         }
@@ -502,46 +553,36 @@ mod linux {
         Err(error())
     }
 
-    pub(crate) fn reload(config: &Config, yes: bool) -> Result<i32> {
-        let h = config
-            .values
-            .harness
-            .as_ref()
-            .ok_or_else(|| Error::new("no harness configuration declared"))?;
-        if h.mode == HarnessMode::Disabled {
-            return Err(Error::new("harness configuration is disabled"));
+    pub(crate) fn prepare(mut config: Config, refresh: bool) -> Result<Prepared> {
+        let mut snapshot = None;
+        if let Some(h) = &mut config.values.harness {
+            if h.mode == HarnessMode::Disabled {
+                h.files.clear();
+                h.snapshot = None;
+            } else if refresh || (h.mode == HarnessMode::Copy && h.snapshot.is_none()) {
+                h.files = discover(h)?;
+                h.snapshot = None;
+            }
         }
-        let parent = directory(config.path.parent().expect("config parent"), true)?;
-        if present(&parent, "runtime.json")? {
-            return Err(Error::new(
-                "reload refused for a bound sandbox; preserve guest auth/sessions and initialize a separate environment; active refresh is not implemented",
-            ));
-        }
-        let (parent, _lock) = locked(config)?;
-        if present(&parent, "runtime.json")? {
-            return Err(error());
-        }
-        let files = discover(h)?;
-        let mut next = h.clone();
-        next.files = files;
-        next.snapshot = None;
-        let mut candidate = config.clone();
-        candidate.values.harness = Some(next.clone());
-        crate::openshell::validate_mount_request(&candidate)?;
-        let stage = tempfile::Builder::new()
-            .prefix("harness-review-")
-            .tempdir_in(fd_path(&parent))?;
-        let staged = open(
-            &parent,
-            stage.path().file_name().ok_or_else(error)?,
-            libc::O_RDONLY | libc::O_DIRECTORY,
-            0,
-        )?;
-        staged.set_permissions(fs::Permissions::from_mode(0o700))?;
-        if h.mode == HarnessMode::Copy {
+        crate::openshell::validate_mount_request(&config)?;
+        let h = config.values.harness.as_ref();
+        if let Some(h) = h.filter(|h| h.mode == HarnessMode::Copy && h.snapshot.is_none()) {
+            let ancestor = config
+                .path
+                .parent()
+                .unwrap()
+                .ancestors()
+                .find(|path| path.exists())
+                .ok_or_else(error)?;
+            let stage = tempfile::Builder::new()
+                .prefix("harness-review-")
+                .tempdir_in(ancestor)?;
+            let staged = directory(stage.path(), false)?;
+            staged.set_permissions(fs::Permissions::from_mode(0o700))?;
+            metadata(&staged, true, true)?;
             let mut hashes = BTreeMap::new();
             let mut total = 0;
-            for path in &next.files {
+            for path in &h.files {
                 let data = bytes(&mut source_file(h, path)?, MAX_FILE)?;
                 total += data.len() as u64;
                 if total > MAX_BYTES {
@@ -559,34 +600,34 @@ mod linux {
                 files: hashes,
             };
             let data = encoded(&manifest)?;
-            next.snapshot = Some(hash(&data));
+            config.values.harness.as_mut().unwrap().snapshot = Some(hash(&data));
             write(&staged, OsStr::new("manifest.json"), &data, 0o600)?;
+            snapshot = Some(stage);
         }
-        println!(
-            "{}",
-            crate::config::review_json(
-                &json!({"harness":next, "warning":WARNING, "effect":"select files for an unbound environment only; no runtime contact or guest auth refresh"})
-            )?
-        );
-        if !yes {
-            if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
-                return Err(Error::new(
-                    "reload approval requires a terminal and typed yes, or --yes",
-                ));
-            }
-            print!("Approve this harness configuration selection? Type yes: ");
-            std::io::stdout().flush()?;
-            let mut answer = String::new();
-            std::io::stdin().read_line(&mut answer)?;
-            if answer.trim() != "yes" {
-                return Err(Error::new("reload cancelled; configuration unchanged"));
-            }
-        }
-        unchanged(config, &parent)?;
-        if present(&parent, "runtime.json")? {
-            return Err(error());
-        }
-        if let Some(digest) = &next.snapshot {
+        let config = crate::config::load_config_data(
+            config.path,
+            serde_json::to_value(config.values)?,
+            |path| Ok((path.to_path_buf(), config.policy)),
+        )?;
+        Ok(Prepared { config, snapshot })
+    }
+
+    impl Prepared {
+        pub(crate) fn publish(&mut self, config: &Config) -> Result<()> {
+            let Some(stage) = self.snapshot.as_ref() else {
+                return Ok(());
+            };
+            let parent = directory(config.path.parent().unwrap(), true)?;
+            let _staged = directory(stage.path(), true)?;
+            let digest = self
+                .config
+                .values
+                .harness
+                .as_ref()
+                .unwrap()
+                .snapshot
+                .as_ref()
+                .unwrap();
             let artifacts = if present(&parent, "harness")? {
                 let dir = open(
                     &parent,
@@ -602,8 +643,8 @@ mod linux {
             if !present(&artifacts, digest)? {
                 if unsafe {
                     libc::renameat2(
-                        parent.as_raw_fd(),
-                        name(stage.path().file_name().ok_or_else(error)?)?.as_ptr(),
+                        libc::AT_FDCWD,
+                        name(stage.path().as_os_str())?.as_ptr(),
                         artifacts.as_raw_fd(),
                         name(OsStr::new(digest))?.as_ptr(),
                         libc::RENAME_NOREPLACE,
@@ -612,24 +653,45 @@ mod linux {
                 {
                     return Err(error());
                 }
-                let _ = stage.keep();
+                let _ = self.snapshot.take().unwrap().keep();
                 artifacts.sync_all()?;
             }
-            let mut candidate = config.clone();
-            candidate.values.harness = Some(next.clone());
-            verify(&candidate)?;
-        } else {
-            for path in &next.files {
-                source_file(&next, path)?;
-            }
+            verify(config)
         }
-        let mut values = config.values.clone();
-        values.harness = Some(next);
-        crate::config::load_config_data(
+    }
+
+    pub(crate) fn update(
+        config: &Config,
+        mut values: ConfigDoc,
+        refresh: bool,
+        approve: impl FnOnce(&Config) -> Result<()>,
+    ) -> Result<Config> {
+        let _admission = crate::export::TransferGuard::environment(config)?;
+        let (parent, _lock) = locked(config)?;
+        let unbound = || -> Result<()> {
+            if present(&parent, "runtime.json")? {
+                return Err(Error::new(
+                    "configuration change refused for a bound sandbox; preserve guest auth/sessions and initialize a separate environment",
+                ));
+            }
+            Ok(())
+        };
+        unbound()?;
+        if refresh && let Some(h) = &mut values.harness {
+            h.files.clear();
+            h.snapshot = None;
+        }
+        let candidate = crate::config::load_config_data(
             config.path.clone(),
             serde_json::to_value(&values)?,
             |path| Ok((path.to_path_buf(), config.policy.clone())),
         )?;
+        let mut prepared = prepare(candidate, refresh)?;
+        approve(&prepared.config)?;
+        unchanged(config, &parent)?;
+        unbound()?;
+        let candidate = prepared.config.clone();
+        prepared.publish(&candidate)?;
         let replacement = tempfile::Builder::new()
             .prefix("harness-config-")
             .tempfile_in(fd_path(&parent))?;
@@ -638,12 +700,10 @@ mod linux {
             .set_permissions(fs::Permissions::from_mode(0o600))?;
         replacement
             .as_file()
-            .write_all(&serde_json::to_vec_pretty(&values)?)?;
+            .write_all(&serde_json::to_vec_pretty(&candidate.values)?)?;
         replacement.as_file().sync_all()?;
         unchanged(config, &parent)?;
-        if present(&parent, "runtime.json")? {
-            return Err(error());
-        }
+        unbound()?;
         if unsafe {
             libc::renameat(
                 parent.as_raw_fd(),
@@ -656,9 +716,50 @@ mod linux {
             return Err(error());
         }
         parent.sync_all()?;
-        println!(
+        Ok(candidate)
+    }
+
+    pub(crate) fn reload(config: &Config, mode: Option<HarnessMode>, yes: bool) -> Result<i32> {
+        let mut values = config.values.clone();
+        let h = values
+            .harness
+            .as_mut()
+            .ok_or_else(|| Error::new("no harness configuration declared"))?;
+        if h.mode == HarnessMode::Disabled {
+            return Err(Error::new("harness configuration is disabled"));
+        }
+        if !yes && (!std::io::stdin().is_terminal() || !std::io::stdout().is_terminal()) {
+            return Err(Error::new(
+                "reload approval requires a terminal and typed yes, or --yes; configuration unchanged",
+            ));
+        }
+        h.mode = mode.unwrap_or(h.mode);
+        update(config, values, true, |candidate| {
+            writeln!(
+                std::io::stdout(),
+                "{}",
+                crate::config::review_json(
+                    &json!({"harness":candidate.values.harness, "warning":WARNING, "effect":"select files for an unbound environment only; no runtime contact or guest auth refresh"})
+                )?
+            )?;
+            if !yes {
+                write!(
+                    std::io::stdout(),
+                    "Approve this harness configuration selection? Type yes: "
+                )?;
+                std::io::stdout().flush()?;
+                let mut answer = String::new();
+                std::io::stdin().read_line(&mut answer)?;
+                if answer.trim() != "yes" {
+                    return Err(Error::new("reload cancelled; configuration unchanged"));
+                }
+            }
+            Ok(())
+        })?;
+        writeln!(
+            std::io::stdout(),
             "Harness selection approved; no sandbox changed. Guest authentication refresh is not implied."
-        );
+        )?;
         Ok(0)
     }
 

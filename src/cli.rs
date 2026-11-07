@@ -16,7 +16,7 @@ use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const DEFAULT_IMAGE: &str = "localhost/dungeon-agent:0.0.3-opencode-2.1.2";
+const REVIEWED_IMAGE: &str = "localhost/dungeon-agent:0.0.3-opencode-2.1.2";
 const OPENCODE_TAGS: &str = "https://registry.npmjs.org/-/package/@opencode%2Fcli/dist-tags";
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -26,12 +26,37 @@ enum AuthAgent {
     Codex,
 }
 
+#[derive(Debug, Default, clap::Args)]
+struct EditOptions {
+    /// Saved agent choice; invocation-only overrides remain available with run.
+    #[arg(long, value_enum, requires = "edit")]
+    agent: Option<Agent>,
+    /// OCI image tag or digest for the first guest; never upgrades an existing guest.
+    #[arg(long, requires = "edit")]
+    image: Option<String>,
+    /// OpenShell project access; plain containers require live.
+    #[arg(long, value_enum, requires = "edit")]
+    project_transfer: Option<ProjectTransfer>,
+    /// OpenCode imports: reviewed copy or disabled; original-source read-only is advanced.
+    #[arg(long, value_enum, requires = "edit")]
+    harness_config: Option<HarnessMode>,
+    /// Omit legacy auth and whole OpenCode JSON configs that may contain credentials.
+    #[arg(long, requires = "edit")]
+    exclude_provider_auth: bool,
+    /// Replace exclusions with these exact config-relative paths/subtrees (repeatable).
+    #[arg(long = "harness-exclude", requires = "edit")]
+    harness_exclude: Vec<String>,
+    /// Approve the displayed changes without prompting; otherwise --edit is guided.
+    #[arg(long, requires = "edit")]
+    yes: bool,
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "dungeon",
     version,
     about = "Manage project containers and optional OpenShell environments",
-    after_help = "Quick start (with a usable container service or configured OpenShell):\n  dungeon init                Choose a harness and approve this project's scope\n  dungeon                     Launch it; later launches reuse the project choice\n  dungeon run -- --help        Pass native flags to the selected harness\n  dungeon exec -- cargo test   Run an image-provided tool (after up)\n  dungeon down                Stop, preserving guest state\n\nHarnesses: OpenCode, Claude Code or Codex; no assumed choice.\nUse dungeon COMMAND --help for options; dungeon config --path for your configuration.\nAutomation: dungeon init --yes --agent AGENT; dungeon machine --help",
+    after_help = "Quick start:\n  dungeon setup               Choose a runtime/image once per machine\n  dungeon                     First run: review, approve and launch; later runs resume\n  dungeon exec -- node --version  Run an image-provided tool\n  dungeon down                Stop, preserving guest state\n\nConfiguration:\n  dungeon init                Review/save only, without starting a guest\n  dungeon config --edit        Review changes before first guest creation\n  dungeon config --path        Find the private configuration\n  dungeon run -- --help        Pass native flags to the selected harness\n\nHarnesses: OpenCode, Claude Code or Codex; no assumed choice.\nUse dungeon COMMAND --help for advanced options.\nAutomation: dungeon setup --yes --runtime container; dungeon init --yes --agent AGENT; dungeon machine --help",
     subcommand_precedence_over_arg = true
 )]
 struct Cli {
@@ -67,7 +92,7 @@ enum Commands {
         #[arg(long)]
         bin_dir: Option<PathBuf>,
     },
-    /// Discover a container service, or set up the optional OpenShell gateway.
+    /// Choose a runtime and image; prepare the local service and save defaults.
     Setup {
         #[arg(long, value_enum, default_value = "auto")]
         runtime: RuntimeChoice,
@@ -75,6 +100,9 @@ enum Commands {
         engine: Engine,
         #[arg(long)]
         endpoint: Option<String>,
+        /// Default image for new projects; accepts a registry tag or immutable digest.
+        #[arg(long)]
+        image: Option<String>,
         /// Enable project bind capability on a fresh gateway (the default); kept for explicit scripts.
         #[arg(long, conflicts_with = "copy_only")]
         enable_live: bool,
@@ -84,6 +112,9 @@ enum Commands {
         /// Inspect prerequisites and print the capability diff without creating state.
         #[arg(long)]
         dry_run: bool,
+        /// Approve socket activation, image pulls, gateway setup and saved defaults.
+        #[arg(long, conflicts_with = "dry_run")]
+        yes: bool,
     },
     /// Read-only prerequisite and capability diagnostics; never initializes an environment.
     Doctor {
@@ -126,7 +157,7 @@ enum Commands {
         workspace: Option<String>,
         #[arg(
             long,
-            help = "sandbox image (container: pinned public base; OpenShell: reviewed local image, build first)"
+            help = "sandbox image tag or digest (default: setup selection, otherwise upstream base:latest)"
         )]
         image: Option<String>,
         #[arg(
@@ -160,15 +191,28 @@ enum Commands {
         )]
         yes: bool,
     },
-    /// Show the resolved private configuration and policy paths; no runtime contact.
+    /// Show private configuration, or explicitly edit an uncreated environment.
     Config {
-        #[arg(long, help = "print only the dungeon.json path")]
+        #[arg(
+            long,
+            conflicts_with = "edit",
+            help = "print only the dungeon.json path"
+        )]
         path: bool,
+        /// Review and save changes without starting or replacing a guest.
+        #[arg(long)]
+        edit: bool,
+        #[command(flatten)]
+        options: EditOptions,
     },
     /// Show the policy and creation plan without writing files or contacting OpenShell.
     Plan,
     /// Review/reselect unbound harness files or capture a copy; never restarts active work.
     Reload {
+        /// Change import mode for this unbound environment in the same approval.
+        #[arg(long, value_enum)]
+        harness_config: Option<HarnessMode>,
+        /// Approve the displayed selection without prompting (also supports headless use).
         #[arg(long)]
         yes: bool,
     },
@@ -332,7 +376,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
             } else {
                 binding::list_scoped(&env::current_dir()?.canonicalize()?)?
             };
-            println!("{}", serde_json::to_string_pretty(&entries)?);
+            writeln!(io::stdout(), "{}", serde_json::to_string_pretty(&entries)?)?;
             Ok(0)
         }
         Some(Commands::Versions { check }) => {
@@ -355,40 +399,27 @@ fn dispatch(cli: Cli) -> Result<i32> {
             runtime,
             engine,
             endpoint,
+            image,
             enable_live,
             copy_only,
             dry_run,
+            yes,
         }) => {
-            if project.is_some() {
+            if project.is_some() || config.is_some() {
                 return Err(Error::new(
-                    "PROJECT is only accepted for direct launch; setup has no project binding",
+                    "setup accepts no PROJECT or --config; it saves defaults for new projects",
                 ));
             }
-            let project = env::current_dir()?.canonicalize()?;
-            let plain = !matches!(runtime, RuntimeChoice::Openshell)
-                && (engine != Engine::Auto
-                    || endpoint.is_some()
-                    || crate::runtime::choose(runtime, &project)?);
-            if plain {
-                if copy_only || enable_live {
-                    return Err(Error::new(
-                        "gateway capability flags require --runtime openshell",
-                    ));
-                }
-                let options = crate::runtime::options(engine, endpoint);
-                crate::runtime::discover(&options, false)?;
-                if !dry_run {
-                    crate::runtime::save_preferences(&options)?;
-                }
-                Ok(0)
-            } else {
-                if engine == Engine::Docker || endpoint.is_some() {
-                    return Err(Error::new(
-                        "managed OpenShell gateway setup currently requires rootless Podman; use --runtime container for Docker CE",
-                    ));
-                }
-                crate::openshell::setup(enable_live || !copy_only, dry_run)
-            }
+            setup(
+                runtime,
+                engine,
+                endpoint,
+                image,
+                enable_live,
+                copy_only,
+                dry_run,
+                yes,
+            )
         }
         Some(Commands::Init {
             runtime,
@@ -437,17 +468,25 @@ fn dispatch(cli: Cli) -> Result<i32> {
                 endpoint,
             )
         }
-        Some(Commands::Config { path }) => {
+        Some(Commands::Config {
+            path,
+            edit,
+            options,
+        }) => {
             if project.is_some() {
                 return Err(Error::new(
                     "run config from the project directory or use --config",
                 ));
             }
             let config = resolve_environment(config, None, false, None)?;
+            if edit {
+                return edit_environment(&config, options);
+            }
             if path {
-                println!("{}", config.path.display());
+                writeln!(io::stdout(), "{}", config.path.display())?;
             } else {
-                println!(
+                writeln!(
+                    io::stdout(),
                     "{}",
                     crate::config::review_json(&json!({
                         "config": config.path,
@@ -455,7 +494,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
                         "values": config.values,
                         "project_transfer": config.values.project_transfer,
                     }))?
-                );
+                )?;
             }
             Ok(0)
         }
@@ -552,6 +591,181 @@ fn select_agent(agent: Option<Agent>) -> Result<Agent> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn setup(
+    mut runtime: RuntimeChoice,
+    engine: Engine,
+    endpoint: Option<String>,
+    image: Option<String>,
+    enable_live: bool,
+    copy_only: bool,
+    dry_run: bool,
+    yes: bool,
+) -> Result<i32> {
+    let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
+    if !interactive && !yes && !dry_run {
+        return Err(Error::new(
+            "setup requires a terminal or explicit --yes; use --dry-run for a read-only preview",
+        ));
+    }
+    let preferences = crate::runtime::preferences(None)?;
+    if runtime == RuntimeChoice::Auto {
+        if enable_live || copy_only {
+            runtime = RuntimeChoice::Openshell;
+        } else if engine != Engine::Auto || endpoint.is_some() {
+            runtime = RuntimeChoice::Container;
+        } else if interactive && !yes && !dry_run {
+            println!(
+                "Choose a runtime:\n  1. Plain containers (Podman or Docker; no OpenShell policy)\n  2. OpenShell (policy, copy/export and remote clients; rootless Podman)"
+            );
+            let default = preferences.runtime.unwrap_or(RuntimeChoice::Container);
+            loop {
+                let answer = setup_answer(&format!(
+                    "Runtime [container/openshell; default: {}]: ",
+                    if default == RuntimeChoice::Openshell {
+                        "openshell"
+                    } else {
+                        "container"
+                    }
+                ))?;
+                runtime = match answer.to_ascii_lowercase().as_str() {
+                    "" => default,
+                    "1" | "container" => RuntimeChoice::Container,
+                    "2" | "openshell" => RuntimeChoice::Openshell,
+                    _ => {
+                        println!("Enter 1 or 2 (container or openshell).");
+                        continue;
+                    }
+                };
+                break;
+            }
+        }
+    }
+    let project = env::current_dir()?.canonicalize()?;
+    let plain = crate::runtime::choose(
+        if runtime == RuntimeChoice::Auto {
+            preferences.runtime_choice()
+        } else {
+            runtime
+        },
+        &project,
+    )?;
+    if plain && (enable_live || copy_only) {
+        return Err(Error::new(
+            "gateway capability flags require --runtime openshell",
+        ));
+    }
+    if !plain && (engine == Engine::Docker || endpoint.is_some()) {
+        return Err(Error::new(
+            "managed OpenShell gateway setup requires rootless Podman; use --runtime container for Docker CE",
+        ));
+    }
+    if engine == Engine::Auto && endpoint.is_some() {
+        return Err(Error::new("--endpoint requires --engine podman or docker"));
+    }
+    let options = if engine == Engine::Auto && endpoint.is_none() {
+        preferences.container.unwrap_or_default()
+    } else {
+        ContainerOptions { engine, endpoint }
+    };
+    let default_image = preferences
+        .image
+        .unwrap_or_else(|| crate::runtime::DEFAULT_IMAGE.into());
+    let image = match image {
+        Some(image) => image,
+        None if interactive && !yes && !dry_run => {
+            println!("Use upstream latest, or enter a version tag / digest to pin the image.");
+            let answer = setup_answer(&format!("Image [{default_image}]: "))?;
+            if answer.is_empty() {
+                default_image
+            } else {
+                answer
+            }
+        }
+        None => default_image,
+    };
+    if !crate::config::valid_image(&image) {
+        return Err(Error::new(
+            "use a registry-qualified OCI image tag or digest",
+        ));
+    }
+    println!(
+        "{}",
+        crate::config::review_json(&json!({
+            "runtime": if plain { "container" } else { "openshell" },
+            "container": if plain { Some(&options) } else { None },
+            "image": image,
+            "gateway_image": if plain { None } else { Some(crate::openshell::GATEWAY_IMAGE) },
+            "defaults": binding::preferences_path()?,
+            "dry_run": dry_run,
+        }))?
+    );
+    println!(
+        "Setup may enable/start the user Podman socket, pull the selected image, {}and save defaults for NEW projects. No package installation, sudo, permission changes, project mounts or existing guest replacement.",
+        if plain {
+            ""
+        } else {
+            "pull the compatible pinned gateway image, create/verify dungeon-local, "
+        }
+    );
+    if !plain {
+        println!(
+            "OpenShell {OPEN_SHELL_VERSION} and rootless Podman must already be installed. Existing gateways are never restarted or overwritten."
+        );
+    } else {
+        println!(
+            "Auto discovery prefers usable Podman over Docker CE. Docker daemon access is host-root-equivalent; plain containers do not enforce OpenShell policy."
+        );
+    }
+    if !yes && !dry_run && !confirm("Apply this setup?")? {
+        return Err(Error::new("setup cancelled; no changes made"));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let container = if plain {
+            let options = crate::container::prepare_service(&options, dry_run)?;
+            crate::container::prepare_image(&options, &image, dry_run)?;
+            Some(options)
+        } else {
+            if dry_run {
+                crate::openshell::setup(enable_live || !copy_only, true)?;
+                crate::openshell::local_setup::prepare(&image, true)?;
+            } else {
+                crate::openshell::local_setup::prepare(&image, false)?;
+                crate::openshell::setup(enable_live || !copy_only, false)?;
+            }
+            None
+        };
+        if !dry_run {
+            crate::runtime::save_preferences(&crate::runtime::Preferences {
+                runtime: Some(if plain {
+                    RuntimeChoice::Container
+                } else {
+                    RuntimeChoice::Openshell
+                }),
+                container,
+                image: Some(image),
+            })?;
+            println!(
+                "Setup complete. Existing project bindings are unchanged. Next: cd /path/to/project && dungeon init"
+            );
+        }
+        Ok(0)
+    }
+    #[cfg(not(target_os = "linux"))]
+    Err(Error::new("local setup currently requires Linux"))
+}
+
+fn setup_answer(prompt: &str) -> Result<String> {
+    print!("{prompt}");
+    io::stdout().flush()?;
+    let mut answer = String::new();
+    if io::stdin().read_line(&mut answer)? == 0 {
+        return Err(Error::new("setup cancelled; no changes made"));
+    }
+    Ok(answer.trim().to_owned())
+}
+
 fn run_selection(arguments: &[String]) -> Result<(Option<Agent>, &[String])> {
     let Some(first) = arguments.first() else {
         return Ok((None, arguments));
@@ -568,6 +782,15 @@ fn run_selection(arguments: &[String]) -> Result<(Option<Agent>, &[String])> {
         }
     };
     let native = &arguments[1..];
+    if native
+        .iter()
+        .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| arg == "--harness-config" || arg.starts_with("--harness-config="))
+    {
+        return Err(Error::new(
+            "--harness-config belongs to init, config --edit or reload, not run; use `dungeon reload --harness-config copy --yes` (or disabled) for an enabled unbound selection; put native agent arguments after --",
+        ));
+    }
     let native = if native.first().is_some_and(|arg| arg == "--") {
         &native[1..]
     } else {
@@ -579,16 +802,227 @@ fn run_selection(arguments: &[String]) -> Result<(Option<Agent>, &[String])> {
 fn create_project_binding(project: &Path, agent: Agent) -> Result<Config> {
     let path = binding::config_path(project)?;
     let directory = path.parent().expect("binding config parent").to_path_buf();
-    let values = environment_defaults(project.to_path_buf(), agent)?;
-    approve_environment(&directory, &values, false)?;
-    write_environment(directory, values)
+    let mut values = environment_defaults(project.to_path_buf(), agent)?;
+    require_configuration_terminal(false)?;
+    choose_environment(&mut values, true, true)?;
+    values.harness = crate::imports::harness::defaults(
+        agent,
+        choose_copy(agent)?,
+        false,
+        vec![],
+        project,
+        &path,
+    )?;
+    save_environment(directory, values, false)
+}
+
+fn require_configuration_terminal(yes: bool) -> Result<()> {
+    if !yes && (!io::stdin().is_terminal() || !io::stdout().is_terminal()) {
+        return Err(Error::new(
+            "configuration requires a terminal or explicit --yes; use `dungeon init --yes --agent AGENT` or `dungeon config --edit --yes` for automation; no configuration saved",
+        ));
+    }
+    Ok(())
+}
+
+fn configuration_answer(prompt: &str) -> Result<String> {
+    print!("{prompt}");
+    io::stdout().flush()?;
+    let mut answer = String::new();
+    if io::stdin().read_line(&mut answer)? == 0 {
+        return Err(Error::new(
+            "configuration cancelled; no configuration saved",
+        ));
+    }
+    Ok(answer.trim().to_owned())
+}
+
+fn choose_environment(values: &mut ConfigDoc, image: bool, transfer: bool) -> Result<()> {
+    if image {
+        loop {
+            let answer = configuration_answer(&format!("Image [{}]: ", values.image))?;
+            if answer.is_empty() {
+                break;
+            }
+            if crate::config::valid_image(&answer) {
+                values.image = answer;
+                break;
+            }
+            println!("Enter a registry-qualified image tag or digest.");
+        }
+    }
+    if transfer && values.container.is_none() {
+        loop {
+            let current = if values.project_transfer == ProjectTransfer::Live {
+                "live"
+            } else {
+                "copy"
+            };
+            let answer =
+                configuration_answer(&format!("Project access [live/copy; default: {current}]: "))?;
+            match answer.to_ascii_lowercase().as_str() {
+                "" => break,
+                "live" => {
+                    values.project_transfer = ProjectTransfer::Live;
+                    break;
+                }
+                "copy" => {
+                    values.project_transfer = ProjectTransfer::Copy;
+                    break;
+                }
+                _ => println!("Live edits host files immediately; copy requires reviewed export."),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn choose_copy(agent: Agent) -> Result<HarnessMode> {
+    if agent == Agent::Opencode {
+        println!(
+            "Optional host configuration: a private snapshot can expose credentials and execute plugins in the guest. Native login/session databases are never shared."
+        );
+        if confirm("Use a reviewed copy of your OpenCode configuration?")? {
+            return Ok(HarnessMode::Copy);
+        }
+    }
+    Ok(HarnessMode::Disabled)
+}
+
+fn edit_environment(config: &Config, mut options: EditOptions) -> Result<i32> {
+    require_configuration_terminal(options.yes)?;
+    // Refuse before prompts or source discovery, even for stopped/invalid bindings.
+    match std::fs::symlink_metadata(config.state_path()) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        _ => {
+            return Err(Error::new(
+                "configuration editing refused for a bound sandbox; guest login/sessions are preserved; initialize a separate environment",
+            ));
+        }
+    }
+    let mut values = config.values.clone();
+    let guided = !options.yes
+        && options.agent.is_none()
+        && options.image.is_none()
+        && options.project_transfer.is_none()
+        && options.harness_config.is_none()
+        && !options.exclude_provider_auth
+        && options.harness_exclude.is_empty();
+    if guided {
+        loop {
+            let answer = configuration_answer(&format!(
+                "Agent [opencode/claude/codex; default: {}]: ",
+                values.agent.as_str()
+            ))?;
+            values.agent = match answer.to_ascii_lowercase().as_str() {
+                "" => values.agent,
+                "opencode" => Agent::Opencode,
+                "claude" => Agent::Claude,
+                "codex" => Agent::Codex,
+                _ => {
+                    println!("Choose opencode, claude or codex.");
+                    continue;
+                }
+            };
+            break;
+        }
+        choose_environment(&mut values, true, true)?;
+        if values.agent == Agent::Opencode {
+            loop {
+                let answer = configuration_answer(
+                    "Host OpenCode configuration [keep/copy/disabled; default: keep]: ",
+                )?;
+                options.harness_config = match answer.to_ascii_lowercase().as_str() {
+                    "" | "keep" => None,
+                    "copy" => Some(HarnessMode::Copy),
+                    "disabled" => Some(HarnessMode::Disabled),
+                    _ => {
+                        println!("Choose keep, copy or disabled; copying may expose credentials.");
+                        continue;
+                    }
+                };
+                break;
+            }
+        }
+    }
+    if let Some(agent) = options.agent {
+        values.agent = agent;
+    }
+    if let Some(image) = options.image {
+        values.image = image;
+    }
+    if let Some(transfer) = options.project_transfer {
+        values.project_transfer = transfer;
+    }
+    let refresh = options.harness_config.is_some()
+        || options.exclude_provider_auth
+        || !options.harness_exclude.is_empty();
+    if refresh {
+        if values.harness.is_none() {
+            if options.harness_config.is_none() {
+                return Err(Error::new(
+                    "choose --harness-config copy before setting import exclusions",
+                ));
+            }
+            values.harness = crate::imports::harness::defaults(
+                values.agent,
+                options.harness_config.unwrap_or(HarnessMode::Disabled),
+                options.exclude_provider_auth,
+                options.harness_exclude.clone(),
+                &values.project,
+                &config.path,
+            )?;
+        } else if let Some(h) = &mut values.harness {
+            if let Some(mode) = options.harness_config {
+                h.mode = mode;
+            }
+            h.exclude_provider_auth |= options.exclude_provider_auth;
+            if !options.harness_exclude.is_empty() {
+                h.exclude = options.harness_exclude;
+            }
+        }
+    }
+    crate::imports::harness::update(config, values, refresh, |candidate| {
+        approve_environment(candidate, options.yes)
+    })?;
+    writeln!(
+        io::stdout(),
+        "Configuration saved. No guest was started or replaced."
+    )?;
+    Ok(0)
+}
+
+fn save_environment(directory: PathBuf, values: ConfigDoc, yes: bool) -> Result<Config> {
+    require_configuration_terminal(yes)?;
+    let directory = new_environment_directory(directory)?;
+    let candidate = load_config_data(
+        directory.join("dungeon.json"),
+        serde_json::to_value(&values)?,
+        |path| Ok((path.to_path_buf(), starter_policy())),
+    )?;
+    let mut prepared = crate::imports::harness::prepare(candidate, true)?;
+    approve_environment(&prepared.config, yes)?;
+    let config = write_environment(directory, prepared.config.values.clone())?;
+    let _admission = if config
+        .values
+        .harness
+        .as_ref()
+        .is_some_and(|h| h.mode == HarnessMode::Copy)
+    {
+        Some(crate::export::TransferGuard::environment(&config)?)
+    } else {
+        None
+    };
+    prepared.publish(&config).map_err(|error| Error::new(format!(
+        "configuration saved, but harness snapshot publication failed: {error}; no runtime started; inspect configuration and run reload --yes before launch")))?;
+    Ok(config)
 }
 
 fn environment_defaults(project: PathBuf, agent: Agent) -> Result<ConfigDoc> {
-    let preferences = crate::runtime::preferences()?;
-    let plain =
-        preferences.container.is_some() || crate::runtime::choose(RuntimeChoice::Auto, &project)?;
+    let preferences = crate::runtime::preferences(Some(&project))?;
+    let plain = preferences.runtime_choice() != RuntimeChoice::Openshell;
     Ok(ConfigDoc {
+        openshell_contract: None,
         container: if plain {
             Some(preferences.container.unwrap_or_default())
         } else {
@@ -600,11 +1034,9 @@ fn environment_defaults(project: PathBuf, agent: Agent) -> Result<ConfigDoc> {
         workspace: "default".into(),
         project,
         project_transfer: ProjectTransfer::Live,
-        image: if plain {
-            crate::runtime::DEFAULT_CONTAINER_IMAGE.into()
-        } else {
-            DEFAULT_IMAGE.into()
-        },
+        image: preferences
+            .image
+            .unwrap_or_else(|| crate::runtime::DEFAULT_IMAGE.into()),
         agent,
         providers: vec![],
         imports: vec![],
@@ -614,19 +1046,23 @@ fn environment_defaults(project: PathBuf, agent: Agent) -> Result<ConfigDoc> {
 
 fn print_plan(config: &Config) -> Result<i32> {
     if config.values.container.is_some() {
-        println!(
+        writeln!(
+            io::stdout(),
             "{}",
             crate::config::review_json(&crate::runtime::container_plan(config))?
-        );
+        )?;
         return Ok(0);
     }
     let imports = crate::imports::plan(config)?;
     let mut unsatisfied = Vec::new();
+    if config.values.openshell_contract.is_some() {
+        unsatisfied.push("the modern OpenShell contract is not enabled in this build; no runtime operation or migration is authorized by this offline plan");
+    }
     if !config.values.imports.is_empty() {
         unsatisfied.push("imports require approved unchanged snapshot and exact local bind-enabled UID998 gateway; offline plan is not runtime verification");
     }
     if crate::imports::harness::enabled(config) {
-        unsatisfied.push("harness imports require Linux and the exact local bind-enabled UID998 gateway; OpenCode database authentication is not shared; copy requires reload approval before up");
+        unsatisfied.push("harness imports require Linux and the exact local bind-enabled UID998 gateway; OpenCode database authentication is not shared; copy requires an approved unchanged snapshot");
     }
     if config.values.project_transfer == ProjectTransfer::Live {
         unsatisfied.push(
@@ -641,11 +1077,13 @@ fn print_plan(config: &Config) -> Result<i32> {
         config.values.workspace.clone(),
     ];
     command.extend(plan_create_arguments(config, &config.policy_path));
-    println!(
+    writeln!(
+        io::stdout(),
         "{}",
         crate::config::review_json(&json!({
             "adapter": "openshell",
             "version": OPEN_SHELL_VERSION,
+            "openshell_contract": config.values.openshell_contract,
             "environment": {
                 "name": config.values.name,
                 "config": config.path,
@@ -663,7 +1101,7 @@ fn print_plan(config: &Config) -> Result<i32> {
             "project_transfer": project_transfer_plan(config),
             "verification": "plan only; no backend contacted or enforcement verified"
         }))?
-    );
+    )?;
     Ok(0)
 }
 
@@ -684,8 +1122,12 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         }
         return Err(crate::runtime::openshell_feature_error());
     }
-    if let Commands::Reload { yes } = command {
-        return crate::imports::harness::reload(config, yes);
+    if let Commands::Reload {
+        harness_config,
+        yes,
+    } = command
+    {
+        return crate::imports::harness::reload(config, harness_config, yes);
     }
     if let Commands::Imports {
         command: ImportCommands::Stage { yes },
@@ -693,6 +1135,16 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
     {
         return crate::imports::stage(config, yes);
     }
+    let prepared;
+    let config = if matches!(
+        &command,
+        Commands::Run { .. } | Commands::Up | Commands::Create | Commands::Attach
+    ) {
+        prepared = prepare_launch(config)?;
+        &prepared
+    } else {
+        config
+    };
     if !matches!(
         &command,
         Commands::Down | Commands::Stop | Commands::Status | Commands::Destroy { .. }
@@ -723,6 +1175,17 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         require_attach_terminal()?;
     }
 
+    if !matches!(
+        &command,
+        Commands::Create
+            | Commands::Up
+            | Commands::Run { .. }
+            | Commands::Attach
+            | Commands::Upload { .. }
+            | Commands::Export { .. }
+    ) {
+        crate::config::read_runtime_state(&config.state_path())?;
+    }
     let runtime = Runtime::new(config)?;
     match command {
         Commands::Create => runtime.create(),
@@ -760,7 +1223,8 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         }
         Commands::Status => {
             let remote = runtime.inspect_bound()?;
-            println!(
+            writeln!(
+                io::stdout(),
                 "{}",
                 serde_json::to_string_pretty(&serde_json::json!({
                     "id": remote["id"],
@@ -772,7 +1236,7 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
                     "engine": remote["engine"],
                     "policy_enforcement": remote["policy_enforcement"],
                 }))?
-            );
+            )?;
             Ok(0)
         }
         Commands::Upload { yes: true } => runtime.upload(),
@@ -840,6 +1304,45 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
         | Commands::Plan
         | Commands::Upload { yes: false } => unreachable!(),
     }
+}
+
+fn prepare_launch(config: &Config) -> Result<Config> {
+    let Err(error) = crate::imports::harness::original_sources_compatible(config) else {
+        return Ok(config.clone());
+    };
+    // Any binding marker, including an invalid file or dangling link, preserves the guest.
+    match std::fs::symlink_metadata(config.state_path()) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        _ => {
+            return Err(Error::new(format!(
+                "{error}\nThis environment has runtime state; no configuration changed. Preserve its guest login/sessions and initialize a separate environment with `dungeon init --directory PATH --name NEW_NAME --agent opencode --harness-config copy`, then use --config PATH/dungeon.json for reload and launch."
+            )));
+        }
+    }
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() || !io::stderr().is_terminal() {
+        return Err(error);
+    }
+    eprintln!(
+        "Cannot use original-source OpenCode configuration with this host's SELinux state. Original files will not be relabeled.\n\nChoose how to continue for this uncreated environment:\n  1. Review a private copy (recommended; may expose credentials)\n  2. Continue without host configuration\n  3. Cancel (default)"
+    );
+    let mode = loop {
+        eprint!("Harness configuration [1-3; default: cancel]: ");
+        io::stderr().flush()?;
+        let mut answer = String::new();
+        if io::stdin().read_line(&mut answer)? == 0 {
+            return Err(Error::new("launch cancelled; configuration unchanged"));
+        }
+        match answer.trim().to_ascii_lowercase().as_str() {
+            "1" | "copy" => break HarnessMode::Copy,
+            "2" | "disabled" => break HarnessMode::Disabled,
+            "" | "3" | "cancel" => {
+                return Err(Error::new("launch cancelled; configuration unchanged"));
+            }
+            _ => eprintln!("Enter 1, 2 or 3 (copy, disabled or cancel)."),
+        }
+    };
+    crate::imports::harness::reload(config, Some(mode), false)?;
+    load_config(&config.path)
 }
 
 fn attach_opencode(runtime: &Runtime<'_>) -> Result<i32> {
@@ -955,19 +1458,21 @@ fn versions(check: bool, config: Option<&Path>) -> Result<i32> {
     } else {
         binding::load(&project)?.map(|config| config.values.image)
     };
-    println!(
+    writeln!(
+        io::stdout(),
         "{}",
         serde_json::to_string_pretty(&json!({
             "host_opencode": host,
             "reviewed_guest_opencode": reviewed,
-            "reviewed_local_image": DEFAULT_IMAGE,
-            "default_container_image": crate::runtime::DEFAULT_CONTAINER_IMAGE,
+            "reviewed_local_image": REVIEWED_IMAGE,
+            "default_image": crate::runtime::DEFAULT_IMAGE,
+            "default_container_image": crate::runtime::DEFAULT_IMAGE,
             "selected_project_image": selected,
             "registry_stable": latest,
             "reviewed_update_available": latest.as_deref().and_then(stable_version).is_some_and(|version| version > reviewed_number),
-            "selection": "new OpenShell bindings use the reviewed local image; plain containers use the pinned public base and may pull it on first use; existing bindings unchanged",
+            "selection": "both runtimes use setup's saved image, otherwise upstream base:latest; reviewed guest versions describe only the optional local recipe, not the upstream image; existing bindings unchanged",
         }))?
-    );
+    )?;
     Ok(0)
 }
 
@@ -991,6 +1496,7 @@ fn initialize(
     endpoint: Option<String>,
 ) -> Result<i32> {
     let project = canonical_project(&project)?;
+    require_configuration_terminal(yes)?;
     let agent = select_agent(agent)?;
     let project_binding = directory.is_none();
     let directory = match directory {
@@ -1008,7 +1514,6 @@ fn initialize(
             ));
         }
         values.container = None;
-        values.image = DEFAULT_IMAGE.into();
     } else if matches!(runtime, RuntimeChoice::Container)
         || engine != Engine::Auto
         || endpoint.is_some()
@@ -1018,7 +1523,6 @@ fn initialize(
         } else {
             ContainerOptions { engine, endpoint }
         });
-        values.image = crate::runtime::DEFAULT_CONTAINER_IMAGE.into();
     }
     // Explicit OpenShell-only features select that contract during initialization.
     if matches!(runtime, RuntimeChoice::Auto)
@@ -1029,7 +1533,6 @@ fn initialize(
             || !providers.is_empty())
     {
         values.container = None;
-        values.image = DEFAULT_IMAGE.into();
     }
     if let Some(name) = name {
         values.name = name;
@@ -1040,6 +1543,7 @@ fn initialize(
     if let Some(workspace) = workspace {
         values.workspace = workspace;
     }
+    let choose_image = image.is_none();
     if let Some(image) = image {
         values.image = image;
     }
@@ -1047,52 +1551,64 @@ fn initialize(
         values.project_transfer = transfer;
     }
     values.providers = providers;
+    if !yes {
+        choose_environment(&mut values, choose_image, project_transfer.is_none())?;
+    }
+    let harness_config = match harness_config {
+        Some(mode) => mode,
+        None if !yes => choose_copy(agent)?,
+        None => HarnessMode::Disabled,
+    };
     values.harness = crate::imports::harness::defaults(
         agent,
-        harness_config.unwrap_or(HarnessMode::Disabled),
+        harness_config,
         exclude_provider_auth,
         harness_exclude,
         &values.project,
         &directory.join("dungeon.json"),
     )?;
-    approve_environment(&directory, &values, yes)?;
-    let config = write_environment(directory, values)?;
+    let config = save_environment(directory, values, yes)?;
 
-    println!("Configuration: {:?}", config.path);
-    if config.values.container.is_some() {
-        println!("Next: dungeon up. Missing registry images are pulled on first use.");
-        return Ok(0);
+    writeln!(
+        io::stdout(),
+        "Configuration saved; runtime readiness not checked. No guest was started."
+    )?;
+    writeln!(io::stdout(), "Configuration: {:?}", config.path)?;
+    if config.values.container.is_none() {
+        writeln!(
+            io::stdout(),
+            "Review policy.json and named providers before launch."
+        )?;
     }
-    println!("No runtime was started. Review policy.json and named providers before first up.");
-    if config.values.image == DEFAULT_IMAGE {
-        println!(
+    if config.values.image == REVIEWED_IMAGE {
+        writeln!(
+            io::stdout(),
             "Build the reviewed local image before first up (images/agent/README.md). `dungeon versions --check` shows upstream stable updates; nothing is downloaded automatically."
-        );
+        )?;
     }
     if project_binding {
-        println!(
-            "Next: dungeon plan to inspect policy; dungeon to start {}. No host harness client required.",
+        writeln!(
+            io::stdout(),
+            "Next: dungeon setup if needed, then dungeon to launch {} (dungeon run without a terminal).",
             config.values.agent.as_str()
-        );
+        )?;
     } else {
-        println!("Next: run plan, then launch dungeon, using --config with the path above.");
+        writeln!(
+            io::stdout(),
+            "Next: dungeon setup if needed, then dungeon --config PATH run using the configuration path above."
+        )?;
     }
     Ok(0)
 }
 
-fn approve_environment(directory: &Path, values: &ConfigDoc, yes: bool) -> Result<()> {
-    let config_path = if directory.is_absolute() {
-        directory.join("dungeon.json")
-    } else {
-        env::current_dir()?.join(directory).join("dungeon.json")
-    };
-    load_config_data(config_path, serde_json::to_value(values)?, |path| {
-        Ok((path.to_path_buf(), starter_policy()))
-    })?;
-    println!(
+fn approve_environment(config: &Config, yes: bool) -> Result<()> {
+    let values = &config.values;
+    writeln!(
+        io::stdout(),
         "{}",
         crate::config::review_json(&json!({
-            "config": directory.join("dungeon.json"),
+            "config": config.path,
+            "policy": config.policy_path,
             "name": values.name,
             "harness": values.agent,
             "project": values.project,
@@ -1105,60 +1621,49 @@ fn approve_environment(directory: &Path, values: &ConfigDoc, yes: bool) -> Resul
             "runtime": if values.container.is_some() {"container"} else {"openshell"},
             "container": values.container,
         }))?
-    );
+    )?;
     if values.container.is_some() {
-        println!(
+        writeln!(
+            io::stdout(),
             "Plain container: project read/write; selected configuration mounts read-only; normal container networking, no OpenShell policy enforcement."
-        );
-        if !yes && (!io::stdin().is_terminal() || !io::stdout().is_terminal()) {
-            return Err(Error::new(
-                "initialization requires a terminal or explicit `dungeon init --yes`; no files were created",
-            ));
+        )?;
+    } else {
+        match values.project_transfer {
+            ProjectTransfer::Copy => writeln!(
+                io::stdout(),
+                "Copy mode: first up uploads the project; guest changes reach the host only through reviewed export. No writable host mounts."
+            )?,
+            ProjectTransfer::Live => writeln!(
+                io::stdout(),
+                "Live mode: the guest can read and WRITE the selected host project immediately at /sandbox/project. Only this project is writable; separately reviewed harness files may be read-only. No upload/export. Requires a bind-enabled gateway. Choose --project-transfer copy for reviewed return of changes."
+            )?,
         }
-        if !yes && !confirm("Save this private configuration and continue?")? {
-            return Err(Error::new(
-                "project environment initialization cancelled; no files were created",
-            ));
-        }
-        return Ok(());
     }
-    match values.project_transfer {
-        ProjectTransfer::Copy => println!(
-            "Copy mode: first up uploads the project; guest changes reach the host only through reviewed export. No writable host mounts."
-        ),
-        ProjectTransfer::Live => println!(
-            "Live mode: the guest can read and WRITE the selected host project immediately at /sandbox/project. Only this project is writable; separately reviewed harness files may be read-only. No upload/export. Requires a bind-enabled gateway. Choose --project-transfer copy for reviewed return of changes."
-        ),
-    }
-    println!(
+    writeln!(
+        io::stdout(),
         "Review project contents before first up; all files within a live project become guest-visible, including secrets. Transfer is not a secret scanner."
-    );
+    )?;
     if let Some(h) = values
         .harness
         .as_ref()
         .filter(|h| h.mode != HarnessMode::Disabled)
     {
-        println!("{}", crate::imports::harness::WARNING);
+        writeln!(io::stdout(), "{}", crate::imports::harness::WARNING)?;
         if h.mode == HarnessMode::Copy {
-            println!(
-                "Copy mode: run dungeon reload to capture and approve the harness snapshot before first up."
-            );
+            writeln!(
+                io::stdout(),
+                "The reviewed private snapshot will be saved with this configuration; no separate reload is needed."
+            )?;
         }
         if h.exclude_provider_auth {
-            println!(
+            writeln!(
+                io::stdout(),
                 "Auth exclusion omits legacy auth.json and entire opencode.json/jsonc/cli.json files. It is not a secret scanner for plugins or other content."
-            );
+            )?;
         }
     }
     if !yes {
-        if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
-            return Err(Error::new(
-                "initialization requires a terminal or explicit `dungeon init --yes`; no files were created",
-            ));
-        }
-        println!(
-            "To customize, cancel and use dungeon init --agent/--image/--gateway/--project-transfer."
-        );
+        require_configuration_terminal(false)?;
         if !confirm("Save this private configuration and continue?")? {
             return Err(Error::new(
                 "project environment initialization cancelled; no files were created",
@@ -1169,6 +1674,20 @@ fn approve_environment(directory: &Path, values: &ConfigDoc, yes: bool) -> Resul
 }
 
 pub(crate) fn write_environment(directory: PathBuf, values: ConfigDoc) -> Result<Config> {
+    let directory = new_environment_directory(directory)?;
+    let policy = starter_policy();
+    load_config_data(
+        directory.join("dungeon.json"),
+        serde_json::to_value(&values)?,
+        |path| Ok((path.to_path_buf(), policy.clone())),
+    )?;
+    create_private_dir(&directory)?;
+    write_new(&directory.join("policy.json"), &policy)?;
+    write_new(&directory.join("dungeon.json"), &values)?;
+    load_config(&directory.join("dungeon.json"))
+}
+
+fn new_environment_directory(directory: PathBuf) -> Result<PathBuf> {
     let directory = if directory.is_absolute() {
         directory
     } else {
@@ -1196,16 +1715,7 @@ pub(crate) fn write_environment(directory: PathBuf, values: ConfigDoc) -> Result
     }
     let directory = ancestor.canonicalize()?.join(suffix);
 
-    let policy = starter_policy();
-    load_config_data(
-        directory.join("dungeon.json"),
-        serde_json::to_value(&values)?,
-        |path| Ok((path.to_path_buf(), policy.clone())),
-    )?;
-    create_private_dir(&directory)?;
-    write_new(&directory.join("policy.json"), &policy)?;
-    write_new(&directory.join("dungeon.json"), &values)?;
-    load_config(&directory.join("dungeon.json"))
+    Ok(directory)
 }
 
 fn confirm(label: &str) -> Result<bool> {
@@ -1288,6 +1798,16 @@ mod tests {
     }
 
     #[test]
+    fn explicit_native_separator_preserves_harness_config_as_workload_data() {
+        let args = ["opencode", "--", "--harness-config", "copy"].map(String::from);
+        let (agent, native) = run_selection(&args).unwrap();
+        assert_eq!(agent, Some(Agent::Opencode));
+        assert_eq!(native, ["--harness-config", "copy"]);
+        let args = ["--harness-config", "copy"].map(String::from);
+        assert_eq!(run_selection(&args).unwrap().1, args);
+    }
+
+    #[test]
     fn run_consumes_only_the_dungeon_separator_after_an_explicit_harness() {
         for agent in ["opencode", "claude", "codex"] {
             for (input, expected) in [
@@ -1331,6 +1851,7 @@ mod tests {
         write_new(
             &path,
             &ConfigDoc {
+                openshell_contract: None,
                 container: None,
                 schema: 2,
                 name: "demo".into(),
@@ -1471,7 +1992,7 @@ mod tests {
         for invalid in ["2.1", "2.1.2-beta", "2.1.2.3", "2.1.02x", ""] {
             assert_eq!(stable_version(invalid), None);
         }
-        assert!(DEFAULT_IMAGE.ends_with("opencode-2.1.2"));
+        assert!(REVIEWED_IMAGE.ends_with("opencode-2.1.2"));
         assert!(Cli::try_parse_from(["dungeon", "versions", "--check"]).is_ok());
         assert!(Cli::try_parse_from(["dungeon", "versions", "--install"]).is_err());
     }
@@ -1513,6 +2034,7 @@ mod tests {
         write_new(
             &path,
             &ConfigDoc {
+                openshell_contract: None,
                 container: None,
                 schema: 2,
                 name: "demo".into(),
@@ -1608,6 +2130,7 @@ mod tests {
         std::fs::write(source.join("init.lua"), "vim.opt.number = true").unwrap();
         write_new(&private.join("policy.json"), &starter_policy()).unwrap();
         let mut doc = serde_json::to_value(ConfigDoc {
+            openshell_contract: None,
             container: None,
             schema: 2,
             name: "demo".into(),

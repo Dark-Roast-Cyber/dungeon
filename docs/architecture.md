@@ -89,14 +89,17 @@ independently useful contract: plain containers do not require OpenShell.
 
 ### Plain-container selection and lifetime
 
-New bindings choose installed OpenShell or plain containers, unless explicitly
-selected with `--runtime` or saved container defaults. Existing schema-2 configs
+New human bindings use saved setup defaults, otherwise plain containers, unless
+explicitly selected with `--runtime` or OpenShell-only options. Existing schema-2 configs
 without `container` remain OpenShell with unchanged serialization/fingerprints.
 `container` holds the requested engine and optional local Unix endpoint. First
 creation discovers usable services (Podman first), then records engine, endpoint,
 daemon identity and exact container ID in `runtime.json`; reuse never rediscovers.
-`setup --runtime container` saves the resolved engine/socket for future projects
-in private `container-defaults.json`. `init` overrides and private config remain
+`setup` saves the selected runtime, image and resolved container engine/socket
+for future projects in private `container-defaults.json`. Both runtimes default
+to the upstream base's `latest` tag, with explicit version/digest overrides.
+Setup refreshes images; ordinary creation pulls missing images, not every cached
+tag. Existing guests are not updated. `init` overrides and private config remain
 authoritative. No remote Docker contexts, engine environment overrides, or
 repository-local settings are adopted.
 
@@ -140,7 +143,13 @@ For supported combinations, Dungeon may:
 - provide exact remediation guidance;
 - expose the same diagnostics in machine-readable form.
 
-Dungeon must not silently install privileged dependencies, overwrite incompatible OpenShell/runtime state, or fall back to weaker containment.
+The human setup wizard reviews the selected runtime/image and requires confirmation
+or `--yes` before activating the user Podman socket, pulling images, creating the
+gateway or replacing saved new-project defaults. Missing dependencies still need
+manual installation; no sudo, permission changes or arbitrary host scripts are
+added. The OpenShell CLI/gateway compatibility pin remains separate from the
+mutable agent image. `--dry-run` and doctor remain read-only. Dungeon must not
+overwrite incompatible OpenShell/runtime state or fall back to weaker containment.
 
 Setup health is not containment attestation.
 
@@ -215,6 +224,16 @@ Initialization does not execute project code or contact a runtime. Creation snap
 
 Reuse verifies identity and policy drift. These checks are not kernel/image attestation and do not prove provider content stayed unchanged.
 
+Persisted adapter identity is independent of runtime version admission. Unmarked
+configs retain the historical hash, including plain containers. The optional
+`openshell_contract: "dungeon-openshell-v1"` identifies the modern Dungeon contract,
+not a vendor release, and enters that same fingerprint rather than another state
+registry. This development checkpoint parses it offline but refuses it before
+runtime discovery; initialization and production admission remain on 0.0.116 until
+the modern setup/lifecycle port is integrated. The single stable-release parser
+lives in `openshell` and is shared by runtime, setup and diagnostics. Its modern
+minimum rule has no upper ceiling; that rule alone does not enable the port.
+
 The lifecycle remains `up`, `run`, and `down` with one explicit config and one Runtime. New CLI bindings select `live` after operator review: creation derives exactly one read-write bind request from the canonical configured project to `/sandbox/project`; first and resumed `up` never upload. Explicit `copy` mode creates the bound sandbox and uploads the project once; resumed `up` starts it without upload, and is a no-op when already Ready. Existing configs omitting the transfer field retain copy semantics. `run` starts a stopped bound sandbox without upload in either mode. `down` stops it and retains environment state.
 
 `upload --yes` and `export` remain copy-mode operations. Upload is the operator's overwrite-capable refresh/recovery action. Export is a Ready-only operation for the bound sandbox on OpenShell 0.0.116: it downloads and stages the guest project, then presents a deterministic three-way diff against the last successful upload baseline and current host project. It applies only after interactive typed `yes` or explicit `--yes`. Both commands refuse in live mode before contacting OpenShell.
@@ -265,9 +284,26 @@ The choice is stored in the project binding, without a global preference registr
 Host harness imports are disabled by default; read-only/copy access is opt-in.
 Human explicit and implicit initialization share one configuration-default
 constructor; CLI options are overrides rather than a second set of defaults.
+Without saved defaults, human setup/initialization recommends plain containers;
+installed OpenShell is not configuration authority. Explicit OpenShell options
+and saved selections retain that runtime; existing bindings never downgrade.
 The same config writer and validator serve direct binding and machine
 initialization. `config` exposes resolved values/paths without a new registry;
-`config` and `plan` never initialize missing bindings or contact OpenShell.
+bare `config` and `plan` never initialize missing bindings or contact OpenShell.
+Explicit `config --edit` reviews common schema fields for an unbound environment.
+It keeps the runtime, service, project identity and policy, using the same atomic
+configuration replacement as reload under existing environment/import locks.
+No editor shell snippets, new schema, registry or backend abstraction is added.
+Machine initialization uses that same writer with explicit runtime/engine/endpoint
+selection. Its omitted runtime retains the schema-1 OpenShell/copy contract;
+explicit containers use live access. Machine streaming/ownership remains
+OpenShell-only, not a second container execution protocol.
+
+Interactive first use selects an agent, image/project access and optional OpenCode
+snapshot, then approves once before saving/launch. Human `init --harness-config
+copy` stages and saves its reviewed snapshot without a separate reload. Snapshot
+preparation/publication is shared with edit/reload; original-source mounts remain
+an advanced explicit choice. Machine initialization remains import-free.
 
 Bare `dungeon` is interactive-only for every harness and reuses `run`'s guest-CLI
 launch path, with no host harness client requirement. Explicit `run` accepts

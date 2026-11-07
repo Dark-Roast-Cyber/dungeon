@@ -34,6 +34,70 @@ fn setup_flags_parse_and_missing_prerequisites_leave_home_and_project_empty() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn approved_openshell_setup_checks_compatibility_before_service_or_image_changes() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let project = root.path().join("project");
+    let home = root.path().join("home");
+    let bin = root.path().join("bin");
+    for dir in [&project, &home, &bin] {
+        fs::create_dir(dir).unwrap();
+    }
+    let marker = root.path().join("native-mutated");
+    for name in ["podman", "systemctl"] {
+        let path = bin.join(name);
+        fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\nprintf forbidden > '{}'\nexit 9\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let path = bin.join("openshell");
+    for version in [
+        "0.0.1",
+        "0.1.6",
+        "0.1.7",
+        "0.1.8",
+        "0.2.0",
+        "1.0.0",
+        "0.1.7-rc.1",
+    ] {
+        fs::write(
+            &path,
+            format!("#!/bin/sh\nprintf 'openshell {version}\\n'\n"),
+        )
+        .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_dungeon"))
+            .args(["setup", "--yes", "--runtime", "openshell"])
+            .env_clear()
+            .env("HOME", &home)
+            .env("PATH", &bin)
+            .current_dir(&project)
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        let expected = match version {
+            "0.0.1" | "0.1.6" => "OpenShell 0.0.116 required",
+            "0.1.7-rc.1" => "unrecognized OpenShell version output",
+            _ => "modern adapter is not enabled",
+        };
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(expected),
+            "{out:?}"
+        );
+        assert!(!marker.exists());
+        assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(&project).unwrap().count(), 0);
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn dry_run_does_not_query_or_initialize_an_empty_engine_store() {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();
@@ -104,7 +168,7 @@ fi
         .env_clear()
         .env("HOME", &home)
         .env("PATH", &tools)
-        .args(["setup", "--dry-run"])
+        .args(["setup", "--runtime", "openshell", "--dry-run"])
         .output()
         .unwrap();
     assert_eq!(result.status.code(), Some(1));

@@ -47,6 +47,475 @@ impl Fixture {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn offline_init_disclaims_readiness_without_probing_runtime_tools() {
+    use std::os::unix::fs::PermissionsExt;
+    for runtime in ["container", "openshell"] {
+        for custom in [false, true] {
+            let f = Fixture::new();
+            let bin = f.home.join("bin");
+            fs::create_dir(&bin).unwrap();
+            let contacted = f.home.join("native-contacted");
+            for name in [
+                "openshell",
+                "openshell-gateway",
+                "podman",
+                "docker",
+                "systemctl",
+            ] {
+                let tool = bin.join(name);
+                fs::write(
+                    &tool,
+                    format!(
+                        "#!/bin/sh\nprintf forbidden > '{}'\nexit 9\n",
+                        contacted.display()
+                    ),
+                )
+                .unwrap();
+                fs::set_permissions(tool, fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            let directory = f.home.join("custom-private");
+            let mut args = vec!["init", "--yes", "--runtime", runtime, "--agent", "opencode"];
+            if custom {
+                args.extend(["--directory", directory.to_str().unwrap()]);
+            }
+            let out = f.command().env("PATH", &bin).args(args).output().unwrap();
+            assert!(out.status.success(), "{out:?}");
+            let text = String::from_utf8(out.stdout).unwrap();
+            assert!(
+                text.contains(
+                    "Configuration saved; runtime readiness not checked. No guest was started."
+                ),
+                "{text}"
+            );
+            assert!(text.contains("Next: dungeon setup if needed"), "{text}");
+            assert_eq!(text.contains("dungeon --config PATH run"), custom);
+            assert!(!text.contains("Next: dungeon plan"));
+            assert!(!contacted.exists());
+            let config = if custom {
+                directory.join("dungeon.json")
+            } else {
+                PathBuf::from(f.config()["config"].as_str().unwrap())
+            };
+            assert!(config.is_file());
+            assert!(!config.with_file_name("runtime.json").exists());
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn modern_contract_is_offline_inspectable_but_cannot_reach_the_legacy_adapter() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let f = Fixture::new();
+    assert!(
+        f.run(&[
+            "init",
+            "--yes",
+            "--agent",
+            "opencode",
+            "--runtime",
+            "openshell",
+            "--project-transfer",
+            "copy"
+        ])
+        .status
+        .success()
+    );
+    let old = f.config();
+    let old_plan: Value = serde_json::from_slice(&f.run(&["plan"]).stdout).unwrap();
+    let path = PathBuf::from(old["config"].as_str().unwrap());
+    assert!(old["values"].get("openshell_contract").is_none());
+    let mut values = old["values"].clone();
+    values["openshell_contract"] = json!("dungeon-openshell-v1");
+    fs::write(&path, serde_json::to_vec_pretty(&values).unwrap()).unwrap();
+    let before = fs::read(&path).unwrap();
+    let marked_plan: Value = serde_json::from_slice(&f.run(&["plan"]).stdout).unwrap();
+    let marked_fingerprint = &marked_plan["fingerprint"];
+    assert!(marked_fingerprint.is_string());
+    assert_ne!(marked_fingerprint, &old_plan["fingerprint"]);
+    let bin = f.home.join("bin");
+    fs::create_dir(&bin).unwrap();
+    let contacted = f.home.join("native-contacted");
+    for name in ["openshell", "podman", "docker", "systemctl"] {
+        let native = bin.join(name);
+        fs::write(
+            &native,
+            format!(
+                "#!/bin/sh\nprintf forbidden > '{}'\nexit 9\n",
+                contacted.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&native, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    let state_path = path.with_file_name("runtime.json");
+    for state in [
+        "absent",
+        "invalid",
+        "mismatched",
+        "pending",
+        "bound",
+        "dangling",
+    ] {
+        match state {
+            "absent" => {}
+            "invalid" => fs::write(&state_path, "invalid").unwrap(),
+            "mismatched" | "pending" | "bound" => {
+                fs::write(&state_path, json!({"schema":1,"id":"retained","config":if state == "mismatched" { &old_plan["fingerprint"] } else { marked_fingerprint },"observed_policy":"retained","initial_upload_pending":state == "pending"}).to_string()).unwrap();
+                fs::set_permissions(&state_path, fs::Permissions::from_mode(0o600)).unwrap();
+            }
+            "dangling" => symlink(f.home.join("absent-target"), &state_path).unwrap(),
+            _ => unreachable!(),
+        }
+        let saved_state = fs::read(&state_path).ok();
+        for args in [
+            vec!["config"],
+            vec!["plan"],
+            vec!["list", "-a"],
+            vec!["machine", "--schema", "1", "resolve"],
+        ] {
+            let out = f.command().env("PATH", &bin).args(&args).output().unwrap();
+            assert!(out.status.success(), "{state}: {args:?}: {out:?}");
+            if args == ["plan"] {
+                let plan: Value = serde_json::from_slice(&out.stdout).unwrap();
+                assert_eq!(plan["openshell_contract"], "dungeon-openshell-v1");
+                assert_ne!(plan["fingerprint"], old_plan["fingerprint"]);
+                assert!(
+                    plan["unsatisfied"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|v| v.as_str().unwrap().contains("not enabled"))
+                );
+            }
+            if args == ["list", "-a"] {
+                let list: Value = serde_json::from_slice(&out.stdout).unwrap();
+                assert_eq!(
+                    list[0]["binding"]["state"],
+                    match state {
+                        "absent" => "configured",
+                        "bound" | "pending" => "bound",
+                        _ => "invalid",
+                    }
+                );
+            }
+        }
+        #[cfg(target_os = "linux")]
+        for args in [
+            vec!["uninstall", "--dry-run"],
+            vec!["uninstall", "--yes"],
+            vec!["doctor", "--json"],
+            vec!["doctor", "--json", "--runtime", "openshell"],
+            vec!["doctor", "--json", "--runtime", "container"],
+        ] {
+            let out = f.command().env("PATH", &bin).args(&args).output().unwrap();
+            assert_eq!(out.status.code(), Some(1), "{state}: {args:?}: {out:?}");
+            if args[0] == "doctor" {
+                let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+                assert_eq!(report["read_only"], true);
+                assert!(
+                    report["checks"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|finding| finding["check"] == "openshell_contract"
+                            && finding["blocking"] == true)
+                );
+                assert!(report.get("container").is_none());
+            } else if matches!(state, "absent" | "pending" | "bound") {
+                assert!(
+                    String::from_utf8_lossy(&out.stderr)
+                        .contains("modern OpenShell contract is not enabled"),
+                    "{out:?}"
+                );
+            }
+        }
+        for args in [
+            vec!["up"],
+            vec!["create"],
+            vec!["machine", "--schema", "1", "up", "--yes"],
+            vec!["machine", "--schema", "1", "create", "--yes"],
+        ] {
+            let out = f.command().env("PATH", &bin).args(&args).output().unwrap();
+            assert_eq!(out.status.code(), Some(1), "{state}: {args:?}: {out:?}");
+            if args[0] == "machine" {
+                assert!(out.stderr.is_empty());
+                let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+                assert_eq!(result["error"]["code"], "unsupported");
+                assert_eq!(result["error"]["effects"], "none");
+            } else {
+                assert!(
+                    String::from_utf8_lossy(&out.stderr)
+                        .contains("modern OpenShell contract is not enabled"),
+                    "{out:?}"
+                );
+            }
+        }
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert_eq!(fs::read(&state_path).ok(), saved_state);
+        assert!(!contacted.exists());
+        assert!(!path.with_file_name("transfer.lock").exists());
+        if state != "absent" {
+            fs::remove_file(&state_path).unwrap();
+        }
+    }
+}
+
+#[test]
+fn configured_but_uncreated_commands_explain_the_next_step_before_runtime_discovery() {
+    for runtime in ["container", "openshell"] {
+        let f = Fixture::new();
+        assert!(
+            f.run(&["init", "--yes", "--agent", "opencode", "--runtime", runtime])
+                .status
+                .success()
+        );
+        let config = f.config();
+        let path = PathBuf::from(config["config"].as_str().unwrap());
+        let before = fs::read(&path).unwrap();
+        for args in [
+            vec!["status"],
+            vec!["exec", "--", "true"],
+            vec!["start"],
+            vec!["down"],
+            vec!["shell"],
+        ] {
+            let out = f.run(&args);
+            assert_eq!(out.status.code(), Some(1), "{runtime}: {out:?}");
+            let error = String::from_utf8(out.stderr).unwrap();
+            assert!(
+                error.contains("has not been created") && error.contains("dungeon up"),
+                "{error}"
+            );
+        }
+        let state = path.with_file_name("runtime.json");
+        assert!(!state.exists());
+        fs::write(&state, "{\"synthetic_invalid_state\":true}").unwrap();
+        let out = f.run(&["status"]);
+        assert!(!out.status.success());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("has not been created"));
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert_eq!(
+            fs::read_to_string(&state).unwrap(),
+            "{\"synthetic_invalid_state\":true}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn closed_output_consumers_are_errors_not_panics() {
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+    for runtime in ["container", "openshell"] {
+        let f = Fixture::new();
+        assert!(
+            f.run(&["init", "--yes", "--agent", "opencode", "--runtime", runtime])
+                .status
+                .success()
+        );
+        let config = f.config();
+        let path = PathBuf::from(config["config"].as_str().unwrap());
+        let before = fs::read(&path).unwrap();
+        for args in [
+            vec!["list", "-a"],
+            vec!["config"],
+            vec!["config", "--path"],
+            vec!["plan"],
+            vec!["versions"],
+            vec![
+                "config",
+                "--edit",
+                "--yes",
+                "--image",
+                "ghcr.io/example/agent:1",
+            ],
+            vec!["machine", "--schema", "1", "resolve"],
+        ] {
+            let (writer, reader) = UnixStream::pair().unwrap();
+            drop(reader);
+            let out = f
+                .command()
+                .args(&args)
+                .stdout(Stdio::from(OwnedFd::from(writer)))
+                .stderr(Stdio::piped())
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(1), "{args:?}: {out:?}");
+            assert!(
+                !String::from_utf8_lossy(&out.stderr).contains("panicked"),
+                "{out:?}"
+            );
+        }
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert!(!path.with_file_name("runtime.json").exists());
+        let directory = f.home.join("unpublished");
+        let (writer, reader) = UnixStream::pair().unwrap();
+        drop(reader);
+        let out = f
+            .command()
+            .args([
+                "init",
+                "--yes",
+                "--agent",
+                "opencode",
+                "--runtime",
+                runtime,
+                "--directory",
+                directory.to_str().unwrap(),
+            ])
+            .stdout(Stdio::from(OwnedFd::from(writer)))
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("panicked"));
+        assert!(
+            !directory.exists(),
+            "failed review output must not publish configuration"
+        );
+    }
+}
+
+#[test]
+fn machine_init_selects_plain_containers_without_contact_or_host_imports() {
+    for engine in ["podman", "docker", "auto"] {
+        let f = Fixture::new();
+        let directory = f.home.join("machine-private");
+        let mut args = vec![
+            "machine",
+            "--schema",
+            "1",
+            "init",
+            "--yes",
+            "--runtime",
+            "container",
+            "--engine",
+            engine,
+            "--directory",
+            directory.to_str().unwrap(),
+            "--project",
+            f.project.to_str().unwrap(),
+            "--name",
+            "machine-test",
+            "--image",
+            "ghcr.io/example/agent:1",
+            "--agent",
+            "claude",
+        ];
+        if engine != "auto" {
+            args.extend(["--endpoint", "unix:///synthetic/unavailable.sock"]);
+        }
+        let out = f.run(&args);
+        assert!(out.status.success(), "{out:?}");
+        assert!(out.stderr.is_empty());
+        let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(result["result"]["environment"]["runtime"], "container");
+        assert_eq!(result["result"]["policy"], "unenforced");
+        assert_eq!(result["result"]["phase"], "uncreated");
+        let values: Value =
+            serde_json::from_slice(&fs::read(directory.join("dungeon.json")).unwrap()).unwrap();
+        assert_eq!(values["container"]["engine"], engine);
+        assert_eq!(values["project_transfer"], "live");
+        assert_eq!(values["agent"], "claude");
+        assert!(values["harness"].is_null());
+        assert!(!directory.join("runtime.json").exists());
+        assert!(!directory.join("harness").exists());
+    }
+}
+
+#[test]
+fn machine_init_keeps_legacy_defaults_and_refuses_conflicts_before_writes() {
+    for extra in [
+        vec![],
+        vec!["--runtime", "openshell"],
+        vec!["--runtime", "container", "--project-transfer", "copy"],
+        vec!["--runtime", "container", "--gateway", "local"],
+        vec!["--runtime", "openshell", "--engine", "docker"],
+        vec![
+            "--runtime",
+            "container",
+            "--endpoint",
+            "unix:///synthetic.sock",
+        ],
+        vec!["--runtime", "auto"],
+    ] {
+        let f = Fixture::new();
+        let directory = f.home.join("machine-private");
+        let mut args = vec![
+            "machine",
+            "--schema",
+            "1",
+            "init",
+            "--yes",
+            "--directory",
+            directory.to_str().unwrap(),
+            "--project",
+            f.project.to_str().unwrap(),
+            "--name",
+            "machine-test",
+            "--image",
+            "ghcr.io/example/agent:1",
+        ];
+        args.extend_from_slice(&extra);
+        let out = f.run(&args);
+        assert!(out.stderr.is_empty());
+        let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+        if extra.is_empty() || extra == ["--runtime", "openshell"] {
+            assert!(out.status.success(), "{out:?}");
+            assert_eq!(result["result"]["environment"]["runtime"], "openshell");
+            assert_eq!(result["result"]["environment"]["project_transfer"], "copy");
+            let saved: Value =
+                serde_json::from_slice(&fs::read(directory.join("dungeon.json")).unwrap()).unwrap();
+            assert!(saved["container"].is_null());
+            assert_eq!(saved["gateway"], "dungeon-local");
+        } else {
+            assert_eq!(out.status.code(), Some(1), "{extra:?}: {out:?}");
+            assert_eq!(result["ok"], false);
+            assert!(!directory.exists());
+        }
+    }
+    let f = Fixture::new();
+    let directory = f.home.join("unapproved");
+    let out = f.run(&[
+        "machine",
+        "--schema",
+        "1",
+        "init",
+        "--runtime",
+        "container",
+        "--directory",
+        directory.to_str().unwrap(),
+        "--project",
+        f.project.to_str().unwrap(),
+        "--name",
+        "machine-test",
+        "--image",
+        "ghcr.io/example/agent:1",
+    ]);
+    let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(result["error"]["code"], "approval_required");
+    assert_eq!(result["error"]["effects"], "none");
+    assert!(!directory.exists());
+}
+
+#[test]
+fn configuration_mutation_options_require_explicit_edit_and_conflict_with_path() {
+    let f = Fixture::new();
+    for args in [
+        vec!["config", "--yes"],
+        vec!["config", "--image", "ghcr.io/example/agent:1"],
+        vec!["config", "--path", "--edit"],
+        vec!["config", "--edit", "--harness-config", "automatic"],
+    ] {
+        assert!(!f.run(&args).status.success(), "{args:?}");
+        assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
+    }
+}
+
 #[test]
 fn default_init_binds_current_project_and_offline_commands_do_not_need_openshell() {
     let f = Fixture::new();
@@ -67,7 +536,7 @@ fn default_init_binds_current_project_and_offline_commands_do_not_need_openshell
     assert_eq!(values["providers"], json!([]));
     assert_eq!(
         values["image"],
-        "ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e"
+        "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
     );
     assert_eq!(config["project_transfer"], "live");
     assert_eq!(values["project_transfer"], "live");
@@ -136,6 +605,134 @@ fn explicit_copy_stays_available_for_new_bindings() {
     assert!(out.status.success(), "{out:?}");
     assert_eq!(f.config()["project_transfer"], "copy");
     assert!(f.config()["values"]["project_transfer"].is_null());
+}
+
+#[test]
+fn every_runtime_and_harness_uses_the_same_image_default_and_accepts_pins() {
+    for runtime in ["container", "openshell"] {
+        for agent in ["opencode", "claude", "codex"] {
+            for image in [
+                None,
+                Some("ghcr.io/example/agent:Release-X"),
+                Some(
+                    "ghcr.io/example/agent@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                ),
+            ] {
+                let f = Fixture::new();
+                let mut args = vec!["init", "--yes", "--runtime", runtime, "--agent", agent];
+                if let Some(image) = image {
+                    args.extend(["--image", image]);
+                }
+                let out = f.run(&args);
+                assert!(out.status.success(), "{out:?}");
+                assert_eq!(
+                    f.config()["values"]["image"],
+                    image.unwrap_or("ghcr.io/nvidia/openshell-community/sandboxes/base:latest")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn installed_openshell_does_not_override_plain_new_project_defaults() {
+    let f = Fixture::new();
+    let tools = f.root.path().join("tools");
+    fs::create_dir(&tools).unwrap();
+    fs::write(
+        tools.join("openshell"),
+        "synthetic executable is not configuration authority",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(tools.join("openshell"), fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let out = f
+        .command()
+        .env("PATH", &tools)
+        .args(["init", "--yes", "--agent", "opencode"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert!(f.config()["values"]["container"].is_object());
+}
+
+#[test]
+fn saved_openshell_defaults_are_authoritative_without_an_installed_cli() {
+    let f = Fixture::new();
+    let directory = f.home.join("config/dungeon");
+    fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("container-defaults.json");
+    fs::write(
+        &path,
+        json!({"runtime":"openshell","container":null,"image":"ghcr.io/example/agent:1"})
+            .to_string(),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    assert!(
+        f.run(&["init", "--yes", "--agent", "codex"])
+            .status
+            .success()
+    );
+    let values = &f.config()["values"];
+    assert!(values["container"].is_null());
+    assert_eq!(values["image"], "ghcr.io/example/agent:1");
+    #[cfg(target_os = "linux")]
+    {
+        let report: Value = serde_json::from_slice(&f.run(&["doctor", "--json"]).stdout).unwrap();
+        assert!(report.get("supported_openshell").is_some());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_defaults_cannot_be_loaded_from_the_selected_project_or_an_alias() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    for alias in [false, true] {
+        let f = Fixture::new();
+        let source = f.project.join("config");
+        fs::create_dir_all(source.join("dungeon")).unwrap();
+        let prefs = source.join("dungeon/container-defaults.json");
+        fs::write(&prefs, json!({"runtime":"openshell","container":null,"image":"ghcr.io/untrusted/agent:latest"}).to_string()).unwrap();
+        fs::set_permissions(&prefs, fs::Permissions::from_mode(0o600)).unwrap();
+        let config_root = if alias {
+            let config = f.home.join("alias");
+            fs::create_dir(&config).unwrap();
+            symlink(source.join("dungeon"), config.join("dungeon")).unwrap();
+            config
+        } else {
+            source
+        };
+        let out = f
+            .command()
+            .current_dir(&f.home)
+            .env("XDG_CONFIG_HOME", &config_root)
+            .args([
+                "init",
+                "--yes",
+                "--agent",
+                "codex",
+                "--project",
+                f.project.to_str().unwrap(),
+                "--directory",
+                f.home.join("private").to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{out:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("defaults must be outside the project"),
+            "{out:?}"
+        );
+        assert!(!config_root.join("dungeon/projects").exists());
+    }
 }
 
 #[test]
@@ -501,6 +1098,16 @@ mod terminal {
             self.master.write_all(text.as_bytes()).unwrap();
         }
 
+        fn default_configuration(&mut self, opencode: bool) {
+            self.until("Image [");
+            self.send("\n");
+            if opencode {
+                self.until("Use a reviewed copy of your OpenCode configuration?");
+                self.send("\n");
+            }
+            self.until("Save this private configuration and continue?");
+        }
+
         fn finish(mut self, success: bool) -> String {
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
@@ -529,12 +1136,232 @@ mod terminal {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn first_run_reviews_and_saves_snapshot_without_reload() {
+        for approve in [false, true] {
+            let f = Fixture::new();
+            let source = f.home.join("config/opencode/themes");
+            fs::create_dir_all(&source).unwrap();
+            fs::write(source.join("synthetic.json"), "{\"fixture\":1}").unwrap();
+            let mut terminal =
+                Terminal::spawn(f.command(), &["run", "opencode", "--", "--version"]);
+            terminal.until("Image [");
+            terminal.send("ghcr.io/example/agent:Reviewed\n");
+            terminal.until("Use a reviewed copy of your OpenCode configuration?");
+            assert!(terminal.text.contains("can expose credentials"));
+            terminal.send("y\n");
+            terminal.until("Save this private configuration and continue?");
+            assert!(terminal.text.contains("\"snapshot\": \""));
+            assert!(!f.home.join("config/dungeon").exists());
+            // The saved copy must be the reviewed bytes, not later source contents.
+            fs::write(source.join("synthetic.json"), "{\"fixture\":2}").unwrap();
+            terminal.send(if approve { "y\n" } else { "n\n" });
+            terminal.finish(false); // No engine is on this fixture's PATH.
+            if approve {
+                let config = f.config();
+                assert_eq!(config["values"]["image"], "ghcr.io/example/agent:Reviewed");
+                let h = &config["values"]["harness"];
+                assert_eq!(h["mode"], "copy");
+                let path = PathBuf::from(config["config"].as_str().unwrap());
+                let copied = path
+                    .parent()
+                    .unwrap()
+                    .join("harness")
+                    .join(h["snapshot"].as_str().unwrap())
+                    .join("config/themes/synthetic.json");
+                assert_eq!(fs::read_to_string(copied).unwrap(), "{\"fixture\":1}");
+                assert!(!path.with_file_name("runtime.json").exists());
+            } else {
+                assert!(!f.home.join("config/dungeon").exists());
+            }
+            assert!(!fs::read_dir(f.home.join("config")).unwrap().any(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("harness-review-")
+            }));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guided_editor_reviews_changes_and_preserves_config_on_cancel_or_new_binding() {
+        for action in ["save", "cancel", "concurrent"] {
+            let f = Fixture::new();
+            assert!(
+                f.run(&[
+                    "init",
+                    "--yes",
+                    "--agent",
+                    "claude",
+                    "--runtime",
+                    "openshell"
+                ])
+                .status
+                .success()
+            );
+            let path = PathBuf::from(f.config()["config"].as_str().unwrap());
+            let before = fs::read(&path).unwrap();
+            let mut terminal = Terminal::spawn(f.command(), &["config", "--edit"]);
+            terminal.until("Agent [");
+            terminal.send("codex\n");
+            terminal.until("Image [");
+            terminal.send("ghcr.io/example/agent:Editor\n");
+            terminal.until("Project access [");
+            terminal.send("copy\n");
+            terminal.until("Save this private configuration and continue?");
+            assert_eq!(fs::read(&path).unwrap(), before);
+            if action == "concurrent" {
+                fs::write(path.with_file_name("runtime.json"), "synthetic binding").unwrap();
+            }
+            terminal.send(if action == "cancel" { "n\n" } else { "y\n" });
+            terminal.finish(action == "save");
+            if action == "save" {
+                let config = f.config();
+                assert_eq!(config["values"]["agent"], "codex");
+                assert_eq!(config["values"]["image"], "ghcr.io/example/agent:Editor");
+                assert_eq!(config["project_transfer"], "copy");
+            } else {
+                assert_eq!(fs::read(&path).unwrap(), before);
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn selinux_fixture() -> Option<Fixture> {
+        if fs::read("/sys/fs/selinux/enforce").ok().as_deref() != Some(b"1") {
+            eprintln!("guided SELinux recovery requires an enforcing Linux host");
+            return None;
+        }
+        let f = Fixture::new();
+        let source = f.home.join("config/opencode/themes");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("synthetic.json"), "{}").unwrap();
+        let out = f.run(&[
+            "init",
+            "--yes",
+            "--runtime",
+            "openshell",
+            "--agent",
+            "opencode",
+            "--harness-config",
+            "read-only",
+            "--exclude-provider-auth",
+        ]);
+        assert!(out.status.success(), "{out:?}");
+        Some(f)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guided_selinux_recovery_reviews_choice_and_continues_launch() {
+        for (choice, mode) in [("1", "copy"), ("2", "disabled")] {
+            let Some(f) = selinux_fixture() else { return };
+            let config = f.config();
+            let path = PathBuf::from(config["config"].as_str().unwrap());
+            let before = fs::read(&path).unwrap();
+            let mut terminal =
+                Terminal::spawn(f.command(), &["run", "opencode", "--", "--version"]);
+            terminal.until("Harness configuration [1-3;");
+            terminal.send("invalid\n");
+            terminal.until("Enter 1, 2 or 3");
+            assert_eq!(fs::read(&path).unwrap(), before);
+            terminal.send(&format!("{choice}\n"));
+            terminal.until("Approve this harness configuration selection? Type yes:");
+            assert_eq!(fs::read(&path).unwrap(), before);
+            terminal.send("yes\n");
+            // No runtime is installed in the fixture: reaching its lookup proves continuation.
+            let text = terminal.finish(false);
+            assert!(text.contains("install the OpenShell"), "{text}");
+            let selected = f.config();
+            assert_eq!(selected["values"]["harness"]["mode"], mode);
+            assert_eq!(
+                selected["values"]["harness"]["snapshot"].is_string(),
+                mode == "copy"
+            );
+            assert!(!path.with_file_name("runtime.json").exists());
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guided_selinux_cancellation_and_concurrent_binding_preserve_config() {
+        for action in ["cancel", "reject", "bound", "concurrent"] {
+            let Some(f) = selinux_fixture() else { return };
+            let path = PathBuf::from(f.config()["config"].as_str().unwrap());
+            let before = fs::read(&path).unwrap();
+            if action == "bound" {
+                fs::write(path.with_file_name("runtime.json"), "synthetic binding").unwrap();
+            }
+            let mut terminal = Terminal::spawn(f.command(), &["run", "opencode"]);
+            if action != "bound" {
+                terminal.until("Harness configuration [1-3;");
+                if action == "cancel" {
+                    terminal.send("\n");
+                } else {
+                    terminal.send("1\n");
+                    terminal.until("Approve this harness configuration selection? Type yes:");
+                    if action == "concurrent" {
+                        fs::write(path.with_file_name("runtime.json"), "synthetic binding")
+                            .unwrap();
+                    }
+                    terminal.send(if action == "reject" { "no\n" } else { "yes\n" });
+                }
+            }
+            let text = terminal.finish(false);
+            assert_eq!(fs::read(&path).unwrap(), before, "{action}: {text}");
+            assert!(!path.with_file_name("harness").exists());
+            if action == "bound" {
+                assert!(text.contains("runtime state"));
+                assert!(!text.contains("Harness configuration [1-3;"));
+            }
+        }
+    }
+
+    #[test]
+    fn setup_wizard_reviews_runtime_and_preserves_image_case_before_approval() {
+        for runtime in ["1", "OpenShell"] {
+            let f = Fixture::new();
+            let mut terminal = Terminal::spawn(f.command(), &["setup"]);
+            terminal.until("Runtime [container/openshell;");
+            terminal.send("invalid\n");
+            terminal.until("Enter 1 or 2");
+            terminal.send(&format!("{runtime}\n"));
+            terminal.until("Image [");
+            terminal.send("ghcr.io/example/agent:Release-X\n");
+            terminal.until("Apply this setup?");
+            assert!(
+                terminal
+                    .text
+                    .contains("\"image\": \"ghcr.io/example/agent:Release-X\"")
+            );
+            assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
+            terminal.send("n\n");
+            terminal.finish(false);
+            assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
+        }
+    }
+
+    #[test]
+    fn cancelling_setup_selection_creates_nothing() {
+        for input in ["\x03", "\x04"] {
+            let f = Fixture::new();
+            let mut terminal = Terminal::spawn(f.command(), &["setup"]);
+            terminal.until("Runtime [container/openshell;");
+            terminal.send(input);
+            terminal.finish(false);
+            assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
+        }
+    }
+
     #[test]
     fn implicit_and_explicit_initialization_share_every_configuration_default() {
         for agent in ["opencode", "claude", "codex"] {
             let f = Fixture::new();
             let mut terminal = Terminal::spawn(f.command(), &["run", agent]);
-            terminal.until("Save this private configuration and continue?");
+            terminal.default_configuration(agent == "opencode");
             terminal.send("y\n");
             terminal.finish(false);
             let implicit = f.config();
@@ -574,7 +1401,7 @@ mod terminal {
             terminal.until("Enter 1, 2 or 3");
             assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
             terminal.send(&format!("{input}\n"));
-            terminal.until("Save this private configuration and continue?");
+            terminal.default_configuration(agent == "opencode");
             assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
             terminal.send("y\n");
             terminal.finish(true);
@@ -594,7 +1421,7 @@ mod terminal {
             let mut terminal = Terminal::spawn(f.command(), &args);
             terminal.until("Harness [1-3 or name; no default]:");
             terminal.send("claude\n");
-            terminal.until("Save this private configuration and continue?");
+            terminal.default_configuration(false);
             terminal.send("y\n");
             terminal.finish(false);
             assert_eq!(f.config()["values"]["agent"], "claude");
@@ -606,7 +1433,7 @@ mod terminal {
         ] {
             let f = Fixture::new();
             let mut terminal = Terminal::spawn(f.command(), &args);
-            terminal.until("Save this private configuration and continue?");
+            terminal.default_configuration(args == ["run", "opencode"] || args == ["attach"]);
             assert!(!terminal.text.contains("Choose this project's harness"));
             terminal.send("n\n");
             terminal.finish(false);
@@ -627,7 +1454,7 @@ mod terminal {
             terminal.until("Harness [1-3 or name; no default]:");
             if select {
                 terminal.send("codex\n");
-                terminal.until("Save this private configuration and continue?");
+                terminal.default_configuration(false);
             }
             terminal.send(cancel);
             terminal.finish(false);

@@ -17,13 +17,41 @@ install -m 755 "$binary" "$HOME/bin/dungeon"
 dungeon=$HOME/bin/dungeon
 cd "$HOME/project"
 printf 'host\n' > host.txt
+printf 'console.log("before")\n' > existing.cjs
 "$dungeon" init --yes --agent opencode --runtime container --engine "$engine" --endpoint "$endpoint" --image "$image" --harness-config copy
-"$dungeon" reload --yes
+config=$("$dungeon" config --path)
+cleanup() {
+    code=$?
+    trap - 0
+    if [ -x "$dungeon" ] && [ -f "${config%/*}/runtime.json" ]; then
+        if ! "$dungeon" down || ! "$dungeon" destroy --yes; then
+            echo 'fixture cleanup failed; inspect the disposable HOME' >&2
+            exit 1
+        fi
+    fi
+    exit "$code"
+}
+trap cleanup 0
 "$dungeon" plan > "$HOME/plan.json"
 "$dungeon" run opencode -- --version > "$HOME/first-version.txt"
 test "$(wc -l < "$HOME/first-version.txt")" -eq 1
 "$dungeon" up
 "$dungeon" status > "$HOME/status-before.json"
+"$dungeon" exec -- node existing.cjs > "$HOME/live-edit.stdout"
+test "$(cat "$HOME/live-edit.stdout")" = before
+printf 'console.log("host-new")\n' > live-edit.cjs
+"$dungeon" exec -- node live-edit.cjs > "$HOME/live-edit.stdout"
+test "$(cat "$HOME/live-edit.stdout")" = host-new
+printf 'console.log("host-edited")\n' > existing.cjs
+"$dungeon" exec -- node existing.cjs > "$HOME/live-edit.stdout"
+test "$(cat "$HOME/live-edit.stdout")" = host-edited
+printf 'console.log("host-replaced")\n' > live-edit.tmp
+mv live-edit.tmp existing.cjs
+"$dungeon" exec -- node existing.cjs > "$HOME/live-edit.stdout"
+test "$(cat "$HOME/live-edit.stdout")" = host-replaced
+"$dungeon" exec -- node -e 'require("fs").writeFileSync("guest-new.cjs", "console.log(42)\n")'
+"$dungeon" exec -- node guest-new.cjs > "$HOME/live-edit.stdout"
+test "$(cat "$HOME/live-edit.stdout")" = 42
 "$dungeon" exec -- /bin/sh -c 'test "$(id -u)" != 0; test "$(cat /sandbox/project/host.txt)" = host; printf guest > /sandbox/project/guest.txt; printf retained > "$HOME/session-marker"'
 "$dungeon" exec -- /bin/sh -c 'grep read-only /sandbox/.config/opencode/themes/dungeon-fixture.json; if (echo forbidden > /sandbox/.config/opencode/themes/dungeon-fixture.json) 2>/dev/null; then exit 1; fi; command -v opencode claude codex'
 "$dungeon" run opencode -- --version

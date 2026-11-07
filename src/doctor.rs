@@ -83,6 +83,15 @@ pub(crate) fn run(
                 "Selected private configuration and policy passed local validation.",
                 "Review dungeon plan before runtime operations.",
             );
+            if config.values.openshell_contract.is_some() {
+                report.add(
+                    "openshell_contract",
+                    "unsupported",
+                    true,
+                    "The modern OpenShell contract is recorded but not enabled in this build.",
+                    "Retain this configuration for the completed port; doctor does not migrate state.",
+                );
+            }
             if crate::imports::configured(&config) {
                 let valid = crate::imports::verify(&config).is_ok();
                 report.add("imports", if valid { "recorded-not-verified" } else { "blocked" }, !valid, "Imports require safe selected live files or approved snapshots and the exact bind-enabled local gateway; guest pathname is mutable.", "Review plan; use reload for unbound harness selection/capture and imports stage for Neovim. Doctor does not mount or execute imports.");
@@ -98,13 +107,28 @@ pub(crate) fn run(
             None
         }
     };
+    if config
+        .as_ref()
+        .is_some_and(|config| config.values.openshell_contract.is_some())
+    {
+        return print_report(&report, json);
+    }
     #[cfg(target_os = "linux")]
     if match runtime {
         crate::runtime::RuntimeChoice::Container => true,
         crate::runtime::RuntimeChoice::Openshell => false,
-        crate::runtime::RuntimeChoice::Auto => {
-            config.as_ref().is_none_or(|c| c.values.container.is_some())
-        }
+        crate::runtime::RuntimeChoice::Auto => config
+            .as_ref()
+            .map(|c| c.values.container.is_some())
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .and_then(|p| {
+                        let preferences = crate::runtime::preferences(Some(&p)).ok()?;
+                        crate::runtime::choose(preferences.runtime_choice(), &p).ok()
+                    })
+                    .unwrap_or(true)
+            }),
     } {
         let diagnostic = if report.exit_code == 0 {
             crate::container::diagnostic(config.as_ref())
@@ -161,6 +185,10 @@ pub(crate) fn run(
         );
     }
     report.add("integration_gates", "recorded-not-verified", false, "Claude account, matched native clients, nested Codex sandbox and editor gates are recorded evidence, not dynamically verified.", "Consult docs/validation.md and Issues #11, #29 and #30. Doctor performs no authentication or AI tests.");
+    print_report(&report, json)
+}
+
+fn print_report(report: &Report, json: bool) -> Result<i32> {
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -384,11 +412,23 @@ mod linux {
                 )
             )
         });
+        let preferences = crate::runtime::preferences(config.map(|c| c.values.project.as_path()));
+        if preferences.is_err() && config.is_none() {
+            report.add(
+                "setup_defaults",
+                "incompatible",
+                true,
+                "Saved setup defaults failed validation.",
+                "Inspect private setup defaults; doctor does not repair them.",
+            );
+        }
+        let image = preferences.ok().and_then(|p| p.image);
         inventory(
             report,
             config.filter(|c| c.values.container.is_none()),
             &env,
             &excluded,
+            image.as_deref(),
         );
     }
 
@@ -397,6 +437,7 @@ mod linux {
         config: Option<&Config>,
         env: &HashMap<OsString, OsString>,
         excluded: &[&Path],
+        default_image: Option<&str>,
     ) {
         let mut env = env.clone();
         let paths: Vec<_> = env
@@ -439,7 +480,7 @@ mod linux {
             let reply = shell.get(&["--version"]);
             let valid = reply
                 .as_ref()
-                .is_some_and(|r| r.code == 0 && setup::require_version(&r.text).is_ok());
+                .is_some_and(|r| r.code == 0 && super::super::require_version(&r.text).is_ok());
             report.add(
                 "openshell",
                 if valid { "healthy" } else { "incompatible" },
@@ -513,7 +554,8 @@ mod linux {
             podman.exists(report, "gateway_image", &["image", "exists", setup::IMAGE]);
             let image = config
                 .map(|c| c.values.image.as_str())
-                .unwrap_or(setup::AGENT_IMAGE);
+                .or(default_image)
+                .unwrap_or(crate::runtime::DEFAULT_IMAGE);
             podman.exists(report, "agent_image", &["image", "exists", image]);
             let present = podman.exists(
                 report,
@@ -821,6 +863,7 @@ mod linux {
             write_new(
                 &path,
                 &ConfigDoc {
+                    openshell_contract: None,
                     container: None,
                     schema: 2,
                     name: "fixture".into(),
@@ -935,7 +978,7 @@ mod linux {
                 .unwrap(),
             );
             let mut report = Report::new();
-            inventory(&mut report, None, &env, &[&cwd, &selected]);
+            inventory(&mut report, None, &env, &[&cwd, &selected], None);
             assert!(!marker.exists());
             assert_eq!(
                 report
@@ -1042,7 +1085,7 @@ esac
             script(&root.path().join("podman"), &mock);
             let env = fixture_env(root.path());
             let mut report = Report::new();
-            inventory(&mut report, None, &env, &[&project]);
+            inventory(&mut report, None, &env, &[&project], None);
             assert_eq!(
                 report
                     .checks
@@ -1079,7 +1122,7 @@ esac
             );
             assert_eq!(report.exit_code, 1);
             let mut second = Report::new();
-            inventory(&mut second, None, &env, &[&project]);
+            inventory(&mut second, None, &env, &[&project], None);
             assert_eq!(
                 serde_json::to_value(&report).unwrap(),
                 serde_json::to_value(&second).unwrap()
@@ -1108,7 +1151,7 @@ esac
                 ),
             );
             let mut report = Report::new();
-            inventory(&mut report, None, &fixture_env(root.path()), &[]);
+            inventory(&mut report, None, &fixture_env(root.path()), &[], None);
             assert_eq!(
                 report
                     .checks
@@ -1138,7 +1181,7 @@ esac
                 "#!/bin/sh\nif [ \"$*\" = --version ]; then printf 'openshell 0.0.116\\n'; else printf 'malformed secret-token'; fi\n",
             );
             let mut malformed = Report::new();
-            inventory(&mut malformed, None, &fixture_env(root.path()), &[]);
+            inventory(&mut malformed, None, &fixture_env(root.path()), &[], None);
             assert_eq!(
                 malformed
                     .checks
@@ -1298,7 +1341,7 @@ esac
             );
             let env = fixture_env(root.path());
             let mut report = Report::new();
-            inventory(&mut report, None, &env, &[]);
+            inventory(&mut report, None, &env, &[], None);
             assert_eq!(
                 fs::read_to_string(root.path().join("calls")).unwrap(),
                 "--version\n--version\n"
@@ -1306,7 +1349,7 @@ esac
             assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
             fs::create_dir_all(home.join(".local/share/containers/storage")).unwrap();
             let mut empty_store_report = Report::new();
-            inventory(&mut empty_store_report, None, &env, &[]);
+            inventory(&mut empty_store_report, None, &env, &[], None);
             assert_eq!(
                 empty_store_report
                     .checks
@@ -1328,7 +1371,7 @@ esac
                 OsString::from("relative-secret"),
             );
             let mut unsafe_report = Report::new();
-            inventory(&mut unsafe_report, None, &unsafe_env, &[]);
+            inventory(&mut unsafe_report, None, &unsafe_env, &[], None);
             assert_eq!(unsafe_report.checks.len(), 1);
             assert_eq!(unsafe_report.checks[0].check, "environment");
             assert_eq!(
@@ -1340,7 +1383,13 @@ esac
             let custom = home.join(".config/containers/storage.conf");
             fs::write(&custom, "untrusted custom storage input").unwrap();
             let mut custom_report = Report::new();
-            inventory(&mut custom_report, None, &fixture_env(root.path()), &[]);
+            inventory(
+                &mut custom_report,
+                None,
+                &fixture_env(root.path()),
+                &[],
+                None,
+            );
             assert_eq!(
                 custom_report
                     .checks
@@ -1383,6 +1432,7 @@ esac
             let config = Config {
                 path: home.join("private/dungeon.json"),
                 values: ConfigDoc {
+                    openshell_contract: None,
                     container: None,
                     schema: 2,
                     name: "fixture".into(),
@@ -1406,6 +1456,7 @@ esac
                 Some(&config),
                 &fixture_env(root.path()),
                 &[&config.values.project],
+                None,
             );
             let registration = report
                 .checks

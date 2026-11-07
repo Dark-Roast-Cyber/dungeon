@@ -47,13 +47,34 @@ explicit `--project`; combining it with `--config` is an error. Project/reposito
 content never supplies authority. Resolve is read-only: missing binding returns
 `bound: false`, not initialization. Explicit initialization writes the selected
 private directory, not a binding registry; an arbitrary directory requires later
-`--config` selection. Copy is the generated default. Live transfer remains explicit
-and subject to the existing gateway and project guards.
+`--config` selection. Omitted `--runtime` retains schema 1's OpenShell/copy default.
+Explicit `--runtime container` uses live project access, optionally selecting
+`--engine podman|docker` and a local Unix `--endpoint` (which requires an explicit
+engine). OpenShell options cannot be combined with container options. `auto` is
+not a machine runtime selection; choose `container` or `openshell`. Initialization
+uses the same config writer/validator, starts nothing and imports no host state.
+`--agent opencode|claude|codex` saves the agent choice, defaulting to OpenCode.
+
+For plain-container lifecycle JSON without an OpenShell dependency:
+
+```sh
+PRIVATE="$HOME/.config/dungeon/plain-demo"
+dungeon machine --schema 1 init --yes --runtime container \
+  --directory "$PRIVATE" --project "$PWD" --name plain-demo \
+  --image ghcr.io/nvidia/openshell-community/sandboxes/base:latest
+dungeon --config "$PRIVATE/dungeon.json" machine --schema 1 up --yes
+dungeon --config "$PRIVATE/dungeon.json" exec -- node --version
+dungeon --config "$PRIVATE/dungeon.json" machine --schema 1 close --preserve
+```
+
+Ordinary `exec` deliberately retains native stdout/stderr and exit codes. The
+JSONL streaming and owned-cleanup contracts still require OpenShell; initialization
+parity does not claim execution-protocol parity.
 
 | Operation | Contract |
 | --- | --- |
 | `resolve` | Loaded configuration and capabilities, without runtime contact |
-| `init --yes` | Existing private-config writer; explicit directory, project, name, gateway and image |
+| `init --yes` | Existing private-config writer; explicit directory, project, name and image; optional runtime/agent and runtime-specific service options |
 | `create --yes` | Create or verify; no implicit project upload |
 | `up --yes` | First copy upload; later resume/no-op without refresh |
 | `start`, `stop` | Identity/policy-checked preservation |
