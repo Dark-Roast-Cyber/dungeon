@@ -129,6 +129,8 @@ the saved choices. No host agent installation is needed for guest CLI use.
 Use `dungeon init` to review/save without starting, `dungeon plan` to inspect, or
 `dungeon config --edit` to change an uncreated environment. The editor has guided
 choices and explicit flags for automation; bare `dungeon config` stays read-only.
+Explicit `init` is offline: configuration saved does not mean runtime readiness
+was checked. Run `dungeon setup` if needed, then launch normally.
 
 Commands run tools supplied by the selected image. The cached upstream base used
 in validation has Node but no Cargo, Rust compiler or pnpm. For Rust tests, select

@@ -236,6 +236,7 @@ mod tests {
         write_new(
             &path,
             &ConfigDoc {
+                openshell_contract: None,
                 container: None,
                 schema: 2,
                 name: "demo".into(),

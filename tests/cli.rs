@@ -47,6 +47,223 @@ impl Fixture {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn offline_init_disclaims_readiness_without_probing_runtime_tools() {
+    use std::os::unix::fs::PermissionsExt;
+    for runtime in ["container", "openshell"] {
+        for custom in [false, true] {
+            let f = Fixture::new();
+            let bin = f.home.join("bin");
+            fs::create_dir(&bin).unwrap();
+            let contacted = f.home.join("native-contacted");
+            for name in [
+                "openshell",
+                "openshell-gateway",
+                "podman",
+                "docker",
+                "systemctl",
+            ] {
+                let tool = bin.join(name);
+                fs::write(
+                    &tool,
+                    format!(
+                        "#!/bin/sh\nprintf forbidden > '{}'\nexit 9\n",
+                        contacted.display()
+                    ),
+                )
+                .unwrap();
+                fs::set_permissions(tool, fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            let directory = f.home.join("custom-private");
+            let mut args = vec!["init", "--yes", "--runtime", runtime, "--agent", "opencode"];
+            if custom {
+                args.extend(["--directory", directory.to_str().unwrap()]);
+            }
+            let out = f.command().env("PATH", &bin).args(args).output().unwrap();
+            assert!(out.status.success(), "{out:?}");
+            let text = String::from_utf8(out.stdout).unwrap();
+            assert!(
+                text.contains(
+                    "Configuration saved; runtime readiness not checked. No guest was started."
+                ),
+                "{text}"
+            );
+            assert!(text.contains("Next: dungeon setup if needed"), "{text}");
+            assert_eq!(text.contains("dungeon --config PATH run"), custom);
+            assert!(!text.contains("Next: dungeon plan"));
+            assert!(!contacted.exists());
+            let config = if custom {
+                directory.join("dungeon.json")
+            } else {
+                PathBuf::from(f.config()["config"].as_str().unwrap())
+            };
+            assert!(config.is_file());
+            assert!(!config.with_file_name("runtime.json").exists());
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn modern_contract_is_offline_inspectable_but_cannot_reach_the_legacy_adapter() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let f = Fixture::new();
+    assert!(
+        f.run(&[
+            "init",
+            "--yes",
+            "--agent",
+            "opencode",
+            "--runtime",
+            "openshell",
+            "--project-transfer",
+            "copy"
+        ])
+        .status
+        .success()
+    );
+    let old = f.config();
+    let old_plan: Value = serde_json::from_slice(&f.run(&["plan"]).stdout).unwrap();
+    let path = PathBuf::from(old["config"].as_str().unwrap());
+    assert!(old["values"].get("openshell_contract").is_none());
+    let mut values = old["values"].clone();
+    values["openshell_contract"] = json!("dungeon-openshell-v1");
+    fs::write(&path, serde_json::to_vec_pretty(&values).unwrap()).unwrap();
+    let before = fs::read(&path).unwrap();
+    let marked_plan: Value = serde_json::from_slice(&f.run(&["plan"]).stdout).unwrap();
+    let marked_fingerprint = &marked_plan["fingerprint"];
+    assert!(marked_fingerprint.is_string());
+    assert_ne!(marked_fingerprint, &old_plan["fingerprint"]);
+    let bin = f.home.join("bin");
+    fs::create_dir(&bin).unwrap();
+    let contacted = f.home.join("native-contacted");
+    for name in ["openshell", "podman", "docker", "systemctl"] {
+        let native = bin.join(name);
+        fs::write(
+            &native,
+            format!(
+                "#!/bin/sh\nprintf forbidden > '{}'\nexit 9\n",
+                contacted.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&native, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    let state_path = path.with_file_name("runtime.json");
+    for state in [
+        "absent",
+        "invalid",
+        "mismatched",
+        "pending",
+        "bound",
+        "dangling",
+    ] {
+        match state {
+            "absent" => {}
+            "invalid" => fs::write(&state_path, "invalid").unwrap(),
+            "mismatched" | "pending" | "bound" => {
+                fs::write(&state_path, json!({"schema":1,"id":"retained","config":if state == "mismatched" { &old_plan["fingerprint"] } else { marked_fingerprint },"observed_policy":"retained","initial_upload_pending":state == "pending"}).to_string()).unwrap();
+                fs::set_permissions(&state_path, fs::Permissions::from_mode(0o600)).unwrap();
+            }
+            "dangling" => symlink(f.home.join("absent-target"), &state_path).unwrap(),
+            _ => unreachable!(),
+        }
+        let saved_state = fs::read(&state_path).ok();
+        for args in [
+            vec!["config"],
+            vec!["plan"],
+            vec!["list", "-a"],
+            vec!["machine", "--schema", "1", "resolve"],
+        ] {
+            let out = f.command().env("PATH", &bin).args(&args).output().unwrap();
+            assert!(out.status.success(), "{state}: {args:?}: {out:?}");
+            if args == ["plan"] {
+                let plan: Value = serde_json::from_slice(&out.stdout).unwrap();
+                assert_eq!(plan["openshell_contract"], "dungeon-openshell-v1");
+                assert_ne!(plan["fingerprint"], old_plan["fingerprint"]);
+                assert!(
+                    plan["unsatisfied"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|v| v.as_str().unwrap().contains("not enabled"))
+                );
+            }
+            if args == ["list", "-a"] {
+                let list: Value = serde_json::from_slice(&out.stdout).unwrap();
+                assert_eq!(
+                    list[0]["binding"]["state"],
+                    match state {
+                        "absent" => "configured",
+                        "bound" | "pending" => "bound",
+                        _ => "invalid",
+                    }
+                );
+            }
+        }
+        #[cfg(target_os = "linux")]
+        for args in [
+            vec!["uninstall", "--dry-run"],
+            vec!["uninstall", "--yes"],
+            vec!["doctor", "--json"],
+            vec!["doctor", "--json", "--runtime", "openshell"],
+            vec!["doctor", "--json", "--runtime", "container"],
+        ] {
+            let out = f.command().env("PATH", &bin).args(&args).output().unwrap();
+            assert_eq!(out.status.code(), Some(1), "{state}: {args:?}: {out:?}");
+            if args[0] == "doctor" {
+                let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+                assert_eq!(report["read_only"], true);
+                assert!(
+                    report["checks"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|finding| finding["check"] == "openshell_contract"
+                            && finding["blocking"] == true)
+                );
+                assert!(report.get("container").is_none());
+            } else if matches!(state, "absent" | "pending" | "bound") {
+                assert!(
+                    String::from_utf8_lossy(&out.stderr)
+                        .contains("modern OpenShell contract is not enabled"),
+                    "{out:?}"
+                );
+            }
+        }
+        for args in [
+            vec!["up"],
+            vec!["create"],
+            vec!["machine", "--schema", "1", "up", "--yes"],
+            vec!["machine", "--schema", "1", "create", "--yes"],
+        ] {
+            let out = f.command().env("PATH", &bin).args(&args).output().unwrap();
+            assert_eq!(out.status.code(), Some(1), "{state}: {args:?}: {out:?}");
+            if args[0] == "machine" {
+                assert!(out.stderr.is_empty());
+                let result: Value = serde_json::from_slice(&out.stdout).unwrap();
+                assert_eq!(result["error"]["code"], "unsupported");
+                assert_eq!(result["error"]["effects"], "none");
+            } else {
+                assert!(
+                    String::from_utf8_lossy(&out.stderr)
+                        .contains("modern OpenShell contract is not enabled"),
+                    "{out:?}"
+                );
+            }
+        }
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert_eq!(fs::read(&state_path).ok(), saved_state);
+        assert!(!contacted.exists());
+        assert!(!path.with_file_name("transfer.lock").exists());
+        if state != "absent" {
+            fs::remove_file(&state_path).unwrap();
+        }
+    }
+}
+
 #[test]
 fn configured_but_uncreated_commands_explain_the_next_step_before_runtime_discovery() {
     for runtime in ["container", "openshell"] {

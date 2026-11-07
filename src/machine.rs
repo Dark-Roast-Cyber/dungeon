@@ -373,6 +373,7 @@ fn dispatch(explicit: Option<PathBuf>, operation: Operation) -> Response {
             let config = crate::cli::write_environment(
                 directory,
                 ConfigDoc {
+                    openshell_contract: None,
                     container,
                     schema: 2,
                     name,

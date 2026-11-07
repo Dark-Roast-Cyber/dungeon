@@ -152,6 +152,7 @@ fn sandbox_ids(tools: &Tools) -> Result<BTreeSet<String>> {
 }
 
 fn runtime<'a>(tools: &Tools, binding: &'a Config) -> Result<Runtime<'a>> {
+    Runtime::require_enabled_contract(binding)?;
     // Reuse setup's version-checked native tools and environment, not another PATH lookup.
     if tools.openshell.starts_with(&binding.values.project)
         || tools.podman.starts_with(&binding.values.project)
@@ -585,6 +586,7 @@ pub(crate) fn run(bin_dir: Option<PathBuf>, dry_run: bool, yes: bool) -> Result<
                 .as_str()
                 .ok_or_else(|| Error::new("invalid binding path"))?,
         ))?;
+        Runtime::require_enabled_contract(&binding)?;
         if binding.values.container.is_some() {
             plain.push(binding);
         }
@@ -966,6 +968,56 @@ esac
             }).to_string()).unwrap();
             fs::write(self.root.path().join("sandbox-container"), "").unwrap();
             config_path
+        }
+    }
+
+    #[test]
+    fn marked_bound_and_pending_guests_refuse_before_native_inspection() {
+        for pending in [false, true] {
+            let f = Fixture::new();
+            let path = f.bind("Ready");
+            let mut document: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            document["openshell_contract"] = serde_json::json!("dungeon-openshell-v1");
+            fs::write(&path, document.to_string()).unwrap();
+            let config = crate::config::load_config(&path).unwrap();
+            fs::write(
+                config.state_path(),
+                serde_json::json!({
+                    "schema":1, "id":"synthetic-id", "config":config.fingerprint,
+                    "observed_policy":crate::config::digest(&config.policy).unwrap(),
+                    "initial_upload_pending":pending,
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let entries = crate::binding::list_in(&f.config.join("projects")).unwrap();
+            assert_eq!(entries[0]["binding"]["state"], "bound");
+            let script = &f.tools.openshell;
+            fs::write(
+                script,
+                fs::read_to_string(script).unwrap().replace(
+                    "'sandbox get') cat",
+                    "'sandbox get') touch \"$FIXTURE/contacted\"; cat",
+                ),
+            )
+            .unwrap();
+            assert!(
+                runtime(&f.tools, &config)
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("modern OpenShell contract is not enabled")
+            );
+            assert!(
+                f.plan()
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("modern OpenShell contract is not enabled")
+            );
+            assert!(!f.root.path().join("contacted").exists());
+            assert!(!f.root.path().join("mutations").exists());
+            assert!(config.state_path().exists());
         }
     }
 

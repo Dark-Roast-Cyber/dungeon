@@ -1111,6 +1111,7 @@ mod tests {
             path: config_dir.join("dungeon.json"),
             policy_path: config_dir.join("policy.json"),
             values: ConfigDoc {
+                openshell_contract: None,
                 container: None,
                 schema: 2,
                 name: "demo".into(),

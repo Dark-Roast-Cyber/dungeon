@@ -51,6 +51,100 @@ pub(crate) const GUEST_PROJECT: &str = "/sandbox/project";
 // Stay below Linux's per-argument limit, including the combined project/import request.
 const MAX_MOUNT_REQUEST_BYTES: usize = 48 * 1024;
 
+const MINIMUM_VERSION: StableVersion = StableVersion(0, 1, 7);
+const TESTED_VERSION: StableVersion = StableVersion(0, 1, 7);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct StableVersion(u32, u32, u32);
+
+impl StableVersion {
+    fn parse(text: &str) -> Option<Self> {
+        if text.is_empty() || text.len() > 128 {
+            return None;
+        }
+        let (release, build) = text
+            .split_once('+')
+            .map_or((text, None), |(release, build)| (release, Some(build)));
+        if build.is_some_and(|build| {
+            build.split('.').any(|part| {
+                part.is_empty() || !part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            })
+        }) {
+            return None;
+        }
+        let mut parts = release.split('.');
+        let mut number = || {
+            let part = parts.next()?;
+            if part.is_empty()
+                || part.len() > 10
+                || (part.len() > 1 && part.starts_with('0'))
+                || !part.bytes().all(|b| b.is_ascii_digit())
+            {
+                return None;
+            }
+            part.parse::<u32>().ok()
+        };
+        let version = Self(number()?, number()?, number()?);
+        parts.next().is_none().then_some(version)
+    }
+
+    fn cli(text: &str) -> Result<Self> {
+        let invalid = || {
+            Error::refusal(
+                crate::ErrorCode::Unsupported,
+                "unrecognized OpenShell version output; expected a stable three-component release (no prerelease or control bytes)",
+            )
+        };
+        if text.len() > 160 {
+            return Err(invalid());
+        }
+        let line = text
+            .strip_suffix("\r\n")
+            .or_else(|| text.strip_suffix('\n'))
+            .unwrap_or(text);
+        let version = line.strip_prefix("openshell ").ok_or_else(invalid)?;
+        Self::parse(version.strip_prefix('v').unwrap_or(version)).ok_or_else(invalid)
+    }
+
+    fn require_minimum(self) -> Result<()> {
+        if self < MINIMUM_VERSION {
+            return Err(Error::refusal(
+                crate::ErrorCode::Unsupported,
+                format!(
+                    "OpenShell {self} is below the modern adapter minimum {MINIMUM_VERSION} (tested baseline {TESTED_VERSION}); install a supported stable release explicitly"
+                ),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for StableVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.0, self.1, self.2)
+    }
+}
+
+// Keep the old adapter closed to modern releases until setup and lifecycle are ported together.
+fn require_version(text: &str) -> Result<()> {
+    let version = StableVersion::cli(text)?;
+    if Some(version) == StableVersion::parse(OPEN_SHELL_VERSION) {
+        return Ok(());
+    }
+    version.require_minimum().map_err(|error| {
+        Error::refusal(
+            crate::ErrorCode::Unsupported,
+            format!("OpenShell {OPEN_SHELL_VERSION} required by the active adapter; {error}"),
+        )
+    })?;
+    Err(Error::refusal(
+        crate::ErrorCode::Unsupported,
+        format!(
+            "OpenShell {version} meets the modern minimum {MINIMUM_VERSION} (tested baseline {TESTED_VERSION}), but the modern adapter is not enabled in this build; the active adapter requires OpenShell {OPEN_SHELL_VERSION}; no automatic upgrade or migration"
+        ),
+    ))
+}
+
 #[derive(Clone, Debug, Serialize)]
 struct LiveProjectMount {
     #[serde(rename = "type")]
@@ -342,7 +436,18 @@ impl<'a> Runtime<'a> {
         self.output.message(format_args!("Sandbox deleted. Private project configuration retained; next up creates a new environment."))?;
         Ok(0)
     }
+    pub(crate) fn require_enabled_contract(config: &Config) -> Result<()> {
+        if config.values.openshell_contract.is_some() {
+            return Err(Error::refusal(
+                crate::ErrorCode::Unsupported,
+                "the modern OpenShell contract is not enabled in this build; no runtime contacted or state migrated; retain this configuration for the completed port",
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn new(config: &'a Config) -> Result<Self> {
+        Self::require_enabled_contract(config)?;
         let env = host_environment(Some(&config.values.project))?;
         let binary =
             find_executable("openshell", env.get(&OsString::from("PATH"))).ok_or_else(|| {
@@ -361,14 +466,7 @@ impl<'a> Runtime<'a> {
             output: crate::output::Output::default(),
         };
         let version = runtime.capture(&["--version".into()], false)?;
-        let version = version.trim();
-        if version != format!("openshell {OPEN_SHELL_VERSION}")
-            && version != format!("openshell v{OPEN_SHELL_VERSION}")
-        {
-            return Err(Error::new(format!(
-                "this adapter requires OpenShell {OPEN_SHELL_VERSION}"
-            )));
-        }
+        require_version(&version)?;
 
         Ok(runtime)
     }
@@ -1017,6 +1115,138 @@ mod tests {
     use crate::config::{Agent, ConfigDoc, ProjectTransfer};
     use crate::policy::starter_policy;
 
+    #[test]
+    fn stable_cli_versions_have_a_minimum_without_an_upper_ceiling() {
+        for (version, supported) in [
+            ("0.0.116", false),
+            ("0.1.6", false),
+            ("0.1.7", true),
+            ("0.1.8", true),
+            ("0.2.0", true),
+            ("1.0.0", true),
+            ("4294967295.4294967295.4294967295", true),
+        ] {
+            for prefix in ["openshell ", "openshell v"] {
+                for build in ["", "+build.01-abc"] {
+                    for ending in ["", "\n", "\r\n"] {
+                        let output = format!("{prefix}{version}{build}{ending}");
+                        let parsed = StableVersion::cli(&output).unwrap();
+                        assert_eq!(parsed.require_minimum().is_ok(), supported, "{output:?}");
+                        assert_eq!(parsed.to_string(), version);
+                    }
+                }
+            }
+        }
+        assert_eq!(MINIMUM_VERSION, TESTED_VERSION);
+    }
+
+    #[test]
+    fn stable_cli_version_parser_rejects_noncanonical_and_untrusted_output() {
+        for version in [
+            "",
+            "1",
+            "1.0",
+            "1.0.0.0",
+            "01.0.0",
+            "0.01.7",
+            "0.1.07",
+            "4294967296.0.0",
+            "0.4294967296.0",
+            "0.0.4294967296",
+            "999999999999999999999999999999.0.0",
+            "0.1.-7",
+            "0.1.+7",
+            "0.1.7-rc.1",
+            "0.1.7-rc.1+build",
+            "0.1.7+",
+            "0.1.7+a..b",
+            "0.1.7+.a",
+            "0.1.7+a.",
+            "0.1.7+a+b",
+            "0.1.7+build_1",
+            "0.1.7+héllo",
+            "0.1.7 suffix",
+            "0.1.7 ",
+            " 0.1.7",
+            "v0.1.7 ",
+            "0.1.7\r",
+            "0.1.7\n\n",
+            "0.1.7\r\r\n",
+            "0.1.7\nmore",
+            "0.1.7\x1b[0m",
+            "0.1.7\0",
+            "0.1.7\t",
+            "0.1.7+build\x7f",
+        ] {
+            let text = format!("openshell {version}");
+            let error = StableVersion::cli(&text).unwrap_err();
+            assert!(
+                error.to_string().starts_with("unrecognized OpenShell"),
+                "{text:?}"
+            );
+            assert_eq!(error.effects, "none");
+        }
+        for output in [
+            "OpenShell 0.1.7",
+            "0.1.7",
+            " openshell 0.1.7",
+            "openshell\t0.1.7",
+        ] {
+            assert!(StableVersion::cli(output).is_err(), "{output:?}");
+        }
+        assert!(StableVersion::cli(&format!("openshell 0.1.7+{}", "a".repeat(129))).is_err());
+        assert!(StableVersion::cli(&"x".repeat(161)).is_err());
+    }
+
+    #[test]
+    fn numeric_admission_does_not_enable_an_unported_adapter() {
+        assert!(require_version("openshell 0.0.116\n").is_ok());
+        let old = StableVersion::cli("openshell 0.1.6")
+            .unwrap()
+            .require_minimum()
+            .unwrap_err();
+        assert!(
+            old.to_string()
+                .contains("below the modern adapter minimum 0.1.7")
+        );
+        for version in ["0.1.7", "0.1.8", "0.2.0", "1.0.0"] {
+            let error = require_version(&format!("openshell {version}\n")).unwrap_err();
+            assert!(error.to_string().contains("modern adapter is not enabled"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn modern_contract_refuses_before_native_discovery_without_changing_saved_state() {
+        let mut fixture = Fixture::new();
+        fixture.config.values.openshell_contract = Some(crate::config::OpenShellContract::V1);
+        for state in [
+            None,
+            Some("invalid"),
+            Some("{\"initial_upload_pending\":true}"),
+        ] {
+            if let Some(state) = state {
+                fs::write(fixture.config.state_path(), state).unwrap();
+            }
+            let before = fs::read(&fixture.config.path).unwrap();
+            let error = Runtime::new(&fixture.config).err().unwrap();
+            assert!(
+                error
+                    .to_string()
+                    .contains("modern OpenShell contract is not enabled")
+            );
+            assert_eq!(error.effects, "none");
+            assert_eq!(fs::read(&fixture.config.path).unwrap(), before);
+            assert!(!fixture.root.path().join("calls").exists());
+            assert_eq!(
+                fs::read_to_string(fixture.config.state_path())
+                    .ok()
+                    .as_deref(),
+                state
+            );
+        }
+    }
+
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
@@ -1040,6 +1270,7 @@ mod tests {
                 path: canonical.join("dungeon.json"),
                 policy_path: canonical.join("policy.json"),
                 values: ConfigDoc {
+                    openshell_contract: None,
                     container: None,
                     schema: 2,
                     name: "demo".into(),
@@ -1784,6 +2015,7 @@ esac
         let config = Config {
             path: PathBuf::from("/tmp/dungeon.json"),
             values: ConfigDoc {
+                openshell_contract: None,
                 container: None,
                 schema: 2,
                 name: "demo".into(),

@@ -1,5 +1,5 @@
 use crate::policy::validate_policy;
-use crate::{Error, OPEN_SHELL_VERSION, Result};
+use crate::{Error, Result};
 use data_encoding::BASE32_NOPAD;
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -12,6 +12,8 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 const MAX_JSON_BYTES: u64 = 1_048_576;
+// Historical identity for existing bindings, including plain containers; not a runtime version gate.
+const LEGACY_ADAPTER_IDENTITY: &str = "0.0.116";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, clap::ValueEnum, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -53,6 +55,12 @@ pub(crate) struct ConfigDoc {
     pub(crate) schema: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) container: Option<ContainerOptions>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_openshell_contract"
+    )]
+    pub(crate) openshell_contract: Option<OpenShellContract>,
     pub(crate) name: String,
     pub(crate) gateway: String,
     pub(crate) workspace: String,
@@ -66,6 +74,30 @@ pub(crate) struct ConfigDoc {
     pub(crate) imports: Vec<Import>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) harness: Option<HarnessConfig>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) enum OpenShellContract {
+    #[serde(rename = "dungeon-openshell-v1")]
+    V1,
+}
+
+impl OpenShellContract {
+    fn identity(self) -> &'static str {
+        match self {
+            Self::V1 => "dungeon-openshell-v1",
+        }
+    }
+}
+
+fn deserialize_openshell_contract<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<OpenShellContract>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let text = String::deserialize(deserializer)?;
+    OpenShellContract::deserialize(de::value::StringDeserializer::<D::Error>::new(text)).map(Some)
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, clap::ValueEnum, PartialEq, Eq)]
@@ -244,6 +276,11 @@ pub(crate) fn load_config_data(
         return Err(Error::new("expected configuration schema 2"));
     }
     if let Some(container) = &values.container {
+        if values.openshell_contract.is_some() {
+            return Err(Error::new(
+                "openshell_contract is not valid for plain containers",
+            ));
+        }
         if values.project_transfer != ProjectTransfer::Live || !values.providers.is_empty() {
             return Err(Error::new(
                 "copy transfer and named providers require --runtime openshell",
@@ -343,11 +380,7 @@ pub(crate) fn load_config_data(
     }
 
     validate_policy(&policy)?;
-    let fingerprint = digest(&json!({
-        "adapter": OPEN_SHELL_VERSION,
-        "config": serde_json::to_value(&values)?,
-        "policy": policy.clone()
-    }))?;
+    let fingerprint = config_fingerprint(&values, &policy)?;
 
     let config = Config {
         path,
@@ -535,6 +568,14 @@ pub(crate) fn digest(value: &Value) -> Result<String> {
     Ok(BASE32_NOPAD
         .encode(&Sha256::digest(serde_json::to_vec(value)?))
         .to_ascii_lowercase())
+}
+
+fn config_fingerprint(values: &ConfigDoc, policy: &Value) -> Result<String> {
+    digest(&json!({
+        "adapter": values.openshell_contract.map_or(LEGACY_ADAPTER_IDENTITY, OpenShellContract::identity),
+        "config": serde_json::to_value(values)?,
+        "policy": policy,
+    }))
 }
 
 pub(crate) fn review_json(value: &Value) -> Result<String> {
@@ -781,6 +822,133 @@ mod tests {
         let mut invalid = base;
         invalid["project_transfer"] = json!("bind");
         assert!(serde_json::from_value::<ConfigDoc>(invalid).is_err());
+    }
+
+    #[test]
+    fn historical_binding_fingerprints_are_independent_of_runtime_admission() {
+        let mut value = json!({
+            "schema": 2, "name": "fixture", "gateway": "local", "workspace": "default",
+            "project": "/synthetic/project", "image": "localhost/synthetic:1",
+            "agent": "opencode", "providers": []
+        });
+        for (container, expected) in [
+            (None, "oab5tj2qihkrfpda6vo2bzvk3wchuip3cwduleoim7obryce3wta"),
+            (
+                Some(
+                    json!({"engine":"podman", "endpoint":"unix:///run/user/1000/podman/podman.sock"}),
+                ),
+                "yn6mpflbhips7qjgnu4fl4wrhhfhvo4hsv454cpydhui3glsvlxa",
+            ),
+        ] {
+            if let Some(container) = container {
+                value["container"] = container;
+            }
+            let values: ConfigDoc = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(
+                config_fingerprint(&values, &starter_policy()).unwrap(),
+                expected
+            );
+            assert_eq!(serde_json::to_value(&values).unwrap(), value);
+        }
+    }
+
+    #[test]
+    fn openshell_contract_is_closed_distinct_and_never_inferred_on_load() {
+        let legacy = json!({
+            "schema": 2, "name": "fixture", "gateway": "local", "workspace": "default",
+            "project": "/synthetic/project", "image": "localhost/synthetic:1",
+            "agent": "opencode", "providers": []
+        });
+        let load = |value| {
+            load_config_data(
+                PathBuf::from("/synthetic/private/dungeon.json"),
+                value,
+                |p| Ok((p.to_owned(), starter_policy())),
+            )
+        };
+        let original = load(legacy.clone()).unwrap();
+        assert_eq!(original.values.openshell_contract, None);
+        assert_eq!(serde_json::to_value(&original.values).unwrap(), legacy);
+
+        let mut modern = legacy.clone();
+        modern["openshell_contract"] = json!("dungeon-openshell-v1");
+        let config = load(modern.clone()).unwrap();
+        assert_eq!(
+            config.values.openshell_contract,
+            Some(OpenShellContract::V1)
+        );
+        assert_eq!(serde_json::to_value(&config.values).unwrap(), modern);
+        assert_ne!(config.fingerprint, original.fingerprint);
+        assert_eq!(
+            load(modern.clone()).unwrap().fingerprint,
+            config.fingerprint
+        );
+        assert_eq!(
+            config.fingerprint,
+            digest(&json!({"adapter":"dungeon-openshell-v1", "config":modern, "policy":starter_policy()})).unwrap()
+        );
+
+        for invalid in [
+            Value::Null,
+            json!(true),
+            json!(1),
+            json!({"version":1}),
+            json!({"dungeon-openshell-v1":null}),
+            json!({"dungeon-openshell-v1":{}}),
+            json!([]),
+            json!(["dungeon-openshell-v1"]),
+            json!(""),
+            json!("0.1.7"),
+            json!("dungeon-openshell-v2"),
+            json!("dungeon-openshell-v1\n"),
+        ] {
+            let mut value = legacy.clone();
+            value["openshell_contract"] = invalid;
+            assert!(load(value).is_err());
+        }
+        modern["container"] = json!({"engine":"podman"});
+        modern["project_transfer"] = json!("live");
+        assert!(
+            load(modern)
+                .unwrap_err()
+                .to_string()
+                .contains("plain containers")
+        );
+    }
+
+    #[test]
+    fn stable_binding_identity_still_detects_scope_and_policy_changes() {
+        let value = json!({
+            "schema": 2, "name": "fixture", "gateway": "local", "workspace": "default",
+            "project": "/synthetic/project", "image": "localhost/synthetic:1",
+            "agent": "opencode", "providers": []
+        });
+        let values: ConfigDoc = serde_json::from_value(value.clone()).unwrap();
+        let policy = starter_policy();
+        let original = config_fingerprint(&values, &policy).unwrap();
+        for (field, change) in [
+            ("name", json!("another")),
+            ("gateway", json!("another")),
+            ("workspace", json!("another")),
+            ("project", json!("/synthetic/another")),
+            ("image", json!("localhost/synthetic:2")),
+            ("agent", json!("claude")),
+            ("providers", json!(["another"])),
+            ("project_transfer", json!("live")),
+            ("container", json!({"engine":"podman"})),
+        ] {
+            let mut changed = value.clone();
+            changed[field] = change;
+            let changed: ConfigDoc = serde_json::from_value(changed).unwrap();
+            assert_ne!(
+                config_fingerprint(&changed, &policy).unwrap(),
+                original,
+                "{field}"
+            );
+        }
+        let mut changed = policy.clone();
+        changed["network_policies"]["default"]["endpoints"] = json!([]);
+        assert_ne!(config_fingerprint(&values, &changed).unwrap(), original);
     }
 
     #[test]

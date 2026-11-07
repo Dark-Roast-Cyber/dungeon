@@ -2,6 +2,490 @@
 
 CI checks formatting, Clippy, locked Rust tests, release compilation, CLI version execution, npm launcher behavior, distribution version synchronization, native archive creation, and full npm package assembly on explicit supported runners.
 
+## Publication checkpoint (2026-11-07)
+
+The combined onboarding and closed modern-contract foundation passed **259 locked
+Rust tests** (151 unit +108 integration), **26 Node24.22.2 tests**, fmt,
+warnings-denied all-target locked Clippy, locked release compilation, shell syntax
+and whitespace checks. The explicit release reports `dungeon 0.0.2`; SHA-256:
+`3872c2759e9e4e318d3f11e3e90b0e5bb8add93a4d852ca8f6eea4ce778e7ed6`.
+No installed binary or host service was replaced.
+
+The first validation harness incorrectly put TMPDIR beneath `/tmp/opencode`, whose
+literal `opencode` component is rejected by the import path restrictions. That run
+failed11 unit tests (140 passed) before integration targets. Source inspection
+identified this fixture-path conflict; the unchanged candidate then passed the
+full suite with checkout-local `target/finalize-validation-20261107` as TMPDIR.
+No restriction, assertion or timeout was relaxed. Both logs are retained under
+`/tmp/opencode/dungeon-finalize-20261107/`.
+
+This publication does **not** enable OpenShell0.1.7, complete C1, diagnose the
+original-host exit137 or qualify native uninstall. Existing adversarial corrections
+remain applied, and the previous checkout owner acknowledged a read-only handoff
+for Git finalization. Its remaining investigation is scratch-only source analysis.
+Cross-platform CI/package checks are separate from the local Linux results above.
+
+## Staging-gate review corrections (2026-11-07)
+
+Adversarial source-path review found two bypasses in the still-gated candidate:
+uninstall constructed `Runtime` directly, and doctor continued native probing after
+its blocking finding (or hid it under `--runtime container`). Both are corrected.
+Uninstall now applies the shared marked-contract refusal in its early binding scan
+before tool discovery and again at direct construction. Doctor reports the marker
+then returns before either runtime probe, independent of the override.
+
+The revised CLI test places instrumented native tools on PATH and uses fingerprints
+from actual offline `plan`, not the `config` output (which has no fingerprint).
+It verifies600-mode marked bound/pending state really classifies as bound, retains
+mismatched/invalid/dangling/absent cases, tests uninstall dry-run/confirmation and
+all doctor runtime selections, and checks state preservation/no contact. A separate
+unit test reaches uninstall planning with its complete synthetic legacy gateway
+fixture and a matching marked bound/pending fingerprint, refusing before sandbox
+inspection. Modern admission and both initialization writers remain disabled.
+
+Combined source passed **259 Rust tests** (151 unit and108 integration), **26 Node24
+tests**, fmt,
+warnings-denied all-target Clippy and release build. Evidence is under
+`target/c1c-native-20261107/`; initial adversarial review did not execute commands,
+and follow-up review has closed both production findings. These checks do not resolve the native create
+timeout or qualify C1. The next fresh fixture separates measured image pulls from
+one cold-private-cache create with bounded projected diagnostics. Its30 offline
+tests passed initially; native collector templates remain unqualified until execution.
+
+Follow-up adversarial review closed both production findings. It found a fixture
+blocker: a failure-path terminal marker could authorize native cleanup while a
+gateway-side create continued. The fixture now writes that marker only after a
+successful workload return, and the controller attempts native cleanup only after
+workload SSH succeeds. All33 offline fixture tests pass, including failure/timeout
+cleanup refusal; adversarial verified the correction. A failed/uncertain workload
+permits diagnostics then exact owned-VM retirement only, not native teardown proof.
+Adversarial also verified a subsequent virtual-disk reduction from20 to18GiB after
+host backing capacity changed, retaining the6GiB host reserve plus1GiB artifact/
+metadata headroom and both pre-create space gates. The reviewed disposable
+`target/c1c-native-20261107/` diagnostic controller is terminal partial, as below.
+Modern admission remains disabled.
+
+### C1C: timeout reproduced with pre-pulled images
+
+The reviewed fresh disposable fixture passed private native provisioning/health,
+all three separately measured image pulls and a cold private-extraction-cache
+precondition. Its one create still returned the native60s timeout after119.949s.
+The observer captured an extractor container in created state, widespread bounded
+Podman metadata-query timeouts, then recovered final engine queries and transient
+identity/extractor/volume events. Pinned source confirms channel/control create
+events occur after successful extraction and are not compensation; removes may
+be compensation. Remaining endpoint interval is control-volume response/inspect
+or first workload-container POST, not yet one proven operation. The runtime-ID
+pull-error is consistent with upstream refresh/fallback, not a failed pre-pull.
+Pre-pulling alone did not resolve the timeout.
+
+Important evidence gaps: gateway journal non-string MESSAGE rows were omitted as
+invalid, despite a misleading query-level incomplete flag; extractor inspect/log
+queries returned125; kernel journal access failed; the cache projector excluded
+native bare64-hex IDs. No raw journals were saved. No post-failure native paged list was
+collected. Empty final engine inventory is neither native sandbox absence nor
+workload-deletion proof. No live/import/UID/agent/persistence/paging gate ran.
+
+The corrected failure path skipped all native cleanup and leaves teardown
+**unproven**. Only its exact owned VM was retired and exact disks/seed/synthetic
+keys removed;18 protected host containers matched before/after. Whole-VM retirement
+eliminated guest state, not a native uninstall pass. C1 remains incomplete and the
+original-host exit137 is independent. Full revision/artifact/storage/timing/observer
+limitations and cleanup evidence: `target/c1c-native-20261107/RESULT.md` and
+`result-cleanup.json`. No host upgrade, installation replacement or publication.
+
+### C1D: completed focused stopped API timing experiment
+
+The next reviewed experiment separately times native volume create/inspect then,
+only if those finish, one stopped native container create with the same measured
+image, UID998 KeepID mapping and synthetic binds. It never starts/executes an agent
+or container, never calls OpenShell workload create/delete, and always leaves
+native teardown unproven before exact owned-VM retirement. Its180s direct HTTP
+observation budget does not change the official gateway's60s operation timeout.
+Sparse direct ping/metadata queries replace repeated CLI startups during the
+primary interval. The corrected observer runs before/after, not periodically.
+
+All53 integrated tests pass, including15 real synthetic Unix HTTP transport tests.
+Adversarial closed observer privacy/completeness findings and reviewed the entire
+fixture/storage boundary with no blocker. Repository backing space dropped to
+8.49GB, so only the new VM disks use a new exact0700 directory on separate root
+XFS/noquota backing with82.23GB observed free;18+6+1GiB disk admission, separate
+evidence reserve and pre-create gates remained unchanged.
+
+All six native volume POST/GET calls returned expected201/200 in2–23ms. The one
+stopped UID998 mapped-container POST returned201 in **56.247850s**, almost entirely
+before response headers;20 sparse HTTP queries stayed responsive. Independent
+inspect confirmed created/PID0, user998:998/networknone. The rootless overlay store
+reported `Supports shifting:false`. This supports cold mapped-storage preparation
+cost near the60s driver budget, but the smaller spec, sparse observer and different
+backing prevent attributing the exact earlier C1C failure conclusively.
+
+No container was started/executed/deleted and no OpenShell workload request ran.
+Native teardown remains unproven; C1 remains incomplete. Exact owned VM/disks/
+seed/keys and empty new storage folder are retired, with18 protected host container
+records unchanged. Kernel access was still unavailable. Full timings, limits and
+qualified cleanup receipt: `target/c1d-native-20261107/RESULT.md` and adjacent
+`result-cleanup.json`. A successful stopped preparation before a separate first
+full native create is the next proposed discriminator—not an approved production
+workaround or evidence of modern Dungeon readiness.
+
+### C1E: controlled primed create passed; exec/lifetime failure
+
+The next independently reviewed fixture required successful stopped same-image
+preparation before its first full native create. Preparation took57.663522s; actual
+ordered numeric UID/GID maps matched the subsequent workload. Private extraction
+remained cold. Full create returned0 in **7.544180851s** and Ready/accepted policy;
+selected image/namespace/labels/network matched. Native `id -u` and `id -g` both
+returned998. This supports a viable controlled primed create, not universal cold
+first-use readiness or approval of a production workaround.
+
+The next diagnostic, `cat /proc/self/uid_map /proc/self/gid_map`, returned no output
+and CLI1 after45.298s: **exec relay closed before the command reported an exit
+status**. Final metadata showed workload exit0 and supervisor137, bothOOMKilledfalse,
+with gateway/engine active. Cause remains unestablished: not a demonstrated policy
+denial, command-specific trigger, OOM absence or original-host137 diagnosis. Unknown
+lifecycle text was omitted by the bounded observer and kernel access unavailable.
+Live/import/agent/persistence/paging/deletion gates did not run. C1 is incomplete.
+
+Failure skipped all native cleanup; exact owned VM/disks/seed/keys and empty new
+storage directory were retired. All18 protected host container records matched.
+Native teardown remains unproven; whole-VM retirement is not uninstall acceptance.
+56 offline fixture tests/syntax and integrated adversarial review preceded this
+gate. Report/receipt/evidence: `target/c1e-native-20261107/RESULT.md` and adjacent
+`result-cleanup.json`. Production admission is still disabled; no host upgrade,
+installed replacement or publication occurred.
+
+### C1F: silent-exec/lifetime discriminator (terminal partial)
+
+The next independently reviewed fixture replaces only the redundant proc-map
+diagnostic with a silent `sleep 60` third exec. Health10, official timeouts, image,
+effective mapping, imports and hard policy remain unchanged. Control acceptance
+requires native zero exit/close, empty stdout, at least59s, both exact admitted
+containers running, unchanged Ready/accepted policy and fresh UID998. Required
+live/import/agent/persistence/paging/deletion gates run only after control success.
+
+A bounded lifecycle observer starts before create and joins before cleanup,
+preserving selected pair/health timestamps and explicit unknowns without raw logs,
+environment, health output or credential data. All77 integrated synthetic tests,
+Python compilation and Node syntax passed. Adversarial found no blocker to this
+bounded diagnostic; that review does not qualify C1 or a production workaround.
+
+The actual runner/evidence is
+`/var/tmp/opencode-dungeon-c1f-native-20261107/fixture/`; the checkout's C1F directory
+is a stale scaffold with a location pointer. Only task files/temp storage moved
+after tmpfs quota filled and checkout space fell below1GiB. The18+6+1GiB disk budget
+and all reserves remained intact.
+
+Stopped preparation returned201 in15.321401s; first full create returned0 in
+1.483630s with Ready/accepted policy, matching actual image/maps and real998. The
+silent `sleep60` returned native CLI74 after **24.799441s**, with no stdout/stderr,
+before the required window. It did not run the post-control or later workload gates.
+Failure without a proc read is not proof of C1E's cause or of sleep's own exit74.
+
+The observer recorded a connection-loss/freeze marker immediately before the
+workload entered **stopping**, while the supervisor remained running and healthy
+with on-failure none. No completed pair exit or supervisor137 was observed in this
+run. In-flight exit-code0 and OOMKilled:false are not completed-exit/OOM-absence
+findings. All31 queries completed without skipped samples; native basic/health/
+event formats worked, but most lifecycle log rows remained unclassified, kernel
+access was denied and observation ended soon after failure. Actor/signal/cause
+and completed shutdown remain unknown.
+
+No native cleanup was authorized. The exact owned VM/disks/seed/keys and empty
+disks child were retired, with all18 protected host container records unchanged;
+retained fixture evidence is not uninstall proof. Report, derived timeline and
+qualified receipt are in the actual root-backed fixture directory. Post-run
+adversarial review found no overclaim or retirement gap; a non-blocking health-check
+timestamp correction is applied. Source diagnosis has resumed in the same coder
+session after restored usage. C1 and modern admission remain closed; no next VM
+is prepared.
+
+Quota-resume audit reused the saved root-backed evidence: all17 originally
+EDQUOT-blocked lifecycle tests subsequently passed individually and are included
+in the77-test integrated pass, alongside two additional lifecycle regressions.
+`validation-reconciliation.json` records the log hashes and test-name comparison;
+there is no missing original synthetic test to rerun. Integrated adversarial
+review and C1F's failed native control remain distinct from that test completion.
+Current checks show81.77GB free and159.79M free inodes on the fixture's root XFS/
+noquota backing, above its unchanged25GiB admission floor. Tmpfs user usage is
+8217/25640MiB with the limit unchanged. No quota setting or unrelated files were
+changed. Capacity must be checked again before another native attempt; restored
+vendor usage is not evidence that filesystem limits or native contracts passed.
+
+## Modern contract/parser and offline-init checkpoint (2026-11-06)
+
+**Implemented, not a modern runtime port.** One optional closed
+`openshell_contract: "dungeon-openshell-v1"` distinguishes modern persisted
+identity without altering unmarked OpenShell or plain-container hashes. Loading
+does not infer/add it, and null/unknown/container combinations refuse. Runtime
+construction refuses marked configs before native discovery; plan identifies the
+staging gate and doctor remains blocking. Both initialization constructors still
+omit the marker until setup/lifecycle can use it coherently. No legacy data is
+retargeted or migrated.
+
+Runtime, setup and doctor now use one strict stable-release parser in the existing
+OpenShell boundary. Its future minimum rule admits0.1.7 and newer stable releases
+without a minor/major ceiling. Bounded input/numbers, valid build metadata,
+LF/CRLF handling and malformed/prerelease/control/overflow refusal have regressions.
+The active adapter still requires0.0.116; numeric admission does not enable modern
+execution. Latest-stable publisher metadata was rechecked read-only: still0.1.7,
+published November3, so minimum/current are the same native assessment release.
+Future-version tests establish parsing/admission logic only, not native support.
+
+The initial candidate passed **257 locked Rust tests** (150 unit +107 integration,
+normal parallel execution) and **26 Node tests on Node24.22.2**. Final string-only
+marker hardening rejects Serde enum-map representations as well as null/unknown
+values. Final fmt, all-target locked Clippy with warnings denied, locked release
+build, shell syntax and whitespace checks passed, as did the focused marker test
+and all **60 CLI/setup/container/lifecycle integration tests**. Actual-CLI cases cover
+modern offline inspection with absent/invalid/pending/bound/dangling runtime
+markers, no native discovery/lock/config mutation on refused creation, fixed
+schema-1 no-effects refusal, and blocking diagnostics. Setup fixtures verify old,
+prerelease and modern releases refuse before service/image changes while the port
+is gated.
+
+**An earlier final Rust gate failed:**145 unit tests passed,5 failed, and integration
+targets did not run. With Node24 on PATH and checkout-local TMPDIR, failures were
+`late_guardian_fault_supersedes_a_pending_normal_acknowledgement`,
+`synthetic_guest_pty_status_stop_and_faults`,
+`oversized_identity_refuses_before_launch_and_postspawn_fault_uses_cleanup_owner`,
+`teardown_signal_overrides_a_verified_successful_receipt`, and
+`owned_command_preserves_result_and_binding_and_refuses_drift`. Missing receipts/
+residual controls preceded poisoned/unavailable signal locks. An auxiliary `/tmp`
+write independently failed EDQUOT; the first final check attempt exited101 before
+tests with empty diagnostics. Quota pressure is not a proven cause of the ownership
+failures. Assertions/deadlines were not relaxed and the suite was not retried until
+green. The initial257-test pass is not substituted for this final failure.
+No process cwd under this parent's task-specific test TMPDIR remained when checked;
+cleanup of hardcoded `/tmp/dungeon-owned-*` controls is unconfirmed after the failed
+assertions. No broad candidate cleanup was attempted without exact ownership.
+
+After the C1 peer removed its owned disks, `quota -s` reported16170/25640 MiB on
+the tmpfs user quota. The unchanged hardened candidate then passed all **257 Rust
+tests**, normal parallel execution with Node24 on PATH and checkout-local TMPDIR.
+`rust-tests-post-c1-cleanup.log` preserves this capacity-change follow-up. It is
+not proof that quota caused every prior ownership failure, nor a claim that those
+tests are no longer flaky. A subsequent human offline-init wording change passed
+its focused regression: both runtimes/custom directories explicitly disclaim
+readiness and an instrumented CLI/gateway/engine/systemctl are never contacted.
+The final combined wording candidate passed **258 locked Rust tests** (150 unit
+and108 integration), normal parallel execution with Node24 on PATH, **26 Node24
+tests**, fmt, warnings-denied all-target locked Clippy, locked release build,
+shell syntax and whitespace checks. Logs use `*-onboarding.*` under the same
+task directory. The earlier failures remain part of the evidence.
+
+Actual old/new offline binary comparison used the retained `d31078e0…28e1566`
+release and the new candidate. Both legacy OpenShell and plain-container plans
+had identical fingerprints; old/new initialization wrote byte-identical config/
+policy files, and reads left them unchanged. An instrumented native executable
+was never contacted. Candidate `target/release/dungeon` SHA-256:
+`1ac8e6071196c8bec3322450b28de8d27cd06847dcbcff58d8375f6bfaa3fecc`.
+Initial evidence: `/tmp/opencode/dungeon-modern-parent-b23/`; final logs,
+`fingerprint-compatibility-onboarding.json`, `source-onboarding.sha256` and the
+release-metadata summary are in `target/dungeon-modern-parent-b23/` because scratch
+writes hit quota. No ownership implementation changed in this slice.
+
+**C1 is terminal but incomplete:** the separate read-only-source parent's partial
+qualification report is recorded below. Its resources were retired before this
+owner began a distinct disk-backed follow-up. No speculative provisioning code
+or modern production admission has been added. The modern
+setup/lifecycle/policy/pair checks, writer activation/legacy refusal, async cleanup,
+onboarding and selected-agent gates remain unimplemented/unvalidated. No actual
+Dungeon0.1.7 setup/live/import/identity/cleanup, headless/PTY/edit/test acceptance
+or new Podman/Docker/platform runtime gate was run for this checkpoint. Only Linux
+target libraries are installed; other-platform compilation was not tested.
+
+This session retained sole source-write ownership of the main checkout on
+`feat/setup-wizard-shared-images` at `ccb48b4`. It changed source/tests/docs and new
+private scratch/offline fixtures. Its subsequent disposable native follow-up is
+recorded below; host engine contact was read-only protected inventory, with no
+existing installed binary/image/service change, real credential access, commit or
+publication.
+The dedicated admission exception remains approved but is not enabled here;
+the original-host exit137 remains an independent P0.
+
+## Dedicated gateway C1 qualification (2026-11-06, terminal partial)
+
+**Not complete; not Dungeon setup acceptance.** The independent read-only-source
+parent's fresh Debian13.7/kernel6.12.115/rootless-Podman5.4.2 fixture installed the
+publisher-hash-verified official0.1.7 Debian package. Its matching native gateway
+executable ran a second healthy instance on loopback17671 with independent private
+state/data/TLS. The package gateway on17670 was not reconfigured. Observed native
+registration was local/user/mTLS; gateway/driver0.1.7 and extension protocol1.0
+readback passed.
+
+Supported dedicated TLS uses native `generate-certs`, `OPENSHELL_LOCAL_TLS_DIR`,
+and `gateway add --local`. Cert generation also writes the native
+`gateways/openshell/mtls` discovery copy, so its private XDG_CONFIG_HOME is essential.
+Normal CLI registration/active selection and package TLS metadata were unchanged.
+The integration owner accepts private CLI registration for the dedicated gateway's
+entire lifecycle rather than a racy global-selection restore. Ordinary OpenShell
+will not see that alias; deliberately selected custom gateways retain their normal
+namespace and never receive the dedicated admission exception. Production routing
+is not yet implemented.
+
+The host tmpfs user quota reached **25640/25640 MiB** during pinned workload
+creation, despite globally free tmpfs space. Guest vda I/O errors followed and SSH
+closed. Creation was not replayed. Live/read-only binds, guest UID998/parents/agent,
+persistence, conflict/reuse and paged native deletion are **unproven** from this
+attempt. It used the already-approved driver-wide label-admission exception with
+hard Landlock, network policy and credential exclusions retained.
+
+Its exact owned QEMU/SSH/transports/listener, disks/seed and synthetic keys are
+absent. Whole-VM disk destruction eliminated guest state; it is **not** successful
+native workload removal or uninstall. Terminal report, detailed source/native
+mappings and cleanup receipt:
+`/tmp/opencode/dungeon-openshell-017/parent-gateway-qualification/{RESULT.md,result-cleanup.json}`.
+No repository or host runtime/service/image change was made by that parent.
+
+### Disk-backed follow-up: terminal partial, native create timeout
+
+The source owner ran one new bounded fixture under `target/c1b-native/` after the
+peer's terminal cleanup. The same Debian13.7/kernel6.12.115/Podman5.4.2 and verified
+OpenShell0.1.7 package were used. Admission recorded actual tmpfs quota usage and
+29,973,295,104 bytes free on disk-backed no-quota XFS; the new overlay was bounded
+at20 GiB. This avoided the first attempt's tmpfs disk placement, not enforcement.
+
+Private native provisioning/registration/health and enabling the new user service
+passed, with package sentinel/selection/TLS preserved. The one `c1b-live` create
+then returned1 with **Internal error: create sandbox failed: timeout after60s**.
+It was not replayed and no completed workload ID was observed. No live/import/
+UID998/agent/file/persistence test ran. Gateway/driver failure journals and image/
+cache timing were not collected on this early-fail path; the exact cause remains
+unresolved. Do not assume TLS, pulling, networking or storage caused the timeout.
+
+Independent native inventory was empty and workload/companion/volume/secret
+inventory matched the initial empty baseline. Exact private registration removal,
+new dedicated service disable/stop/unit removal, MainPID0/closed17671 and empty
+dedicated-network removal passed; the package sentinel remained unchanged.
+**This is gateway-only cleanup:** no sandbox delete was issued and nonempty page
+iteration/asynchronous workload deletion were not exercised. The receipt explicitly
+qualifies the controller's initial generic teardown-success wording accordingly.
+
+QEMU was reaped, SSH/monitor absent, and exact new disks/seed/synthetic keys removed.
+All18 protected host container IDs/names/states/start timestamps matched before/
+after, including after retirement. Private state survived until whole-VM retirement;
+that destruction is not proof of Dungeon uninstall predicates. Complete report,
+qualified receipt and native/host evidence: `target/c1b-native/RESULT.md`,
+`result-cleanup.json`, `prepare-evidence/`, `workload-evidence/`, `cleanup-evidence/`.
+**C1 is still incomplete.** Modern runtime admission stays closed. Original-host
+exit137 remains a separate P0, not closed by any Debian-only result.
+
+## OpenShell 0.1.7 contract assessment (2026-11-06, slice A)
+
+**Assessment only; Dungeon has not been ported.** Upstream 0.1.7 remains the latest
+stable release. A fresh QEMU/KVM fixture used Debian 13.7, kernel
+`6.12.115+deb13.1-cloud-amd64`, rootless Podman 5.4.2 and the official 0.1.7 Debian
+package, verified against the publisher's SHA-256 metadata. Its native systemd
+user gateway reported healthy CLI/gateway/Podman-driver 0.1.7 and extension
+protocol 1.0. The package, not an installer shell pipeline, was exercised.
+
+**The live/import assessment reached a security-contract stop condition.**
+With `allow_driver_config=true`, `enable_bind_mounts=true`, UID998 keep-id and
+resource admission still enabled, a synthetic project bind was rejected:
+
+```text
+host bind or image mount cannot be attached while resource admission is enabled:
+no trusted label resolver
+```
+
+Independent sandbox inventory was empty afterward. A separate read-only leaf-bind
+request was also rejected with the same error, affecting existing imports.
+The documented workaround disables external-resource label admission
+for the entire driver, not just one project. **That opt-out was not applied.**
+See [runtime mounts](https://github.com/NVIDIA/OpenShell/blob/v0.1.7/docs/how-it-works/sandboxes/runtimes.mdx#podman-mounts)
+and [resource admission](https://github.com/NVIDIA/OpenShell/blob/v0.1.7/docs/how-it-works/gateways/configuration.mdx#external-resource-admission).
+Do not treat named-volume conversion or copy-only operation as approved
+replacements for existing live/import features.
+
+The user subsequently **approved the dedicated exception**: continue through a
+new, explicitly reviewed Dungeon-dedicated gateway, retaining Dungeon path review,
+hard Landlock, network policy and UID checks. Existing/shared gateways must not
+receive this opt-out. It was not applied during this assessment, and does not by
+itself establish live/import acceptance or modern Dungeon support.
+
+Native `gateway add ... --local` registered mTLS using package-owned TLS discovery;
+registration and health JSON were checked independently. An earlier fixture call
+omitted `--local`: upstream attempted browser/cloud authentication, timed out,
+removed registration and still returned 0. Subsequent health failed. The corrected
+registration passed; the failed attempt is retained, not counted as success.
+
+The unchanged Dungeon release used for offline initialization is
+`d31078e016f35131e5af1de3c1bed5dab991b52fac4cf0ce7f6824cdc28e1566`.
+It generated the actual starter policy without runtime contact and then refused
+0.1.7 as expected. Raw native create/get succeeded with that policy, the explicit
+upstream base digest `aeef1c63…8044e`, manual approval and no automatic providers.
+The sandbox JSON retained canonical name/workspace, stable ID, labels, sandbox
+policy source, hard Landlock and accepted configuration-admission state.
+
+An initial upload probe used an absolute `project/.` source, which nested a
+`project` directory; the subsequent script check failed with MODULE_NOT_FOUND.
+Dungeon's actual upload uses literal `.` from the project cwd. That exact form
+passed on the existing fixture without recreating it; download preserved the
+expected directory contents and omitted the gitignored synthetic file. The initial
+failure does not establish a Dungeon upload regression.
+
+| Native check, with resource admission enabled | Result |
+| --- | --- |
+| Copy creation/get | Ready with canonical ID/labels, sandbox policy and accepted configuration admission |
+| Non-TTY command transport | Literal multiword/metacharacter argv, independent stdout/stderr, exit23 and finite binary stdin passed |
+| Live-written JavaScript | Uploaded, guest-created and in-place-edited `.cjs` files executed successfully; this is not the full atomic-edit/Cargo/agent edit matrix |
+| Selected agent | Image-provided OpenCode 1.2.18 version command passed; no login or inference |
+| Filesystem boundary | `/var/tmp` write failed with Permission denied under hard Landlock |
+| Network/exclusions | Direct unapproved `1.1.1.1:443` connection failed, with matching native `transparent_tcp_policy_denied` log; checked guest engine sockets and the fixture host-home path were absent |
+| Persistence | Independently observed Stopped then Ready, same sandbox ID, unchanged policy and retained edited script |
+| Copy transfer | Literal-dot upload, gitignore omission and downloaded file contents passed |
+| SSH | Native config rendering passed; template/source inspection only, not owned terminal acceptance |
+
+Observed gateway-selected trusted images were `openshell/sandbox:0.1.7`
+(`sha256:89819c03f291d9b909c3fc2962360e24af4516627422d18f3e681829f003f347`)
+and `openshell/supervisor:0.1.7`
+(`sha256:a07864bd0c546716039c2000a919f50ce8f7f1f67ba37dda350cf64d3a7cfb06`).
+The explicit workload image was
+`ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e`.
+This is not qualification of mutable `latest` or the reviewed Rust-toolchain image.
+
+Native delete returned success with **deletion accepted; cleanup pending**. The
+first independent JSON inventory still showed the same ID as Deleting; the next
+was empty. Both workload/supervisor containers, volumes and secrets were then
+independently absent. Cleanup probes initially used the wrong Podman template
+field (`.Id` instead of `.ID`) and assumed empty secret inventory was JSON; those
+fixture errors are retained. Corrected inspection and explicit empty-ID inventory
+completed cleanup without replaying deletion or removing unrelated resources.
+
+The disposable gateway was observed inactive, QEMU exited, its SSH listener closed,
+and its writable disk, downloaded base disk, seed and synthetic keys were removed.
+All **18** pre-existing host container IDs/states/start timestamps matched the
+baseline; no new host container remained. No existing host gateway, guest, image
+tag, installed binary, enforcement setting or authentication was changed. These
+are native assessment results, not a ported-Dungeon test suite.
+
+The existing adapter/setup/version gate remained unchanged at that checkpoint. A subsequent source
+change freezes the historical configuration adapter identity independently of the
+runtime admission version, preserving existing hashes; golden OpenShell/container
+and scope/policy-drift regressions cover it. No modern contract marker or version
+admission change was implemented at the fingerprint-only checkpoint. The newer
+marker/parser checkpoint is recorded above. Live/import enforcement, owned execution/
+cancellation, PTY/editor flows, provider inference and final Dungeon onboarding
+acceptance are not established by this assessment. The original-host exit137
+remains an independent open blocker.
+
+The fingerprint-only candidate passed **251 locked Rust tests** (145 unit +106
+integration, normal parallel execution), **26 Node tests on Node24.22.2**,
+formatting, warnings-denied all-target locked Clippy and locked release compilation.
+Independent offline CLI checks used the original `d31078e0…28e1566` release to
+write OpenShell/plain-container configurations, then compared its `plan` results
+with the candidate: both fingerprints and all configuration/policy bytes were
+unchanged, with no runtime binding/contact. Candidate SHA-256:
+`0d37f65a65d98d4ed53fc88a905571051fc199ad1c7d8fca90c684eda1bad6e8`.
+The installed binary remains unchanged. The native OpenShell assessment above
+preceded this fingerprint-only source change; it is not a native test of a modern
+Dungeon adapter. `git diff --check` passed. No commit or push was performed.
+
+Source owner mapping and the required decision are in `PLAN.md` slice A. Local
+source manifests, fixture scripts and native outputs:
+`/tmp/opencode/dungeon-openshell-017/`.
+
 ## Headless follow-up (2026-11-06, source checkout)
 
 **Edit/test acceptance remains blocked on the tested Podman host.** Identical

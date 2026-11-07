@@ -1022,6 +1022,7 @@ fn environment_defaults(project: PathBuf, agent: Agent) -> Result<ConfigDoc> {
     let preferences = crate::runtime::preferences(Some(&project))?;
     let plain = preferences.runtime_choice() != RuntimeChoice::Openshell;
     Ok(ConfigDoc {
+        openshell_contract: None,
         container: if plain {
             Some(preferences.container.unwrap_or_default())
         } else {
@@ -1054,6 +1055,9 @@ fn print_plan(config: &Config) -> Result<i32> {
     }
     let imports = crate::imports::plan(config)?;
     let mut unsatisfied = Vec::new();
+    if config.values.openshell_contract.is_some() {
+        unsatisfied.push("the modern OpenShell contract is not enabled in this build; no runtime operation or migration is authorized by this offline plan");
+    }
     if !config.values.imports.is_empty() {
         unsatisfied.push("imports require approved unchanged snapshot and exact local bind-enabled UID998 gateway; offline plan is not runtime verification");
     }
@@ -1079,6 +1083,7 @@ fn print_plan(config: &Config) -> Result<i32> {
         crate::config::review_json(&json!({
             "adapter": "openshell",
             "version": OPEN_SHELL_VERSION,
+            "openshell_contract": config.values.openshell_contract,
             "environment": {
                 "name": config.values.name,
                 "config": config.path,
@@ -1564,18 +1569,17 @@ fn initialize(
     )?;
     let config = save_environment(directory, values, yes)?;
 
-    writeln!(io::stdout(), "Configuration: {:?}", config.path)?;
-    if config.values.container.is_some() {
-        writeln!(
-            io::stdout(),
-            "Next: dungeon up. Missing registry images are pulled on first use."
-        )?;
-        return Ok(0);
-    }
     writeln!(
         io::stdout(),
-        "No runtime was started. Review policy.json and named providers before first up."
+        "Configuration saved; runtime readiness not checked. No guest was started."
     )?;
+    writeln!(io::stdout(), "Configuration: {:?}", config.path)?;
+    if config.values.container.is_none() {
+        writeln!(
+            io::stdout(),
+            "Review policy.json and named providers before launch."
+        )?;
+    }
     if config.values.image == REVIEWED_IMAGE {
         writeln!(
             io::stdout(),
@@ -1585,13 +1589,13 @@ fn initialize(
     if project_binding {
         writeln!(
             io::stdout(),
-            "Next: dungeon plan to inspect policy; dungeon to start {}. No host harness client required.",
+            "Next: dungeon setup if needed, then dungeon to launch {} (dungeon run without a terminal).",
             config.values.agent.as_str()
         )?;
     } else {
         writeln!(
             io::stdout(),
-            "Next: run plan, then launch dungeon, using --config with the path above."
+            "Next: dungeon setup if needed, then dungeon --config PATH run using the configuration path above."
         )?;
     }
     Ok(0)
@@ -1847,6 +1851,7 @@ mod tests {
         write_new(
             &path,
             &ConfigDoc {
+                openshell_contract: None,
                 container: None,
                 schema: 2,
                 name: "demo".into(),
@@ -2029,6 +2034,7 @@ mod tests {
         write_new(
             &path,
             &ConfigDoc {
+                openshell_contract: None,
                 container: None,
                 schema: 2,
                 name: "demo".into(),
@@ -2124,6 +2130,7 @@ mod tests {
         std::fs::write(source.join("init.lua"), "vim.opt.number = true").unwrap();
         write_new(&private.join("policy.json"), &starter_policy()).unwrap();
         let mut doc = serde_json::to_value(ConfigDoc {
+            openshell_contract: None,
             container: None,
             schema: 2,
             name: "demo".into(),

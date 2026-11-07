@@ -83,6 +83,15 @@ pub(crate) fn run(
                 "Selected private configuration and policy passed local validation.",
                 "Review dungeon plan before runtime operations.",
             );
+            if config.values.openshell_contract.is_some() {
+                report.add(
+                    "openshell_contract",
+                    "unsupported",
+                    true,
+                    "The modern OpenShell contract is recorded but not enabled in this build.",
+                    "Retain this configuration for the completed port; doctor does not migrate state.",
+                );
+            }
             if crate::imports::configured(&config) {
                 let valid = crate::imports::verify(&config).is_ok();
                 report.add("imports", if valid { "recorded-not-verified" } else { "blocked" }, !valid, "Imports require safe selected live files or approved snapshots and the exact bind-enabled local gateway; guest pathname is mutable.", "Review plan; use reload for unbound harness selection/capture and imports stage for Neovim. Doctor does not mount or execute imports.");
@@ -98,6 +107,12 @@ pub(crate) fn run(
             None
         }
     };
+    if config
+        .as_ref()
+        .is_some_and(|config| config.values.openshell_contract.is_some())
+    {
+        return print_report(&report, json);
+    }
     #[cfg(target_os = "linux")]
     if match runtime {
         crate::runtime::RuntimeChoice::Container => true,
@@ -170,6 +185,10 @@ pub(crate) fn run(
         );
     }
     report.add("integration_gates", "recorded-not-verified", false, "Claude account, matched native clients, nested Codex sandbox and editor gates are recorded evidence, not dynamically verified.", "Consult docs/validation.md and Issues #11, #29 and #30. Doctor performs no authentication or AI tests.");
+    print_report(&report, json)
+}
+
+fn print_report(report: &Report, json: bool) -> Result<i32> {
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -461,7 +480,7 @@ mod linux {
             let reply = shell.get(&["--version"]);
             let valid = reply
                 .as_ref()
-                .is_some_and(|r| r.code == 0 && setup::require_version(&r.text).is_ok());
+                .is_some_and(|r| r.code == 0 && super::super::require_version(&r.text).is_ok());
             report.add(
                 "openshell",
                 if valid { "healthy" } else { "incompatible" },
@@ -844,6 +863,7 @@ mod linux {
             write_new(
                 &path,
                 &ConfigDoc {
+                    openshell_contract: None,
                     container: None,
                     schema: 2,
                     name: "fixture".into(),
@@ -1412,6 +1432,7 @@ esac
             let config = Config {
                 path: home.join("private/dungeon.json"),
                 values: ConfigDoc {
+                    openshell_contract: None,
                     container: None,
                     schema: 2,
                     name: "fixture".into(),

@@ -224,6 +224,16 @@ Initialization does not execute project code or contact a runtime. Creation snap
 
 Reuse verifies identity and policy drift. These checks are not kernel/image attestation and do not prove provider content stayed unchanged.
 
+Persisted adapter identity is independent of runtime version admission. Unmarked
+configs retain the historical hash, including plain containers. The optional
+`openshell_contract: "dungeon-openshell-v1"` identifies the modern Dungeon contract,
+not a vendor release, and enters that same fingerprint rather than another state
+registry. This development checkpoint parses it offline but refuses it before
+runtime discovery; initialization and production admission remain on 0.0.116 until
+the modern setup/lifecycle port is integrated. The single stable-release parser
+lives in `openshell` and is shared by runtime, setup and diagnostics. Its modern
+minimum rule has no upper ceiling; that rule alone does not enable the port.
+
 The lifecycle remains `up`, `run`, and `down` with one explicit config and one Runtime. New CLI bindings select `live` after operator review: creation derives exactly one read-write bind request from the canonical configured project to `/sandbox/project`; first and resumed `up` never upload. Explicit `copy` mode creates the bound sandbox and uploads the project once; resumed `up` starts it without upload, and is a no-op when already Ready. Existing configs omitting the transfer field retain copy semantics. `run` starts a stopped bound sandbox without upload in either mode. `down` stops it and retains environment state.
 
 `upload --yes` and `export` remain copy-mode operations. Upload is the operator's overwrite-capable refresh/recovery action. Export is a Ready-only operation for the bound sandbox on OpenShell 0.0.116: it downloads and stages the guest project, then presents a deterministic three-way diff against the last successful upload baseline and current host project. It applies only after interactive typed `yes` or explicit `--yes`. Both commands refuse in live mode before contacting OpenShell.

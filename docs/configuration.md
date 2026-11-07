@@ -162,6 +162,22 @@ gates.
 
 ## Environment configuration
 
+### Persisted OpenShell contract (development checkpoint)
+
+Configurations without `openshell_contract` retain their historical 0.0.116
+identity; plain-container serialization and fingerprints are unchanged. The only
+recognized explicit value is `"dungeon-openshell-v1"`, a Dungeon contract identity,
+not an installed OpenShell version. It changes the fingerprint and is invalid
+with `container`. Unknown values and explicit null are rejected. Loading or
+editing an existing configuration never infers or adds this marker.
+
+The modern port is **not enabled**: initialization still writes the current
+legacy contract. Explicitly marked configurations can be inspected with offline
+config/plan/list/resolve, but runtime construction refuses before native discovery;
+doctor reports the contract as blocking. Do not add the marker to convert a bound
+guest. Keep legacy data and its matching old Dungeon/OpenShell installation for
+recovery; a new contract will require separate initialization, not migration.
+
 The gateway setup description below applies to `setup --runtime openshell`.
 Plain setup discovers a service and saves defaults as described above.
 
@@ -184,7 +200,12 @@ review but saves without starting. Explicit flags skip the corresponding choices
 `--yes` suppresses all prompts. No harness is assumed or inferred from installed
 tools. Imports stay off unless selected explicitly. Optional snapshots are staged
 before the final review and saved with the configuration; ordinary initialization
-does not contact a runtime or upload the project. Override values with flags:
+does not contact a runtime or upload the project. Override values with flags.
+
+Successful offline `init` explicitly reports **configuration saved; runtime
+readiness not checked**. It does not probe dependencies, including with `--yes`.
+Use `dungeon setup` if needed, then `dungeon` (or explicit `run` without a terminal).
+For a custom initialization directory, launch with `dungeon --config PATH run`.
 
 Explicit `init` and implicit first use resolve the same defaults; flags override
 only the selected values. Headless initialization never adds host imports without

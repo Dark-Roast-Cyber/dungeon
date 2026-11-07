@@ -1,5 +1,5 @@
 //! Local 0.0.116 gateway bootstrap. OpenShell owns registrations; Podman owns containers.
-use super::{find_executable, host_environment};
+use super::{find_executable, host_environment, require_version};
 use crate::{Error, OPEN_SHELL_VERSION, Result};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -407,17 +407,6 @@ fn setup_environment(project: Option<&Path>) -> Result<HashMap<OsString, OsStrin
         }
     }
     Ok(env)
-}
-
-pub(super) fn require_version(version: &str) -> Result<()> {
-    if version.trim() != format!("openshell {OPEN_SHELL_VERSION}")
-        && version.trim() != format!("openshell v{OPEN_SHELL_VERSION}")
-    {
-        return Err(Error::new(format!(
-            "OpenShell {OPEN_SHELL_VERSION} required; unrecognized version output. Install the pinned CLI explicitly"
-        )));
-    }
-    Ok(())
 }
 
 pub(super) fn executable(
