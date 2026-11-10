@@ -741,10 +741,10 @@ fn versions_is_read_only_and_uses_the_reviewed_image_pin() {
     let out = f.run(&["versions"]);
     assert!(out.status.success(), "{out:?}");
     let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(report["reviewed_guest_opencode"], "2.1.2");
+    assert_eq!(report["reviewed_guest_opencode"], "2.2.7");
     assert_eq!(
         report["reviewed_local_image"],
-        "localhost/dungeon-agent:0.0.3-opencode-2.1.2"
+        "localhost/dungeon-agent:0.0.3-opencode-2.2.7"
     );
     assert!(report["registry_stable"].is_null());
     assert_eq!(report["reviewed_update_available"], false);

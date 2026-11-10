@@ -343,7 +343,7 @@ needs validation on the actual host/image/agent combination.
   "workspace": "default",
   "project": "/home/user/projects/demo",
   "project_transfer": "live",
-  "image": "localhost/dungeon-agent:0.0.3-opencode-2.1.2",
+  "image": "localhost/dungeon-agent:0.0.3-opencode-2.2.7",
   "agent": "opencode",
   "providers": []
 }

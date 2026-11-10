@@ -2,6 +2,30 @@
 
 CI checks formatting, Clippy, locked Rust tests, release compilation, CLI version execution, npm launcher behavior, distribution version synchronization, native archive creation, and full npm package assembly on explicit supported runners.
 
+## OpenCode V2 pin update (2026-11-10)
+
+The optional local image now pins `@opencode/cli` **2.2.7**, the official
+registry's stable `latest` at review time, with matching locked platform packages.
+The package archive matched its registry SHA-512; its postinstall is byte-identical
+to 2.1.2, and all ten included platform-package integrity values match the registry.
+Other tool pins, upstream image defaults and existing guests are unchanged.
+
+Formatting, warnings-denied all-target locked Clippy and all **26 Node tests**
+passed on Node24.11.1. The full Rust suite failed on private-path ownership/
+permission checks in this environment, including with a separate private TMPDIR;
+it is not a passing gate. No safety check was relaxed. Further broad testing was
+explicitly deferred in favor of preparing a usable local image. Historical 2.1.2
+native results below do not qualify 2.2.7.
+
+The actual Docker29.9.3/Linux amd64 recipe build then succeeded as
+`localhost/dungeon-agent:0.0.3-opencode-2.2.7`, image ID
+`c56f7d34c8bace2ac50070c811f0a36563a8ce7c323d5bc90ddf7a4adb1eb8e1`.
+Its network-disabled final non-root checks reported OpenCode2.2.7 and all unchanged
+tool versions; empty UID998 native-state layout verification also passed. No
+existing image tag or guest was replaced. This establishes a locally usable image,
+not end-to-end Dungeon/OpenShell, provider-authentication or containment acceptance.
+Build log: `/tmp/opencode/dungeon-opencode-2.2.7-20261110/image-build.log`.
+
 ## Publication checkpoint (2026-11-07)
 
 The combined onboarding and closed modern-contract foundation passed **259 locked

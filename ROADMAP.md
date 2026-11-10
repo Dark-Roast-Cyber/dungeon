@@ -24,7 +24,7 @@ The current milestone remains focused on making the contained development loop c
 
 Completed or substantially implemented:
 
-1. **Reviewed agent image, Issue #6.** The local Linux amd64 candidate pins official OpenCode, Claude Code, and Codex packages on the validated immutable base. New human CLI bindings select the versioned local OpenCode 2.1.2 image, which must be explicitly built first. Publication/provenance remains a separate boundary. `versions --check` reports upstream stable updates without installing them. Claude account-dependent validation remains tracked by Issue #11.
+1. **Reviewed agent image, Issue #6.** The local Linux amd64 candidate pins official OpenCode, Claude Code, and Codex packages on the validated immutable base. The optional recipe now pins OpenCode 2.2.7 and requires an explicit build/selection and fresh native validation; both runtimes otherwise use setup's saved image or upstream `base:latest`. Historical OpenCode 2.1.2 validation does not qualify the new pin. Publication/provenance remains a separate boundary. `versions --check` reports upstream stable updates without installing them. Claude account-dependent validation remains tracked by Issue #11.
 2. **One-command local setup, Issue #7.** `dungeon setup` provisions and verifies the local Linux/rootless-Podman gateway after explicit prerequisite installation and immutable gateway-image pull.
 3. **Daily lifecycle, Issue #8.** `up`, `run`, and `down` preserve guest state and do not silently re-upload on resume.
 4. **Safe project export, Issue #9.** Reviewed staged export is implemented on the validated OpenShell 0.0.116/rootless-Podman path.

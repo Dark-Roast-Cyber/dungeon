@@ -10,7 +10,7 @@ root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 config=${XDG_CONFIG_HOME:-$HOME/.config}/dungeon
 state=${XDG_STATE_HOME:-$HOME/.local/state}/dungeon
 registry=${XDG_CONFIG_HOME:-$HOME/.config}/openshell/gateways
-image=${DUNGEON_UNINSTALL_TEST_IMAGE:-localhost/dungeon-agent:0.0.3-opencode-2.1.2}
+image=${DUNGEON_UNINSTALL_TEST_IMAGE:-localhost/dungeon-agent:0.0.3-opencode-2.2.7}
 for path in "$config" "$state" "$registry/dungeon-local" "$registry/uninstall-sentinel" "$HOME/.local/bin/dungeon"; do
     [ ! -e "$path" ] && [ ! -L "$path" ] || fail 'test requires no pre-existing Dungeon or sentinel state'
 done

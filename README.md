@@ -104,7 +104,7 @@ dungeon init --image ghcr.io/example/agent@sha256:YOUR_REVIEWED_DIGEST
 
 The optional [reviewed local image](images/agent/README.md) includes pinned
 agents, patched Node, Neovim and Rust. Build it explicitly and select it with
-`--image localhost/dungeon-agent:0.0.3-opencode-2.1.2`; it is not published or
+`--image localhost/dungeon-agent:0.0.3-opencode-2.2.7`; it is not published or
 automatically built. Its validation does not attest the mutable upstream image.
 
 ## Using Dungeon

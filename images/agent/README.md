@@ -8,7 +8,7 @@ Issue #6's optional Linux image candidate, extended by Issue #17 with reviewed i
 - `package.json` owns the exact agent versions, build-only pnpm version, Node/Neovim/Rust versions, distribution coordinates, and reviewed SHA-256 artifact hashes. `pnpm-lock.yaml` locks official npm registry packages, including platform binaries, with SHA-512 integrity metadata. Read the manifest for selected versions and hashes rather than maintaining a second version list.
 - Neovim comes from the official Linux x86_64 release archive. Rust uses the official `rustc`, `cargo`, and `rust-std` standalone component archives for the bounded x86_64 GNU/Linux toolchain, without rustup or runtime toolchain resolution.
 - This glibc Linux image excludes OpenCode's two redundant x64 musl optional binary packages through pnpm's lock-aware `ignoredOptionalDependencies`. The glibc x64 baseline fallback stays installed for CPUs without AVX2.
-- OpenCode uses the reviewed pinned V2 `@opencode/cli` distribution, not the legacy `opencode-ai` package. The current 2.1.2 pin matched the official registry's stable `latest` tag during review on 2026-10-21; tags are never resolved at build/start time. Claude's pinned version was selected from Anthropic's **stable** channel (not its faster `latest` channel); Codex's pinned version was selected from the non-prerelease `latest` distribution.
+- OpenCode uses the reviewed pinned V2 `@opencode/cli` distribution, not the legacy `opencode-ai` package. The current 2.2.7 pin matched the official registry's stable `latest` tag during review on 2026-11-10; tags are never resolved at build/start time. A local Docker build passed offline tool/version/layout checks; end-to-end native validation remains separate, and historical 2.1.2 results do not qualify 2.2.7. See the [current build record](../../docs/validation.md#opencode-v2-pin-update-2026-11-10). Claude's pinned version was selected from Anthropic's **stable** channel (not its faster `latest` channel); Codex's pinned version was selected from the non-prerelease `latest` distribution.
 - The inherited Node 22.22.1 executable is replaced with the manifest-pinned official Linux x64 runtime at `/usr/bin/node`, before agent installers run. Only `bin/node` is extracted after archive hash verification; no npm, Corepack, runtime manager or distro upgrade is added. `/usr/bin/nodejs` points to that same binary. This also updates the exact path used by Dungeon's owned guardian.
 
 Node security sources reviewed on 2026-11-05 UTC:
@@ -35,13 +35,13 @@ From the repository root, using rootless Podman:
 
 ```sh
 podman pull ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e
-podman build --pull=never -t localhost/dungeon-agent:0.0.3-opencode-2.1.2 \
+podman build --pull=never -t localhost/dungeon-agent:0.0.3-opencode-2.2.7 \
   -f images/agent/Containerfile images/agent
 podman run --rm --network none --entrypoint node \
-  localhost/dungeon-agent:0.0.3-opencode-2.1.2 /usr/lib/node_modules/dungeon-agent/verify.cjs --path
+  localhost/dungeon-agent:0.0.3-opencode-2.2.7 /usr/lib/node_modules/dungeon-agent/verify.cjs --path
 podman run --rm --network none --entrypoint node \
-  localhost/dungeon-agent:0.0.3-opencode-2.1.2 /usr/lib/node_modules/dungeon-agent/verify-layout.cjs
-podman history --no-trunc localhost/dungeon-agent:0.0.3-opencode-2.1.2
+  localhost/dungeon-agent:0.0.3-opencode-2.2.7 /usr/lib/node_modules/dungeon-agent/verify-layout.cjs
+podman history --no-trunc localhost/dungeon-agent:0.0.3-opencode-2.2.7
 ```
 
 Pull the exact `FROM` digest first if it is not cached. No registry publication is needed. `verify.cjs` checks the final non-root Linux amd64 Node version, `/usr/bin/node` execution/PATH identity, root ownership and non-writability (including its parent), and refuses alternate Node/nodejs runtimes on PATH. It also compares all three agent CLI outputs against the manifest and checks Neovim, rustc, and Cargo versions, exact image-owned paths, root ownership, non-writability, and `HOME=/sandbox`. The final check removes its transient guest cache, Cargo state, logs, and helper paths; it does not leave a Codex session or auth state in the image. Runtime agent links target vendor-declared binaries directly, not pnpm's location-dependent shell shims.

@@ -14,7 +14,7 @@ project and `export --yes` applies reviewed guest changes to the host.
 PRIVATE="$HOME/.config/dungeon/demo"
 dungeon machine --schema 1 resolve --project "$PWD"
 dungeon machine --schema 1 init --yes --directory "$PRIVATE" --project "$PWD" \
-  --name demo --gateway dungeon-local --image localhost/dungeon-agent:0.0.3-opencode-2.1.2
+  --name demo --gateway dungeon-local --image localhost/dungeon-agent:0.0.3-opencode-2.2.7
 dungeon --config "$PRIVATE/dungeon.json" machine --schema 1 up --yes
 dungeon --config "$PRIVATE/dungeon.json" machine --schema 1 status
 ```

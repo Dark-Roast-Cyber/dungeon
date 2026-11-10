@@ -16,7 +16,7 @@ use std::num::NonZeroU16;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const REVIEWED_IMAGE: &str = "localhost/dungeon-agent:0.0.3-opencode-2.1.2";
+const REVIEWED_IMAGE: &str = "localhost/dungeon-agent:0.0.3-opencode-2.2.7";
 const OPENCODE_TAGS: &str = "https://registry.npmjs.org/-/package/@opencode%2Fcli/dist-tags";
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -1992,7 +1992,11 @@ mod tests {
         for invalid in ["2.1", "2.1.2-beta", "2.1.2.3", "2.1.02x", ""] {
             assert_eq!(stable_version(invalid), None);
         }
-        assert!(REVIEWED_IMAGE.ends_with("opencode-2.1.2"));
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../images/agent/package.json")).unwrap();
+        let reviewed = manifest["dependencies"]["@opencode/cli"].as_str().unwrap();
+        assert!(stable_version(reviewed).is_some());
+        assert!(REVIEWED_IMAGE.ends_with(&format!("opencode-{reviewed}")));
         assert!(Cli::try_parse_from(["dungeon", "versions", "--check"]).is_ok());
         assert!(Cli::try_parse_from(["dungeon", "versions", "--install"]).is_err());
     }
