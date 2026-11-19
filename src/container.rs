@@ -153,10 +153,20 @@ fn engine_environment(project: &Path) -> Result<HashMap<OsString, OsString>> {
 fn connect(engine: Engine, endpoint: &str, project: &Path) -> Result<Native> {
     crate::config::validate_endpoint(endpoint)?;
     let socket = Path::new(endpoint.strip_prefix("unix://").unwrap());
-    if socket.starts_with(project) {
-        return Err(Error::new("container socket must be outside the project"));
-    }
-    if socket.canonicalize().is_ok_and(|p| p.starts_with(project)) {
+    let cwd = std::env::current_dir()?.canonicalize()?;
+    let home = PathBuf::from(
+        std::env::var_os("HOME")
+            .ok_or_else(|| Error::new("HOME is required for local container services"))?,
+    )
+    .canonicalize()?;
+    let resolved = socket.canonicalize().ok();
+    if [Some(project), (cwd != home).then_some(cwd.as_path())]
+        .into_iter()
+        .flatten()
+        .any(|root| {
+            socket.starts_with(root) || resolved.as_ref().is_some_and(|p| p.starts_with(root))
+        })
+    {
         return Err(Error::new("container socket must be outside the project"));
     }
     let meta = fs::metadata(socket).map_err(|_| {
@@ -171,14 +181,7 @@ fn connect(engine: Engine, endpoint: &str, project: &Path) -> Result<Native> {
         return Err(Error::new("unsupported container socket ownership or type"));
     }
     let env = engine_environment(project)?;
-    let home = Path::new(env.get(OsStr::new("HOME")).unwrap()).canonicalize()?;
-    let cwd = std::env::current_dir()?.canonicalize()?;
-    let binary = find_executable(engine.name(), env.get(OsStr::new("PATH")))
-        .filter(|p| {
-            [project, cwd.as_path()]
-                .into_iter()
-                .all(|root| root == home || !p.starts_with(root))
-        })
+    let binary = engine_executable(engine.name(), &env, project)?
         .ok_or_else(|| Error::new(format!("install {} to use this environment", engine.name())))?;
     let mut native = Native {
         binding: ContainerBinding {
@@ -192,6 +195,26 @@ fn connect(engine: Engine, endpoint: &str, project: &Path) -> Result<Native> {
     let info = read_json_text(&native.query(&strings(&["info", "--format", "{{json .}}"]), 5)?)?;
     native.binding.daemon = service_identity(engine, &info)?;
     Ok(native)
+}
+
+fn engine_executable(
+    name: &str,
+    env: &HashMap<OsString, OsString>,
+    project: &Path,
+) -> Result<Option<PathBuf>> {
+    let home = Path::new(
+        env.get(OsStr::new("HOME"))
+            .ok_or_else(|| Error::new("HOME is required for local container services"))?,
+    )
+    .canonicalize()?;
+    let cwd = std::env::current_dir()?.canonicalize()?;
+    Ok(
+        find_executable(name, env.get(OsStr::new("PATH"))).filter(|p| {
+            [project, cwd.as_path()]
+                .into_iter()
+                .all(|root| root == home || !p.starts_with(root))
+        }),
+    )
 }
 
 fn service_identity(engine: Engine, info: &Value) -> Result<String> {
@@ -284,18 +307,18 @@ fn select(options: &ContainerOptions, project: &Path) -> Result<(Native, Vec<Val
 
 pub(crate) fn prepare_service(
     options: &ContainerOptions,
+    project: &Path,
     dry_run: bool,
 ) -> Result<ContainerOptions> {
-    match resolved_options(options) {
+    match resolved_options(options, project) {
         Ok(selected) => return Ok(selected),
         Err(error) if options.engine == Engine::Docker || options.endpoint.is_some() => {
             return Err(error);
         }
         Err(_) => {}
     }
-    let project = std::env::current_dir()?.canonicalize()?;
-    let env = engine_environment(&project)?;
-    if find_executable("podman", env.get(OsStr::new("PATH"))).is_none() {
+    let env = engine_environment(project)?;
+    if engine_executable("podman", &env, project)?.is_none() {
         return Err(Error::new(
             "install rootless Podman or Docker CE, then retry setup",
         ));
@@ -310,7 +333,12 @@ pub(crate) fn prepare_service(
             ));
         }
     }
-    activate_podman_socket(env, dry_run)?;
+    let systemctl = if dry_run {
+        None
+    } else {
+        engine_executable("systemctl", &env, project)?
+    };
+    activate_podman_socket(env, systemctl.as_deref(), dry_run)?;
     let selected = ContainerOptions {
         engine: Engine::Podman,
         endpoint: Some(endpoint),
@@ -318,11 +346,15 @@ pub(crate) fn prepare_service(
     if dry_run {
         Ok(selected)
     } else {
-        resolved_options(&selected).map_err(|_| Error::new("Podman service is still unavailable after socket activation; activation may have changed user service state. Inspect it explicitly"))
+        resolved_options(&selected, project).map_err(|_| Error::new("Podman service is still unavailable after socket activation; activation may have changed user service state. Inspect it explicitly"))
     }
 }
 
-fn activate_podman_socket(mut env: HashMap<OsString, OsString>, dry_run: bool) -> Result<()> {
+fn activate_podman_socket(
+    mut env: HashMap<OsString, OsString>,
+    systemctl: Option<&Path>,
+    dry_run: bool,
+) -> Result<()> {
     let uid = unsafe { libc::geteuid() };
     if uid == 0 {
         return Err(Error::new(
@@ -336,12 +368,12 @@ fn activate_podman_socket(mut env: HashMap<OsString, OsString>, dry_run: bool) -
     if dry_run {
         return Ok(());
     }
-    let binary = find_executable("systemctl", env.get(OsStr::new("PATH"))).ok_or_else(|| {
+    let binary = systemctl.ok_or_else(|| {
         Error::new("systemctl is unavailable; start the rootless Podman API service yourself")
     })?;
     env.insert("XDG_RUNTIME_DIR".into(), format!("/run/user/{uid}").into());
     if !query(
-        &binary,
+        binary,
         &env,
         &["--user", "enable", "--now", "podman.socket"],
         Duration::from_secs(30),
@@ -355,7 +387,12 @@ fn activate_podman_socket(mut env: HashMap<OsString, OsString>, dry_run: bool) -
     Ok(())
 }
 
-pub(crate) fn prepare_image(options: &ContainerOptions, image: &str, dry_run: bool) -> Result<()> {
+pub(crate) fn prepare_image(
+    options: &ContainerOptions,
+    image: &str,
+    project: &Path,
+    dry_run: bool,
+) -> Result<()> {
     if !crate::config::valid_image(image) {
         return Err(Error::new("invalid OCI image reference"));
     }
@@ -370,7 +407,7 @@ pub(crate) fn prepare_image(options: &ContainerOptions, image: &str, dry_run: bo
         );
         return Ok(());
     }
-    let (native, _) = select(options, &std::env::current_dir()?.canonicalize()?)?;
+    let (native, _) = select(options, project)?;
     if !image.starts_with("localhost/") {
         println!("Pulling image: {image}");
         native.query(&strings(&["pull", image]), 300)?;
@@ -403,8 +440,8 @@ pub(crate) fn diagnostic(config: Option<&Config>) -> Result<Value> {
     Ok(json!({"selected":native.binding,"engines":engines}))
 }
 
-pub(crate) fn resolved_options(options: &ContainerOptions) -> Result<ContainerOptions> {
-    let (native, _) = select(options, &std::env::current_dir()?.canonicalize()?)?;
+fn resolved_options(options: &ContainerOptions, project: &Path) -> Result<ContainerOptions> {
+    let (native, _) = select(options, project)?;
     Ok(ContainerOptions {
         engine: native.binding.engine,
         endpoint: Some(native.binding.endpoint),
@@ -804,8 +841,11 @@ impl<'a> Runtime<'a> {
         self.up()
     }
     pub(crate) fn up(&self) -> Result<i32> {
+        self.up_for_startup(false)
+    }
+    fn up_for_startup(&self, wait: bool) -> Result<i32> {
         crate::imports::verify(self.config)?;
-        let lock = crate::export::TransferGuard::environment(self.config)?;
+        let lock = crate::export::TransferGuard::environment_for_startup(self.config, wait)?;
         let _imports = crate::imports::creation_lock(self.config)?;
         if fs::symlink_metadata(self.config.state_path()).is_ok() {
             return self.start_locked();
@@ -1067,7 +1107,11 @@ impl<'a> Runtime<'a> {
         Ok(command.status()?.code().unwrap_or(128))
     }
     pub(crate) fn run_agent(&self, argv: &[String], tty: bool) -> Result<i32> {
-        self.start()?;
+        if tty {
+            self.up_for_startup(true)?;
+        } else {
+            self.start()?;
+        }
         self.execute(argv, tty, GUEST_PROJECT)
     }
 }
@@ -1092,15 +1136,15 @@ mod setup_tests {
         .unwrap();
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
         let env = HashMap::from([("PATH".into(), root.path().as_os_str().to_owned())]);
-        let dry = activate_podman_socket(env.clone(), true);
+        let dry = activate_podman_socket(env.clone(), Some(&binary), true);
         assert!(!marker.exists());
         if unsafe { libc::geteuid() } == 0 {
             assert!(dry.is_err());
-            assert!(activate_podman_socket(env, false).is_err());
+            assert!(activate_podman_socket(env, Some(&binary), false).is_err());
             assert!(!marker.exists());
         } else {
             dry.unwrap();
-            activate_podman_socket(env, false).unwrap();
+            activate_podman_socket(env, Some(&binary), false).unwrap();
             assert_eq!(
                 fs::read_to_string(marker).unwrap(),
                 format!(

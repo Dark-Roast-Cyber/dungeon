@@ -5,9 +5,14 @@ environments, using their normal CLIs. Dungeon manages the environment; your
 agent still owns prompts, models, permissions and conversations.
 Part of [Agent Archaeology](https://agentarchaeology.ai/).
 
-**Development preview:** Rust 0.0.2 is source-only. Published v0.0.1 is the older
-Python implementation; Rust release archives and npm packages are not published
-yet. Dungeon is not an audited isolation product.
+**Development preview:** Rust 0.0.2 has no public binaries or npm packages.
+Published v0.0.1 is the older Python implementation. Dungeon is not an audited
+isolation product.
+
+**Sharing with a team?** Start with the
+[Linux pilot checklist](docs/adoption.md#team-pilot). Use a disposable checkout,
+rootless Podman, and one approved image digest. This is not a fleet rollout or
+an OpenShell containment sign-off.
 
 ## Overview
 
@@ -57,28 +62,40 @@ is refused; review it before explicitly using `--replace`. The PATH change above
 applies to this shell. For a trial without installation, use
 `cargo build --release --locked` and `export PATH="$PWD/target/release:$PATH"`.
 See [distribution and uninstall](docs/distribution.md).
+Pilot users can [install a verified prebuilt binary](docs/distribution.md#internal-linux-pilot)
+without installing Rust.
 
-### 2. Run interactive setup
+### 2. Launch from a project
 
 ```sh
-dungeon setup
-dungeon doctor
+cd /path/to/project
+dungeon            # OpenCode on a new project; your saved agent thereafter
+dungeon -a claude  # choose Claude Code instead (or use codex)
 ```
 
-Choose **plain containers** (the simplest start) or **OpenShell** (policy and
-remote-client features), then choose an image and approve the changes. Setup
-discovers the service, offers user Podman socket activation when needed, pulls
-images and saves defaults for new projects. Podman is preferred over Docker CE;
-Docker needs an already running daemon and appropriate access.
+On a new machine, `dungeon` proposes plain containers with the upstream image.
+Approve setup, then approve this project's access separately. No host agent
+installation or host configuration import is needed. Dungeon prefers Podman
+over Docker CE and can activate the user Podman socket after approval. Docker
+needs a running daemon and appropriate access. Plain containers do not enforce
+OpenShell policy.
+
+Run `dungeon setup` first if you want OpenShell, a different image or a specific
+engine. Setup only changes defaults for new projects.
 
 OpenShell requires its **0.0.116** CLI and rootless Podman already installed.
+Dungeon does not support OpenShell 0.1.x yet; a
+[native 0.1.7 test](docs/validation.md#reviewed-image-on-native-openshell-017-2026-11-18)
+is not adapter support.
 Setup pulls the compatible pinned gateway image and creates `dungeon-local`
 with mTLS on loopback port 17670. It never installs packages, uses sudo, changes
 permissions, overwrites conflicting state or restarts an existing gateway.
 `doctor` is read-only; `setup --dry-run` previews without changes and reports
 missing prerequisites. See the [adoption guide](docs/adoption.md#2-choose-the-runtime).
 
-For unattended setup, select explicitly and approve with `--yes`:
+Run `dungeon setup` explicitly to set or change defaults for new projects. It
+does not wipe existing guests or change existing project bindings. For unattended
+setup, select explicitly and approve with `--yes`:
 
 ```sh
 dungeon setup --yes --runtime container
@@ -115,16 +132,16 @@ From your project directory:
 
 ```sh
 cd /path/to/project
-dungeon               # first run: choose agent, review image/access, approve and launch
+dungeon               # set up if needed, review project access, then launch or resume
 dungeon exec -- node --version
 dungeon down           # keep guest login, sessions and files
 ```
 
-First run offers an optional reviewed copy of OpenCode configuration, **off by
-default**. One scope approval saves that exact snapshot and launches; no separate
-`init`, `reload` or `up` is required. Copies can expose credentials and execute
-plugins; native login/session databases are never shared. Later launches reuse
-the saved choices. No host agent installation is needed for guest CLI use.
+New projects launched this way do not import host configuration. To opt in
+before creating a guest, use `dungeon init --agent opencode --harness-config copy`
+or edit an uncreated binding. Copies can expose credentials and execute plugins; native
+login/session databases are never shared. Later launches reuse existing
+bindings even when no setup defaults exist.
 
 Use `dungeon init` to review/save without starting, `dungeon plan` to inspect, or
 `dungeon config --edit` to change an uncreated environment. The editor has guided
@@ -137,10 +154,10 @@ in validation has Node but no Cargo, Rust compiler or pnpm. For Rust tests, sele
 the [reviewed local image](images/agent/README.md) or your own toolchain image
 before creating the guest; Dungeon does not install missing tools automatically.
 
-Runtime selection uses saved setup defaults, otherwise plain containers, even if
-OpenShell is installed. Use `init --runtime container` or
-`init --runtime openshell` to be explicit. Existing bindings never switch runtime
-or service when a dependency disappears.
+Plain containers are the setup wizard's default, even if OpenShell is installed.
+Explicit `init` uses saved setup defaults or plain containers unless you pass
+`--runtime container` or `--runtime openshell`. Existing bindings never switch
+runtime or service when a dependency disappears.
 
 **Live files are the default:** the selected project is writable at
 `/sandbox/project`, and guest edits reach the host immediately. Review its contents
@@ -150,13 +167,18 @@ SELinux private-label conflicts.
 
 ### OpenCode and Claude Code
 
-Switch agents within the same environment without changing the saved default:
+Choose a different agent for an existing project without changing its saved
+default. On a new project, the first choice is saved.
 
 ```sh
-dungeon run opencode
-dungeon run claude
-dungeon run codex
+dungeon -a opencode
+dungeon -a claude
+dungeon -a codex
 ```
+
+Use `dungeon run AGENT -- ...` to pass native agent options or run headless.
+Interactive `dungeon run` uses the same first-launch approvals as `dungeon`.
+For headless use, initialize the binding explicitly first.
 
 Authenticate **inside the guest**. OpenCode uses its `/connect` flow. The reviewed
 Claude CLI supports an explicit browser login, followed by ordinary launch:
@@ -190,9 +212,13 @@ exit codes propagate. The first `--` belongs to Dungeon; subsequent separators
 are passed to the agent. Agents own session selection, including native resume
 flags. See [headless examples](docs/adoption.md#4-headless-use).
 
-**Known unresolved native failure:** new/edited JavaScript exits 137 on the tested
-Podman host, including without Dungeon. Edit/test acceptance is blocked there;
-see [current findings](docs/validation.md#headless-follow-up-2026-11-06-source-checkout).
+**Host drift prevention can interrupt edit/test workflows.** On one Fedora
+host, Falcon Container Drift prevention matched a synthetic script run that
+returned exit 137. A fresh create/edit/run check passed once after the host
+administrator changed that policy. That was a native OpenShell 0.1.7 check, not
+Dungeon support for 0.1.7. Exit 137 alone does not identify the cause. Dungeon
+does not change host protection settings or retry a failed workload to bypass
+them. See the [original Podman reproduction](docs/validation.md#headless-follow-up-2026-11-06-source-checkout).
 
 ### Commands to remember
 

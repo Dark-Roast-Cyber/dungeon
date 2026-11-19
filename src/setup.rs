@@ -370,8 +370,8 @@ fn private_read(
     Ok((bytes, m))
 }
 
-fn setup_environment(project: Option<&Path>) -> Result<HashMap<OsString, OsString>> {
-    let mut env = host_environment(project)?;
+fn setup_environment(excluded: &[&Path]) -> Result<HashMap<OsString, OsString>> {
+    let mut env = host_environment(None)?;
     env.retain(|k, _| {
         matches!(
             k.to_str(),
@@ -390,6 +390,13 @@ fn setup_environment(project: Option<&Path>) -> Result<HashMap<OsString, OsStrin
             )
         )
     });
+    let paths: Vec<_> = env::split_paths(env.get(&OsString::from("PATH")).unwrap())
+        .filter(|path| !excluded.iter().any(|root| path.starts_with(root)))
+        .collect();
+    env.insert(
+        "PATH".into(),
+        env::join_paths(paths).map_err(|_| Error::new("invalid setup PATH"))?,
+    );
     for key in [
         "HOME",
         "XDG_CONFIG_HOME",
@@ -399,7 +406,7 @@ fn setup_environment(project: Option<&Path>) -> Result<HashMap<OsString, OsStrin
     ] {
         if env
             .get(&OsString::from(key))
-            .is_some_and(|p| !safe_path(Path::new(p), &project.into_iter().collect::<Vec<_>>()))
+            .is_some_and(|p| !safe_path(Path::new(p), excluded))
         {
             return Err(Error::new(
                 "setup HOME/XDG paths must be normalized, symlink-free and outside the project",
@@ -412,14 +419,14 @@ fn setup_environment(project: Option<&Path>) -> Result<HashMap<OsString, OsStrin
 pub(super) fn executable(
     name: &str,
     env: &HashMap<OsString, OsString>,
-    project: Option<&Path>,
+    excluded: &[&Path],
 ) -> Result<PathBuf> {
     let path = find_executable(name, env.get(&OsString::from("PATH"))).ok_or_else(|| {
         Error::new(format!(
             "{name} not found outside the current directory; install {name} and add it to PATH"
         ))
     })?;
-    if project.is_some_and(|project| path.starts_with(project)) {
+    if excluded.iter().any(|root| path.starts_with(root)) {
         return Err(Error::new(format!(
             "refusing a project-owned {name} executable"
         )));
@@ -447,11 +454,7 @@ pub(super) fn valid_podman_version(text: &str) -> bool {
         })
 }
 
-fn prerequisites(
-    os: &str,
-    project: Option<&Path>,
-    env: HashMap<OsString, OsString>,
-) -> Result<Tools> {
+fn prerequisites(os: &str, excluded: &[&Path], env: HashMap<OsString, OsString>) -> Result<Tools> {
     require_linux(os)?;
     let uid = unsafe { libc::geteuid() };
     if uid == 0 {
@@ -459,8 +462,8 @@ fn prerequisites(
             "run dungeon setup as a non-root user, not with sudo",
         ));
     }
-    let openshell = executable("openshell", &env, project)?;
-    let podman = executable("podman", &env, project)?;
+    let openshell = executable("openshell", &env, excluded)?;
+    let podman = executable("podman", &env, excluded)?;
     let mut tools = Tools {
         openshell,
         podman,
@@ -477,10 +480,7 @@ fn prerequisites(
         .trim()
         .trim_start_matches("podman version ")
         .to_owned();
-    if !storage_ready(
-        &tools.env,
-        project.into_iter().collect::<Vec<_>>().as_slice(),
-    ) {
+    if !storage_ready(&tools.env, excluded) {
         return Err(Error::new(
             "established default rootless Podman storage required; missing/empty/custom storage is not queried or initialized. Prepare Podman and the pinned image explicitly",
         ));
@@ -977,11 +977,8 @@ pub(super) fn verify_import_gateway(
             "import gateway state must be outside the project",
         ));
     }
-    let tools = prerequisites(
-        env::consts::OS,
-        Some(&config.values.project),
-        setup_environment(Some(&config.values.project))?,
-    )?;
+    let excluded = [config.values.project.as_path()];
+    let tools = prerequisites(env::consts::OS, &excluded, setup_environment(&excluded)?)?;
     if !exists(&tools, "container", CONTAINER)? {
         return Err(Error::new(
             "existing exact bind-enabled local gateway required; imports never invoke setup",
@@ -1001,13 +998,13 @@ pub(super) fn verify_import_gateway(
     Ok(())
 }
 
-pub(crate) fn run(enable_live: bool, dry_run: bool) -> Result<i32> {
+pub(crate) fn run(project: &Path, enable_live: bool, dry_run: bool) -> Result<i32> {
     let cwd = env::current_dir()?.canonicalize()?;
     let home = env::var_os("HOME")
         .ok_or_else(|| Error::new("HOME required for local OpenShell gateway"))?;
     let home_path = PathBuf::from(&home).canonicalize()?;
-    let project = (cwd != home_path).then_some(cwd.as_path());
-    let tools = prerequisites(env::consts::OS, project, setup_environment(project)?)?;
+    let excluded = setup_exclusions(project, &cwd, &home_path);
+    let tools = prerequisites(env::consts::OS, &excluded, setup_environment(&excluded)?)?;
     let state_root = env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(&home).join(".local/state"));
@@ -1016,10 +1013,12 @@ pub(crate) fn run(enable_live: bool, dry_run: bool) -> Result<i32> {
         .unwrap_or_else(|| PathBuf::from(&home).join(".config"));
     if !state_root.is_absolute()
         || !config_root.is_absolute()
-        || (cwd != home_path && (state_root.starts_with(&cwd) || config_root.starts_with(&cwd)))
+        || excluded
+            .iter()
+            .any(|root| state_root.starts_with(root) || config_root.starts_with(root))
     {
         return Err(Error::new(
-            "setup state and OpenShell config must be absolute paths outside the current project",
+            "setup state and OpenShell config must be absolute paths outside project directories",
         ));
     }
     let state = state_root.join("dungeon/local-setup");
@@ -1035,12 +1034,19 @@ pub(crate) fn run(enable_live: bool, dry_run: bool) -> Result<i32> {
     )
 }
 
-pub(crate) fn prepare(image: &str, dry_run: bool) -> Result<()> {
+fn setup_exclusions<'a>(project: &'a Path, cwd: &'a Path, home: &Path) -> Vec<&'a Path> {
+    [project, cwd]
+        .into_iter()
+        .filter(|root| *root != home)
+        .collect()
+}
+
+pub(crate) fn prepare(image: &str, project: &Path, dry_run: bool) -> Result<()> {
     let cwd = env::current_dir()?.canonicalize()?;
     let home = env::var_os("HOME").ok_or_else(|| Error::new("HOME required"))?;
-    let project = (cwd != PathBuf::from(home).canonicalize()?).then_some(cwd.as_path());
-    let env = setup_environment(project)?;
-    let openshell = executable("openshell", &env, project)?;
+    let excluded = setup_exclusions(project, &cwd, &PathBuf::from(home).canonicalize()?);
+    let env = setup_environment(&excluded)?;
+    let openshell = executable("openshell", &env, &excluded)?;
     let version = query(&openshell, &env, &["--version"], Duration::from_secs(5))
         .filter(|reply| reply.code == 0)
         .ok_or_else(|| Error::new("OpenShell version check failed"))?;
@@ -1050,10 +1056,11 @@ pub(crate) fn prepare(image: &str, dry_run: bool) -> Result<()> {
             engine: crate::config::Engine::Podman,
             endpoint: None,
         },
+        project,
         dry_run,
     )?;
-    crate::container::prepare_image(&options, IMAGE, dry_run)?;
-    crate::container::prepare_image(&options, image, dry_run)
+    crate::container::prepare_image(&options, IMAGE, project, dry_run)?;
+    crate::container::prepare_image(&options, image, project, dry_run)
 }
 
 fn present(path: &Path) -> Result<bool> {
@@ -1933,13 +1940,13 @@ esac
             temp.path().as_os_str().to_os_string(),
         )]);
         assert!(
-            executable("openshell", &env, Some(temp.path()))
+            executable("openshell", &env, &[temp.path()])
                 .unwrap_err()
                 .to_string()
                 .contains("not found")
         );
         assert!(
-            executable("podman", &env, Some(temp.path()))
+            executable("podman", &env, &[temp.path()])
                 .unwrap_err()
                 .to_string()
                 .contains("not found")

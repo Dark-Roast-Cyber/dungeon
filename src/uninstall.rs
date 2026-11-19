@@ -610,7 +610,8 @@ pub(crate) fn run(bin_dir: Option<PathBuf>, dry_run: bool, yes: bool) -> Result<
         }
         crate::container::removal_inventory(&plain)?.verify_empty()?;
     }
-    let tools = prerequisites(env::consts::OS, project, setup_environment(project)?)?;
+    let excluded: Vec<_> = project.into_iter().collect();
+    let tools = prerequisites(env::consts::OS, &excluded, setup_environment(&excluded)?)?;
     let plan = plan(&tools, config, state, binary)?;
     println!(
         "{}",

@@ -99,9 +99,9 @@ pub(crate) fn preferences(project: Option<&std::path::Path>) -> Result<Preferenc
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn save_preferences(value: &Preferences) -> Result<()> {
+pub(crate) fn save_preferences(value: &Preferences, project: &std::path::Path) -> Result<()> {
     let path = crate::binding::preferences_path()?;
-    let previous = preferences(None)?;
+    let previous = preferences(Some(project))?;
     if serde_json::to_value(&previous)? == serde_json::to_value(value)? {
         return Ok(());
     }

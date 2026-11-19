@@ -89,8 +89,12 @@ independently useful contract: plain containers do not require OpenShell.
 
 ### Plain-container selection and lifetime
 
-New human bindings use saved setup defaults, otherwise plain containers, unless
-explicitly selected with `--runtime` or OpenShell-only options. Existing schema-2 configs
+Both `dungeon` and interactive `dungeon run` offer plain-container setup when no
+defaults have been saved. They use OpenCode unless another agent is selected, and do
+not opt in to host configuration imports. For existing bindings, `--agent`
+overrides only the invocation; it does not change the binding or mount scope.
+Explicit initialization uses saved defaults or plain containers unless selected
+with `--runtime` or OpenShell-only options. Existing schema-2 configs
 without `container` remain OpenShell with unchanged serialization/fingerprints.
 `container` holds the requested engine and optional local Unix endpoint. First
 creation discovers usable services (Podman first), then records engine, endpoint,
@@ -143,9 +147,14 @@ For supported combinations, Dungeon may:
 - provide exact remediation guidance;
 - expose the same diagnostics in machine-readable form.
 
-The human setup wizard reviews the selected runtime/image and requires confirmation
+Human setup reviews the selected runtime/image and requires confirmation
 or `--yes` before activating the user Podman socket, pulling images, creating the
-gateway or replacing saved new-project defaults. Missing dependencies still need
+gateway or replacing saved new-project defaults. A terminal launch reuses
+setup only for an unbound project without saved setup defaults; setup approval
+does not approve the project or its imports. Setup excludes project and launch
+directories from native tool lookup (except the home directory as invocation
+directory). Explicit configuration, existing bindings and automation do not enter
+implicit setup. Missing dependencies still need
 manual installation; no sudo, permission changes or arbitrary host scripts are
 added. The OpenShell CLI/gateway compatibility pin remains separate from the
 mutable agent image. `--dry-run` and doctor remain read-only. Dungeon must not

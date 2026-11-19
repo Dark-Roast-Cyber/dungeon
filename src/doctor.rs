@@ -356,10 +356,7 @@ mod linux {
     }
 
     fn tools(name: &str, env: &HashMap<OsString, OsString>, excluded: &[&Path]) -> Option<Queries> {
-        let binary = setup::executable(name, env, excluded.first().copied()).ok()?;
-        if excluded.iter().any(|p| binary.starts_with(p)) {
-            return None;
-        }
+        let binary = setup::executable(name, env, excluded).ok()?;
         Some(Queries {
             binary,
             env: env.clone(),

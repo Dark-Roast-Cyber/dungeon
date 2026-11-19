@@ -18,6 +18,8 @@ use std::process::Command;
 
 const REVIEWED_IMAGE: &str = "localhost/dungeon-agent:0.0.3-opencode-2.2.7";
 const OPENCODE_TAGS: &str = "https://registry.npmjs.org/-/package/@opencode%2Fcli/dist-tags";
+const DIRECT_AGENT_ONLY: &str =
+    "--agent is only for direct launch; use `dungeon -a AGENT` or `dungeon run AGENT -- ...`";
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 #[value(rename_all = "lower")]
@@ -56,7 +58,7 @@ struct EditOptions {
     name = "dungeon",
     version,
     about = "Manage project containers and optional OpenShell environments",
-    after_help = "Quick start:\n  dungeon setup               Choose a runtime/image once per machine\n  dungeon                     First run: review, approve and launch; later runs resume\n  dungeon exec -- node --version  Run an image-provided tool\n  dungeon down                Stop, preserving guest state\n\nConfiguration:\n  dungeon init                Review/save only, without starting a guest\n  dungeon config --edit        Review changes before first guest creation\n  dungeon config --path        Find the private configuration\n  dungeon run -- --help        Pass native flags to the selected harness\n\nHarnesses: OpenCode, Claude Code or Codex; no assumed choice.\nUse dungeon COMMAND --help for advanced options.\nAutomation: dungeon setup --yes --runtime container; dungeon init --yes --agent AGENT; dungeon machine --help",
+    after_help = "Quick start:\n  dungeon                   Launch the saved agent (OpenCode for a new project)\n  dungeon -a claude         Use Claude Code; override only this launch on an existing project\n  dungeon down              Stop, preserving guest state\n\nFirst launch guides you through setup if needed and asks you to approve project access.\n\nConfiguration:\n  dungeon setup             Change defaults for new projects; never wipes guests\n  dungeon init              Review/save only, without starting a guest\n  dungeon config --edit     Review changes before first guest creation\n  dungeon config --path     Find the private configuration\n  dungeon run -- --help     Pass native flags to the selected agent\n  dungeon exec -- node --version  Run an image-provided tool\n\nUse dungeon COMMAND --help for advanced options.\nAutomation: dungeon setup --yes --runtime container; dungeon init --yes --agent AGENT; dungeon machine --help",
     subcommand_precedence_over_arg = true
 )]
 struct Cli {
@@ -66,6 +68,9 @@ struct Cli {
         help = "explicit private dungeon.json; no project discovery"
     )]
     config: Option<PathBuf>,
+    /// Agent for direct launch. On a new project, save it as the project default.
+    #[arg(short, long, value_enum)]
+    agent: Option<Agent>,
     #[arg(
         value_name = "PROJECT",
         help = "project directory for direct launch; defaults to the current directory"
@@ -278,6 +283,9 @@ enum Commands {
     },
     /// Run an agent (default: configured agent); resume a stopped sandbox without uploading.
     Run {
+        // Reject launcher flags before the native argument tail; after `--` they are workload data.
+        #[arg(short = 'a', long = "agent", hide = true)]
+        misplaced_agent: Option<String>,
         #[arg(
             value_name = "AGENT_OR_ARG",
             trailing_var_arg = true,
@@ -343,9 +351,13 @@ fn human_command() -> clap::Command {
 fn dispatch(cli: Cli) -> Result<i32> {
     let Cli {
         config,
+        agent,
         project,
         command,
     } = cli;
+    if agent.is_some() && command.is_some() {
+        return Err(Error::new(DIRECT_AGENT_ONLY));
+    }
 
     match command {
         Some(Commands::Uninstall {
@@ -411,6 +423,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
                 ));
             }
             setup(
+                &env::current_dir()?.canonicalize()?,
                 runtime,
                 engine,
                 endpoint,
@@ -478,7 +491,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     "run config from the project directory or use --config",
                 ));
             }
-            let config = resolve_environment(config, None, false, None)?;
+            let config = resolve_environment(config, None, BindingRequest::Existing)?;
             if edit {
                 return edit_environment(&config, options);
             }
@@ -504,13 +517,20 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     "PROJECT is only accepted for direct launch; run plan from that directory or use --config",
                 ));
             }
-            let config = resolve_environment(config, None, false, None)?;
+            let config = resolve_environment(config, None, BindingRequest::Existing)?;
             print_plan(&config)
         }
         None => {
             require_launch_terminal()?;
-            let config = resolve_environment(config, project.as_deref(), true, None)?;
-            run_command(&config, Commands::Run { arguments: vec![] })
+            let config =
+                resolve_environment(config, project.as_deref(), BindingRequest::Launch(agent))?;
+            run_command(
+                &config,
+                Commands::Run {
+                    misplaced_agent: None,
+                    arguments: agent.map(|a| a.as_str().to_owned()).into_iter().collect(),
+                },
+            )
         }
         Some(command) => {
             if project.is_some() {
@@ -518,26 +538,36 @@ fn dispatch(cli: Cli) -> Result<i32> {
                     "PROJECT is only accepted for direct launch; run the subcommand from that directory or use --config",
                 ));
             }
-            let create_binding = matches!(
-                &command,
-                Commands::Create | Commands::Up | Commands::Run { .. } | Commands::Attach
-            );
-            let first_agent = match &command {
-                Commands::Run { arguments } => run_selection(arguments)?.0,
-                Commands::Attach => Some(Agent::Opencode),
-                _ => None,
+            let request = match &command {
+                Commands::Run {
+                    misplaced_agent,
+                    arguments,
+                } => {
+                    if misplaced_agent.is_some() {
+                        return Err(Error::new(DIRECT_AGENT_ONLY));
+                    }
+                    BindingRequest::Launch(run_selection(arguments)?.0)
+                }
+                Commands::Attach => BindingRequest::Create(Some(Agent::Opencode)),
+                Commands::Create | Commands::Up => BindingRequest::Create(None),
+                _ => BindingRequest::Existing,
             };
-            let config = resolve_environment(config, None, create_binding, first_agent)?;
+            let config = resolve_environment(config, None, request)?;
             run_command(&config, command)
         }
     }
 }
 
+enum BindingRequest {
+    Existing,
+    Create(Option<Agent>),
+    Launch(Option<Agent>),
+}
+
 fn resolve_environment(
     explicit: Option<PathBuf>,
     project: Option<&Path>,
-    create_if_missing: bool,
-    first_agent: Option<Agent>,
+    request: BindingRequest,
 ) -> Result<Config> {
     if let Some(path) = explicit {
         if project.is_some() {
@@ -552,13 +582,40 @@ fn resolve_environment(
     if let Some(config) = binding::load(&project)? {
         return Ok(config);
     }
-    if !create_if_missing {
-        return Err(Error::new(format!(
+    match request {
+        BindingRequest::Existing => Err(Error::new(format!(
             "no private Dungeon environment is bound to {}; run `dungeon init` from that project first (or `dungeon init --yes --agent opencode|claude|codex` for automation)",
             project.display()
-        )));
+        ))),
+        BindingRequest::Create(agent) => {
+            create_project_binding(&project, select_agent(agent)?, true)
+        }
+        BindingRequest::Launch(agent) => {
+            require_configuration_terminal(false)?;
+            let preferences = crate::runtime::preferences(Some(&project))?;
+            if preferences.runtime.is_none() {
+                println!(
+                    "First launch uses plain containers. To choose OpenShell or a different image, cancel and run `dungeon setup`."
+                );
+                setup(
+                    &project,
+                    RuntimeChoice::Container,
+                    Engine::Auto,
+                    None,
+                    Some(
+                        preferences
+                            .image
+                            .unwrap_or_else(|| crate::runtime::DEFAULT_IMAGE.into()),
+                    ),
+                    false,
+                    false,
+                    false,
+                    false,
+                )?;
+            }
+            create_project_binding(&project, agent.unwrap_or(Agent::Opencode), false)
+        }
     }
-    create_project_binding(&project, select_agent(first_agent)?)
 }
 
 fn select_agent(agent: Option<Agent>) -> Result<Agent> {
@@ -593,6 +650,7 @@ fn select_agent(agent: Option<Agent>) -> Result<Agent> {
 
 #[allow(clippy::too_many_arguments)]
 fn setup(
+    project: &Path,
     mut runtime: RuntimeChoice,
     engine: Engine,
     endpoint: Option<String>,
@@ -608,7 +666,7 @@ fn setup(
             "setup requires a terminal or explicit --yes; use --dry-run for a read-only preview",
         ));
     }
-    let preferences = crate::runtime::preferences(None)?;
+    let preferences = crate::runtime::preferences(Some(project))?;
     if runtime == RuntimeChoice::Auto {
         if enable_live || copy_only {
             runtime = RuntimeChoice::Openshell;
@@ -641,14 +699,13 @@ fn setup(
             }
         }
     }
-    let project = env::current_dir()?.canonicalize()?;
     let plain = crate::runtime::choose(
         if runtime == RuntimeChoice::Auto {
             preferences.runtime_choice()
         } else {
             runtime
         },
-        &project,
+        project,
     )?;
     if plain && (enable_live || copy_only) {
         return Err(Error::new(
@@ -723,32 +780,33 @@ fn setup(
     #[cfg(target_os = "linux")]
     {
         let container = if plain {
-            let options = crate::container::prepare_service(&options, dry_run)?;
-            crate::container::prepare_image(&options, &image, dry_run)?;
+            let options = crate::container::prepare_service(&options, project, dry_run)?;
+            crate::container::prepare_image(&options, &image, project, dry_run)?;
             Some(options)
         } else {
             if dry_run {
-                crate::openshell::setup(enable_live || !copy_only, true)?;
-                crate::openshell::local_setup::prepare(&image, true)?;
+                crate::openshell::setup(project, enable_live || !copy_only, true)?;
+                crate::openshell::local_setup::prepare(&image, project, true)?;
             } else {
-                crate::openshell::local_setup::prepare(&image, false)?;
-                crate::openshell::setup(enable_live || !copy_only, false)?;
+                crate::openshell::local_setup::prepare(&image, project, false)?;
+                crate::openshell::setup(project, enable_live || !copy_only, false)?;
             }
             None
         };
         if !dry_run {
-            crate::runtime::save_preferences(&crate::runtime::Preferences {
-                runtime: Some(if plain {
-                    RuntimeChoice::Container
-                } else {
-                    RuntimeChoice::Openshell
-                }),
-                container,
-                image: Some(image),
-            })?;
-            println!(
-                "Setup complete. Existing project bindings are unchanged. Next: cd /path/to/project && dungeon init"
-            );
+            crate::runtime::save_preferences(
+                &crate::runtime::Preferences {
+                    runtime: Some(if plain {
+                        RuntimeChoice::Container
+                    } else {
+                        RuntimeChoice::Openshell
+                    }),
+                    container,
+                    image: Some(image),
+                },
+                project,
+            )?;
+            println!("Setup complete. Existing project bindings are unchanged.");
         }
         Ok(0)
     }
@@ -799,21 +857,23 @@ fn run_selection(arguments: &[String]) -> Result<(Option<Agent>, &[String])> {
     Ok((Some(agent), native))
 }
 
-fn create_project_binding(project: &Path, agent: Agent) -> Result<Config> {
+fn create_project_binding(project: &Path, agent: Agent, customize: bool) -> Result<Config> {
     let path = binding::config_path(project)?;
     let directory = path.parent().expect("binding config parent").to_path_buf();
     let mut values = environment_defaults(project.to_path_buf(), agent)?;
     require_configuration_terminal(false)?;
-    choose_environment(&mut values, true, true)?;
-    values.harness = crate::imports::harness::defaults(
-        agent,
-        choose_copy(agent)?,
-        false,
-        vec![],
-        project,
-        &path,
-    )?;
-    save_environment(directory, values, false)
+    choose_environment(&mut values, customize, true)?;
+    if customize {
+        values.harness = crate::imports::harness::defaults(
+            agent,
+            choose_copy(agent)?,
+            false,
+            vec![],
+            project,
+            &path,
+        )?;
+    }
+    save_environment(directory, values, false, !customize)
 }
 
 fn require_configuration_terminal(yes: bool) -> Result<()> {
@@ -992,9 +1052,17 @@ fn edit_environment(config: &Config, mut options: EditOptions) -> Result<i32> {
     Ok(0)
 }
 
-fn save_environment(directory: PathBuf, values: ConfigDoc, yes: bool) -> Result<Config> {
+fn save_environment(
+    directory: PathBuf,
+    values: ConfigDoc,
+    yes: bool,
+    reuse_matching: bool,
+) -> Result<Config> {
     require_configuration_terminal(yes)?;
-    let directory = new_environment_directory(directory)?;
+    let directory = resolve_environment_directory(directory)?;
+    if !reuse_matching && directory.exists() {
+        return Err(existing_directory());
+    }
     let candidate = load_config_data(
         directory.join("dungeon.json"),
         serde_json::to_value(&values)?,
@@ -1002,7 +1070,20 @@ fn save_environment(directory: PathBuf, values: ConfigDoc, yes: bool) -> Result<
     )?;
     let mut prepared = crate::imports::harness::prepare(candidate, true)?;
     approve_environment(&prepared.config, yes)?;
-    let config = write_environment(directory, prepared.config.values.clone())?;
+    if !write_environment_files(&prepared.config)? {
+        if reuse_matching && let Some(winner) = binding::load(&prepared.config.values.project)? {
+            if winner.path == prepared.config.path
+                && winner.fingerprint == prepared.config.fingerprint
+            {
+                return Ok(winner);
+            }
+            return Err(Error::new(
+                "another launch saved a different configuration; review it with `dungeon config` before launching again",
+            ));
+        }
+        return Err(existing_directory());
+    }
+    let config = load_config(&prepared.config.path)?;
     let _admission = if config
         .values
         .harness
@@ -1261,18 +1342,16 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
             );
             runtime.execute(&["claude".into()], true, "/sandbox")
         }
-        Commands::Run { arguments } => {
+        Commands::Run { arguments, .. } => {
             let (agent, arguments) = run_selection(&arguments)?;
             let selected = agent.unwrap_or(config.values.agent);
-            if !config.state_path().exists() {
+            let tty = io::stdin().is_terminal() && io::stdout().is_terminal();
+            if !tty && !config.state_path().exists() {
                 runtime.up()?;
             }
             let mut command = vec![selected.as_str().to_owned()];
             command.extend_from_slice(arguments);
-            runtime.run_agent(
-                &command,
-                io::stdin().is_terminal() && io::stdout().is_terminal(),
-            )
+            runtime.run_agent(&command, tty)
         }
         Commands::Exec {
             tty,
@@ -1567,7 +1646,7 @@ fn initialize(
         &values.project,
         &directory.join("dungeon.json"),
     )?;
-    let config = save_environment(directory, values, yes)?;
+    let config = save_environment(directory, values, yes, false)?;
 
     writeln!(
         io::stdout(),
@@ -1674,31 +1753,81 @@ fn approve_environment(config: &Config, yes: bool) -> Result<()> {
 }
 
 pub(crate) fn write_environment(directory: PathBuf, values: ConfigDoc) -> Result<Config> {
-    let directory = new_environment_directory(directory)?;
-    let policy = starter_policy();
-    load_config_data(
+    let directory = resolve_environment_directory(directory)?;
+    let config = load_config_data(
         directory.join("dungeon.json"),
         serde_json::to_value(&values)?,
-        |path| Ok((path.to_path_buf(), policy.clone())),
+        |path| Ok((path.to_path_buf(), starter_policy())),
     )?;
-    create_private_dir(&directory)?;
-    write_new(&directory.join("policy.json"), &policy)?;
-    write_new(&directory.join("dungeon.json"), &values)?;
-    load_config(&directory.join("dungeon.json"))
+    if !write_environment_files(&config)? {
+        return Err(existing_directory());
+    }
+    load_config(&config.path)
 }
 
-fn new_environment_directory(directory: PathBuf) -> Result<PathBuf> {
+fn existing_directory() -> Error {
+    Error::new("use a new configuration directory; existing directories are never overwritten")
+}
+
+fn write_environment_files(config: &Config) -> Result<bool> {
+    let directory = config.path.parent().expect("binding parent");
+    let parent = directory.parent().ok_or_else(existing_directory)?;
+    if std::fs::symlink_metadata(directory).is_ok() {
+        return Ok(false);
+    }
+    create_private_dir(parent)?;
+    #[cfg(target_os = "linux")]
+    {
+        use std::ffi::CString;
+        use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt};
+        let staging = tempfile::Builder::new()
+            .prefix(".dungeon-pending-")
+            .permissions(std::fs::Permissions::from_mode(0o700))
+            .tempdir_in(parent)?;
+        write_new(&staging.path().join("policy.json"), &config.policy)?;
+        write_new(&staging.path().join("dungeon.json"), &config.values)?;
+        std::fs::File::open(staging.path())?.sync_all()?;
+        let source =
+            CString::new(staging.path().as_os_str().as_bytes()).map_err(io::Error::from)?;
+        let target = CString::new(directory.as_os_str().as_bytes()).map_err(io::Error::from)?;
+        // Publish policy and config together without replacing even an empty destination.
+        if unsafe {
+            libc::renameat2(
+                libc::AT_FDCWD,
+                source.as_ptr(),
+                libc::AT_FDCWD,
+                target.as_ptr(),
+                libc::RENAME_NOREPLACE,
+            )
+        } != 0
+        {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                return Ok(false);
+            }
+            return Err(error.into());
+        }
+        let _ = staging.keep();
+        std::fs::File::open(parent)?.sync_all()?;
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        create_private_dir(directory)?;
+        write_new(&config.policy_path, &config.policy)?;
+        write_new(&config.path, &config.values)?;
+    }
+    Ok(true)
+}
+
+fn resolve_environment_directory(directory: PathBuf) -> Result<PathBuf> {
     let directory = if directory.is_absolute() {
         directory
     } else {
         env::current_dir()?.join(directory)
     };
-    if directory.exists() {
-        return Err(Error::new(
-            "use a new configuration directory; existing directories are never overwritten",
-        ));
-    }
     let ancestor = directory
+        .parent()
+        .ok_or_else(existing_directory)?
         .ancestors()
         .find(|path| path.exists())
         .ok_or_else(|| Error::new("configuration directory has no existing ancestor"))?;
@@ -1779,12 +1908,12 @@ mod tests {
     #[test]
     fn run_selects_only_known_harnesses_and_forwards_native_flags() {
         let parsed = Cli::try_parse_from(["dungeon", "run", "claude"]).unwrap();
-        let Some(Commands::Run { arguments }) = parsed.command else {
+        let Some(Commands::Run { arguments, .. }) = parsed.command else {
             panic!()
         };
         assert_eq!(run_selection(&arguments).unwrap().0, Some(Agent::Claude));
         let parsed = Cli::try_parse_from(["dungeon", "run", "codex"]).unwrap();
-        let Some(Commands::Run { arguments }) = parsed.command else {
+        let Some(Commands::Run { arguments, .. }) = parsed.command else {
             panic!()
         };
         assert_eq!(run_selection(&arguments).unwrap().0, Some(Agent::Codex));
@@ -1828,7 +1957,7 @@ mod tests {
                 let mut argv = vec!["dungeon", "run", agent];
                 argv.extend(input);
                 let parsed = Cli::try_parse_from(argv).unwrap();
-                let Some(Commands::Run { arguments }) = parsed.command else {
+                let Some(Commands::Run { arguments, .. }) = parsed.command else {
                     panic!()
                 };
                 let (selected, native) = run_selection(&arguments).unwrap();
@@ -1868,14 +1997,18 @@ mod tests {
         )
         .unwrap();
 
-        let resolved = resolve_environment(Some(path.clone()), None, false, None).unwrap();
+        let resolved =
+            resolve_environment(Some(path.clone()), None, BindingRequest::Existing).unwrap();
         assert_eq!(resolved.path, path);
         assert_eq!(resolved.values.project, project);
 
-        let error =
-            resolve_environment(Some(resolved.path.clone()), Some(root.path()), false, None)
-                .unwrap_err()
-                .to_string();
+        let error = resolve_environment(
+            Some(resolved.path.clone()),
+            Some(root.path()),
+            BindingRequest::Existing,
+        )
+        .unwrap_err()
+        .to_string();
         assert!(
             error.contains("explicit config is authoritative"),
             "{error}"

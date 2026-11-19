@@ -269,8 +269,13 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn up(&self) -> Result<i32> {
+        self.up_for_startup(false)
+    }
+
+    fn up_for_startup(&self, interactive_launch: bool) -> Result<i32> {
         crate::imports::verify(self.config)?;
-        let mut transfer = export::TransferGuard::environment(self.config)?;
+        let mut transfer =
+            export::TransferGuard::environment_for_startup(self.config, interactive_launch)?;
         if !self.config.state_path().exists() {
             let _imports = crate::imports::creation_lock(self.config)?;
             let copy = self.config.values.project_transfer == ProjectTransfer::Copy;
@@ -303,6 +308,7 @@ impl<'a> Runtime<'a> {
         } else {
             self.work_ready()?;
             match Self::phase(&self.checked(false, true)?)? {
+                Phase::Ready if interactive_launch => {}
                 Phase::Ready => match self.config.values.project_transfer {
                     ProjectTransfer::Copy => self.output.message(format_args!(
                         "Environment already up; guest project unchanged."
@@ -323,9 +329,13 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn run_agent(&self, command: &[String], tty: bool) -> Result<i32> {
-        self.work_ready()?;
-        if Self::phase(&self.checked(false, true)?)? == Phase::Stopped {
-            self.start()?;
+        if tty {
+            self.up_for_startup(true)?;
+        } else {
+            self.work_ready()?;
+            if Self::phase(&self.checked(false, true)?)? == Phase::Stopped {
+                self.start()?;
+            }
         }
         self.execute(command, tty, GUEST_PROJECT)
     }

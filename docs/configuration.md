@@ -482,10 +482,11 @@ Review `plan` before `up`. `runtime.json` is Dungeon-owned identity bookkeeping 
 
 ## Private project binding
 
-Direct launch accepts an optional project path:
+Direct launch accepts an optional project path and agent:
 
 ```sh
 dungeon
+dungeon -a codex
 dungeon ../other-project
 ```
 
@@ -494,23 +495,27 @@ rejects filesystem root/home scope, derives a stable private project key, and
 resolves only the matching Dungeon-owned config directory. It does not scan the
 repository or other config directories.
 
-If no private binding exists, direct launch, `run`, `attach`, `up`, or `create`
-may initialize one only in an interactive terminal. An explicit `run AGENT`
-supplies the harness choice; `attach` supplies OpenCode. Otherwise Dungeon asks.
-Before writing files,
-Dungeon shows the canonical project, private config path, transfer mode,
-gateway, image, and default agent and requires one confirmation. Use `init`
-first to customize those defaults, or `init --yes --agent AGENT` for explicit noninteractive
-configuration writing. `plan` and `config` never create a binding. The generated
-binding starts in reviewed `live` mode; choose `--project-transfer copy` for
-upload/export. Existing bindings and machine initialization keep their contracts.
+If no private binding exists, `dungeon` and interactive `dungeon run` use
+OpenCode unless you choose another agent. Both ask for project scope approval
+before saving that choice.
+If no runtime defaults exist either, it first asks you to approve plain-container
+setup. Direct launch does not enable host configuration imports. Use `setup` to choose
+runtime defaults, `init` to customize a project before launch, or
+`init --yes --agent AGENT` for noninteractive configuration. `plan` and `config`
+never create a binding. Project transfer defaults to `live`; with OpenShell,
+choose `--project-transfer copy` for upload/export.
 
-Bare `dungeon` is interactive-only for all three harnesses. It launches the same
-guest CLI as `dungeon run`, creating/resuming as needed; no host harness client
-is required. `dungeon run -- --help` passes native flags to the configured
-harness; `dungeon run codex --version` overrides the harness for this invocation
-without changing an existing binding's default. Use explicit `run` for
-noninteractive work. Host OpenCode attachment is only `dungeon attach`.
+Direct launch requires a terminal. On an existing binding, `-a` overrides only
+the agent for this invocation. Use `run` to pass native options
+(`dungeon run -- --help`) or launch an already configured project without a
+terminal. Neither form needs a host agent installation. If `attach`, `up`, or
+`create` initializes a binding, it still requires interactive project approval.
+Host OpenCode attachment is only `dungeon attach`.
+
+On Linux, if another launch saves the same configuration during project review,
+Dungeon reuses it. If it differs, inspect it with `dungeon config` and launch
+again. Interactive launches wait up to 15 seconds for a concurrent environment
+operation before asking you to retry; they do not repeat a native request.
 
 Omitting the harness name accepts leading native flags only. For a native
 subcommand or positional argument, name the harness, for example

@@ -61,6 +61,16 @@ impl TransferGuard {
 
     #[cfg(unix)]
     pub(crate) fn environment(config: &Config) -> Result<Self> {
+        Self::environment_for_startup(config, false)
+    }
+
+    #[cfg(not(unix))]
+    pub(crate) fn environment_for_startup(config: &Config, _: bool) -> Result<Self> {
+        Self::environment(config)
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn environment_for_startup(config: &Config, wait: bool) -> Result<Self> {
         use private::*;
         let parent = directory(config.path.parent().expect("config parent"), false)?;
         let mut guard = Self {
@@ -69,7 +79,7 @@ impl TransferGuard {
         };
         guard
             .locks
-            .push(lock(&guard._directories[0], "transfer.lock")?);
+            .push(lock(&guard._directories[0], "transfer.lock", wait)?);
         guard.verify_environment(config)?;
         Ok(guard)
     }
@@ -122,7 +132,7 @@ impl TransferGuard {
         let authority = directory(project_lock.parent().unwrap().parent().unwrap(), true)?;
         let root = directory(project_lock.parent().expect("lock parent"), true)?;
         self.locks
-            .push(lock(&root, project_lock.file_name().unwrap())?);
+            .push(lock(&root, project_lock.file_name().unwrap(), false)?);
         let current = directory(project_lock.parent().unwrap(), false)?;
         use std::os::unix::fs::MetadataExt;
         let a = current.metadata()?;
@@ -274,16 +284,35 @@ mod private {
         Ok(dir)
     }
 
-    pub(super) fn lock(dir: &File, name: impl AsRef<OsStr>) -> Result<File> {
+    pub(super) fn lock(dir: &File, name: impl AsRef<OsStr>, wait: bool) -> Result<File> {
+        use std::fs::TryLockError;
+        use std::time::{Duration, Instant};
         let file = open(dir, name, libc::O_RDWR | libc::O_CREAT, 0o600)?;
         metadata(&file, false)?;
-        file.try_lock().map_err(|_| {
-            Error::refusal(
-                crate::ErrorCode::Busy,
-                "another environment operation owns the transfer lock; retry explicitly",
-            )
-        })?;
-        Ok(file)
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut reported = false;
+        loop {
+            match file.try_lock() {
+                Ok(()) => return Ok(file),
+                Err(TryLockError::WouldBlock) if wait && Instant::now() < deadline => {
+                    if !reported {
+                        let _ = writeln!(
+                            io::stderr(),
+                            "Waiting for the current environment operation to finish..."
+                        );
+                        reported = true;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(TryLockError::WouldBlock) => {
+                    return Err(Error::refusal(
+                        crate::ErrorCode::Busy,
+                        "another environment operation owns the transfer lock; retry explicitly",
+                    ));
+                }
+                Err(TryLockError::Error(error)) => return Err(error.into()),
+            }
+        }
     }
 
     pub(super) fn bytes(dir: &File, name: impl AsRef<OsStr>, limit: u64) -> Result<Vec<u8>> {

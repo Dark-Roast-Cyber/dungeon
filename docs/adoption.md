@@ -1,10 +1,75 @@
 # Dungeon adoption cheat sheet (source preview)
 
-Dungeon 0.0.2 is **source-only**. Do not use the published v0.0.1 Python package
-or unpublished npm commands for this Rust workflow. The supported local path is
+Dungeon 0.0.2 has **no public binary release**. Do not use the published v0.0.1
+Python package or unpublished npm commands for this Rust workflow. The supported
+local path is
 Linux with rootless Podman or standard Docker CE, and Rust **1.98.1** for building.
 OpenShell **0.0.116** is optional for policy enforcement, copy/export, SSH and
 forwarding. This is an engineering preview, not containment certification.
+
+## Team pilot
+
+**Start with a few named users on managed Linux x86-64 with rootless Podman.**
+Use a disposable account or checkout with no customer data, credentials, or
+production access. Plain containers give the guest write access to that
+checkout and normal outbound networking. Do not use this pilot when enforced
+egress restrictions or audited isolation are required.
+
+Have one pilot owner supply a [verified prebuilt binary](distribution.md#internal-linux-pilot),
+an approved `registry/image@sha256:...` reference, and a private support channel.
+Use one checkout per participant; don't share a project directory between live
+containers on SELinux. Do not disable SELinux, endpoint protection, or an agent's
+own sandbox to get a pass.
+
+### No-login smoke check
+
+Run this in a disposable checkout after installing the binary. Set
+`PILOT_IMAGE` to the approved digest reference from the pilot owner. The setup
+command may start the user Podman socket, pull the image, and save defaults for
+**new** projects. Review it before approving; it does not change existing
+bindings. Use a disposable user if changing your defaults is not acceptable.
+
+```sh
+dungeon setup --runtime container --engine podman --image "$PILOT_IMAGE"
+dungeon doctor --runtime container
+dungeon init --agent opencode --image "$PILOT_IMAGE" --harness-config disabled
+dungeon run opencode -- --version
+dungeon exec -- sh -c 'printf "pilot\n" > "$HOME/dungeon-pilot-marker"'
+dungeon down
+dungeon run opencode -- --version
+dungeon exec -- cat /sandbox/dungeon-pilot-marker
+dungeon down
+```
+
+Pass means both launches report the same agent version, the final `cat` prints
+`pilot`, and both stops succeed. Day to day use `dungeon` (or `dungeon -a claude`
+or `dungeon -a codex` with an image that ships the agent). The smoke check does
+not test provider sign-in. Test vendor login only inside a guest, with pilot
+accounts and projects approved for that provider.
+
+| Symptom | Next step |
+| --- | --- |
+| `dungeon --version` is wrong | Check `command -v dungeon` and PATH. Do not use v0.0.1 or unpublished npm packages. |
+| Podman or socket unavailable | Run `dungeon doctor --runtime container` and inspect `systemctl --user status podman.socket`. Ask your Linux owner rather than changing permissions or using sudo. |
+| Image pull fails or a guest tool is missing | Confirm the approved registry/digest and network access. Host-installed tools do not appear in the guest. A changed default does not update an existing binding. |
+| OpenShell 0.1.x is already installed | Leave it installed. Use the plain-container pilot only if its boundary is acceptable; Dungeon's 0.1.x adapter is not enabled. |
+| Fresh or edited guest commands die unexpectedly | Stop and collect the exact command and exit status for your endpoint-security owner. Do not disable protections or infer the cause from an exit code alone. |
+
+For support, record the source revision, engine/OS versions, image digest,
+failing step, and sanitized error. Review `doctor` output before sharing it;
+omit private paths, credentials, configuration files, and session data. Follow
+the [security reporting route](../SECURITY.md#reporting) for suspected vulnerabilities.
+Use `dungeon down` to stop without deleting state. If you want to discard only
+the pilot guest, run `dungeon destroy` after stopping it and review the
+confirmation. Do not use global uninstall or an engine prune as pilot cleanup.
+
+**Before expanding:** repeat install and smoke checks on clean machines
+representative of the team's fleet; exercise one real provider workflow with
+approved data; agree on ownership for image updates, egress, and endpoint
+protection; and rehearse recovery and disposal. If the team requires OpenShell,
+qualify Dungeon's production adapter before offering that path. The
+[native 0.1.7 result](validation.md#reviewed-image-on-native-openshell-017-2026-11-18)
+does not close that gate.
 
 ## 1. Install the CLI, not a gateway
 
@@ -31,7 +96,9 @@ trial without installation, use `cargo build --release --locked` followed by
 
 ## 2. Choose the runtime
 
-Run the setup wizard:
+Run `dungeon` in a new project. If no defaults are saved, it asks you to approve
+plain-container setup, then asks separately for project access. To choose
+OpenShell, a different engine, or a different image, run setup first:
 
 ```sh
 dungeon setup                     # runtime, image, review, approval
@@ -44,7 +111,8 @@ and create the owned gateway. It installs nothing and never changes permissions.
 For Docker CE, start its daemon and check access yourself; daemon access is
 host-root-equivalent. Select it with `setup --runtime container --engine docker`.
 Noninteractive setup requires `--yes`; `--dry-run` never activates services, pulls
-images or writes defaults. Containers mount
+images or writes defaults. Setup is not a reset: changing defaults never replaces
+a guest or rewrites a project binding. Containers mount
 only the reviewed project/imports, but **do not enforce OpenShell policy or restrict
 outbound networking**. Existing bindings never switch runtime automatically.
 
@@ -79,32 +147,33 @@ immutable content. Setup never replaces existing guests or rewrites their bindin
 
 For the optional reviewed tool versions, build the
 [local Linux amd64 image](../images/agent/README.md) and select it with
-`dungeon init --image localhost/dungeon-agent:0.0.3-opencode-2.1.2`. The tag names
+`dungeon init --image localhost/dungeon-agent:0.0.3-opencode-2.2.7`. The tag names
 the OpenCode pin, not a required harness choice. Upstream image contents and
 versions differ from this recipe; its native results do not validate `latest`.
 To use the optional host OpenCode UI, separately install a host client
-matching the guest pin (currently 2.1.2); use `dungeon versions` to compare them.
+matching the guest pin; use `dungeon versions` to compare them.
 Ordinary `dungeon` / `dungeon run` uses the guest CLI and needs no host harness client.
 
 ```sh
 cd /path/to/project
-dungeon                         # choose a harness, approve project scope, launch guest CLI
-# OR, on a new project:
-dungeon run claude              # review binding, choose Claude as default
-dungeon run codex               # choose Codex for this invocation on an existing binding
+dungeon                         # saved agent; OpenCode for a new project
+dungeon -a claude               # use Claude; saves the choice only on a new project
+dungeon -a codex                # use Codex this time in the existing project
 ```
 
-First use asks for OpenCode, Claude Code or Codex (no assumed choice), reviews the
-image/project access and offers an optional OpenCode configuration copy (default
-no). One scope approval saves the exact reviewed snapshot and launches, without
-a separate reload. Copies can expose credentials; native auth/session databases
-are never imported. Later launches reuse that project's choices without prompting.
+First project review shows the agent, image and project access. Direct launch
+does not enable host configuration imports on new projects. To opt in, use
+`dungeon init --agent opencode --harness-config copy` before first launch.
+Copies can expose credentials; native auth/session databases are never imported. If you cancel
+project review after approving setup, the defaults stay saved and no project is
+bound. Later launches reuse that project's choices even if setup defaults are
+absent.
 First use requires a terminal for review. `dungeon init` writes the private
 config without starting anything; use it **before** first launch to choose an
 image, transfer mode, gateway, or provider:
 
 ```sh
-dungeon init                     # same review, save only; no guest started
+dungeon init                     # guided configuration; no guest started
 dungeon config --edit            # optional guided changes before first guest creation
 dungeon plan                     # inspect policy and requested mounts
 dungeon                           # first up, then the selected agent
@@ -145,8 +214,8 @@ also be changed with `dungeon config --edit --yes --image OCI_REFERENCE` or
 `--harness-config copy`. No implicit imports or runtime switching occurs.
 `--yes` approves the displayed configuration scope; it does not log in or bypass
 the agent's permissions.
-Bare `dungeon`, `attach`, `shell` and interactive login are terminal workflows;
-do not use them in unattended jobs.
+Direct `dungeon` (including `-a`), `attach`, `shell` and interactive login are
+terminal workflows; do not use them in unattended jobs.
 
 After authenticating **inside this guest**, use the harness's native mode:
 

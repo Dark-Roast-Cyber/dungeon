@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Let Linux pilot users install a trusted prebuilt binary without Rust, using a
+  required SHA-256 and the existing local install helper.
+- Launch the saved agent from `dungeon` (OpenCode for new projects); use `-a` /
+  `--agent` to choose another. Interactive `run` shares setup/project approvals.
+  Concurrent first launches reuse a matching approved binding instead of
+  overwriting it. `setup` and `init` remain configurable.
 - Update the optional local agent image to OpenCode V2 2.2.7 with locked platform packages and a distinct image tag; existing guests, upstream image defaults and other tool pins are unchanged. Rebuild explicitly to use the new pin; end-to-end native validation remains separate.
 - Pin a hash-verified Node22.23.4 image runtime, including the owned guardian's exact path; preserve other tool pins and refuse stale/shadowed runtimes in image checks. Existing local image tags are not replaced automatically.
 - Keep runtime startup/resume diagnostics on stderr so headless harness stdout remains usable as JSON/JSONL; preserve native workload streams and exit status.

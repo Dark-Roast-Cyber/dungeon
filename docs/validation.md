@@ -2,6 +2,67 @@
 
 CI checks formatting, Clippy, locked Rust tests, release compilation, CLI version execution, npm launcher behavior, distribution version synchronization, native archive creation, and full npm package assembly on explicit supported runners.
 
+## Internal Linux pilot smoke check
+
+On one Linux x86-64 host with SELinux enforcing and rootless Podman 5.8.9,
+the locked release binary installed from a SHA-256-checked bundle into a
+disposable HOME without Cargo on PATH. Its dry run did not install anything.
+With a cached, digest-pinned local image, setup, doctor, explicit project review
+approval, OpenCode 2.2.7 `--version`, and stop/resume with a synthetic private
+state marker passed. Targeted destruction removed only the pilot container;
+the pre-existing container inventory and start times matched afterward.
+
+This used an already running user Podman socket and a cached local image.
+Fresh-machine setup, registry access, provider sign-in, and multi-host rollout
+were not tested. See [the pilot checklist](adoption.md#team-pilot) for the
+remaining acceptance steps.
+
+## Real agent workflows with host Ollama
+
+On Linux x86-64, rootless Podman 5.8.9 and enforcing SELinux, bare `dungeon`
+went through both first-launch approvals and opened the actual OpenCode 2.2.7
+TUI. `tui-mcp` 1.2.3 drove prompts, resize and exit. A synthetic project used
+an explicitly configured `gemma4:e2b` on the already reachable host Ollama
+0.40.0 service. The first prompt took 78 seconds; after `down` and reopening
+OpenCode with `--continue`, the same native workload recalled a marker from the
+earlier conversation in 3 seconds. OpenCode also fixed a synthetic Node bug;
+an independently run test passed after failing before the edit.
+
+In the same guest, Claude Code 2.1.267 and Codex 0.156.1 completed separate
+headless prompts through Ollama's Anthropic and Responses APIs, respectively.
+Codex warned that model metadata was missing and used defaults. Those were
+no-tool prompts, not edit/test or login gates. No host imports,
+vendor login, engine networking or listener changes were needed. The test guest
+was stopped and retained; all 20 pre-existing container records were unchanged.
+This does not qualify OpenShell egress, other platforms, or the default image.
+
+## Reviewed image on native OpenShell 0.1.7 (2026-11-18)
+
+One fresh local qualification passed on rootless Podman 5.8.9 with SELinux
+enforcing. It used the unchanged reviewed image (OpenCode 2.2.7, local manifest
+`sha256:3469e34c3b826add46afe2eb2c6da9bfad5d9adb3408f50787516eb5b76755f3`),
+hard Landlock in the accepted policy, and a supervisor health interval of 10
+seconds in the private store.
+
+The preceding attempt checked the client-supplied Dungeon owner label on both
+records and stopped early. In this run the OpenShell record proved the owner
+label, and its UUID matched the private Podman workload and supervisor by
+their OpenShell-managed role and caller-driver-config labels. The workload
+used the exact image ID, numeric UID/GID 998, and expected bind sources and
+modes. The Dungeon label was again absent on the Podman workload.
+
+Guest UID/GID and OpenCode version checks passed. The four OpenCode private
+directories were writable at mode 0700 and the two synthetic imports were
+read-only. A newly created and then edited Node script ran without retry.
+Native stop/start kept the same sandbox UUID and workload container ID, with
+the edited script and all four private markers intact. The test sandbox was
+stopped and retained; the private gateway, API, and helper exited. Five retained
+private containers and 19 normal host container records were unchanged.
+
+This is a bounded native result, not Dungeon 0.1.7 admission. It did not test
+native deletion, production setup/uninstall, broader policy enforcement,
+provider login or 0.1.8. The version gate remains unchanged.
+
 ## OpenCode V2 pin update (2026-11-10)
 
 The optional local image now pins `@opencode/cli` **2.2.7**, the official

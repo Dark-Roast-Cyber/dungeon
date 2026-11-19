@@ -983,7 +983,11 @@ fn bare_launch_requires_a_terminal_for_every_configured_harness_without_runtime_
         let config = f.config();
         let path = PathBuf::from(config["config"].as_str().unwrap());
         let before = fs::read(&path).unwrap();
-        for args in [vec![], vec!["--config", path.to_str().unwrap()]] {
+        for args in [
+            vec![],
+            vec!["--config", path.to_str().unwrap()],
+            vec!["-a", "codex"],
+        ] {
             let out = f.run(&args);
             assert!(!out.status.success());
             let error = String::from_utf8_lossy(&out.stderr);
@@ -996,6 +1000,38 @@ fn bare_launch_requires_a_terminal_for_every_configured_harness_without_runtime_
             assert!(!path.with_file_name("runtime.json").exists());
         }
     }
+}
+
+#[test]
+fn direct_agent_option_cannot_be_combined_with_a_subcommand() {
+    let f = Fixture::new();
+    let out = f.run(&["-a", "claude", "init", "--yes", "--agent", "codex"]);
+    assert!(!out.status.success(), "{out:?}");
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        error.contains("--agent is only for direct launch"),
+        "{error}"
+    );
+    assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
+}
+
+#[test]
+fn run_rejects_misplaced_direct_agent_options_before_runtime_work() {
+    let f = Fixture::new();
+    for args in [
+        &["run", "--agent", "claude"][..],
+        &["run", "-a", "codex"][..],
+        &["run", "--agent=codex"][..],
+    ] {
+        let out = f.run(args);
+        assert!(!out.status.success(), "{args:?}: {out:?}");
+        let error = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            error.contains("--agent is only for direct launch"),
+            "{error}"
+        );
+    }
+    assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
 }
 
 #[cfg(unix)]
@@ -1138,26 +1174,31 @@ mod terminal {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn first_run_reviews_and_saves_snapshot_without_reload() {
+    fn explicit_init_reviews_and_saves_snapshot_without_reload() {
         for approve in [false, true] {
             let f = Fixture::new();
             let source = f.home.join("config/opencode/themes");
             fs::create_dir_all(&source).unwrap();
             fs::write(source.join("synthetic.json"), "{\"fixture\":1}").unwrap();
-            let mut terminal =
-                Terminal::spawn(f.command(), &["run", "opencode", "--", "--version"]);
-            terminal.until("Image [");
-            terminal.send("ghcr.io/example/agent:Reviewed\n");
-            terminal.until("Use a reviewed copy of your OpenCode configuration?");
-            assert!(terminal.text.contains("can expose credentials"));
-            terminal.send("y\n");
+            let mut terminal = Terminal::spawn(
+                f.command(),
+                &[
+                    "init",
+                    "--agent",
+                    "opencode",
+                    "--image",
+                    "ghcr.io/example/agent:Reviewed",
+                    "--harness-config",
+                    "copy",
+                ],
+            );
             terminal.until("Save this private configuration and continue?");
             assert!(terminal.text.contains("\"snapshot\": \""));
             assert!(!f.home.join("config/dungeon").exists());
             // The saved copy must be the reviewed bytes, not later source contents.
             fs::write(source.join("synthetic.json"), "{\"fixture\":2}").unwrap();
             terminal.send(if approve { "y\n" } else { "n\n" });
-            terminal.finish(false); // No engine is on this fixture's PATH.
+            terminal.finish(approve); // Explicit init never starts the engine.
             if approve {
                 let config = f.config();
                 assert_eq!(config["values"]["image"], "ghcr.io/example/agent:Reviewed");
@@ -1360,10 +1401,15 @@ mod terminal {
     fn implicit_and_explicit_initialization_share_every_configuration_default() {
         for agent in ["opencode", "claude", "codex"] {
             let f = Fixture::new();
+            save_container_defaults(&f);
             let mut terminal = Terminal::spawn(f.command(), &["run", agent]);
-            terminal.default_configuration(agent == "opencode");
+            terminal.until("Save this private configuration and continue?");
             terminal.send("y\n");
-            terminal.finish(false);
+            let text = terminal.finish(false);
+            assert!(
+                !text.contains("Image [") && !text.contains("Use a reviewed copy"),
+                "{text}"
+            );
             let implicit = f.config();
             let home = f.root.path().join("explicit-home");
             fs::create_dir(&home).unwrap();
@@ -1391,6 +1437,67 @@ mod terminal {
         }
     }
 
+    fn save_container_defaults(f: &Fixture) {
+        let defaults = f.home.join("config/dungeon/container-defaults.json");
+        fs::create_dir_all(defaults.parent().unwrap()).unwrap();
+        fs::write(
+            &defaults,
+            br#"{"runtime":"container","container":{"engine":"auto"}}"#,
+        )
+        .unwrap();
+        fs::set_permissions(defaults, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    #[test]
+    fn unbound_interactive_run_offers_the_same_setup_as_direct_launch() {
+        let f = Fixture::new();
+        let mut terminal = Terminal::spawn(f.command(), &["run"]);
+        terminal.until("Apply this setup?");
+        terminal.send("n\n");
+        let text = terminal.finish(false);
+        assert!(!text.contains("Choose this project's harness"), "{text}");
+        assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn concurrent_matching_launches_reuse_the_first_binding() {
+        let f = Fixture::new();
+        save_container_defaults(&f);
+        let mut first = Terminal::spawn(f.command(), &[]);
+        first.until("Save this private configuration and continue?");
+        let mut second = Terminal::spawn(f.command(), &["run", "opencode"]);
+        second.until("Save this private configuration and continue?");
+        first.send("y\n");
+        let first = first.finish(false); // Fixture has no local engine.
+        assert!(first.contains("install Podman or Docker CE"), "{first}");
+        let config = f.config();
+        let path = config["config"].as_str().unwrap();
+        let before = fs::read(path).unwrap();
+        second.send("y\n");
+        let second = second.finish(false);
+        assert!(second.contains("install Podman or Docker CE"), "{second}");
+        assert_eq!(fs::read(path).unwrap(), before);
+    }
+
+    #[test]
+    fn concurrent_launch_refuses_a_different_reviewed_binding() {
+        let f = Fixture::new();
+        save_container_defaults(&f);
+        let mut first = Terminal::spawn(f.command(), &[]);
+        first.until("Save this private configuration and continue?");
+        let mut second = Terminal::spawn(f.command(), &["-a", "codex"]);
+        second.until("Save this private configuration and continue?");
+        first.send("y\n");
+        first.finish(false);
+        second.send("y\n");
+        let second = second.finish(false);
+        assert!(
+            second.contains("another launch saved a different configuration"),
+            "{second}"
+        );
+        assert_eq!(f.config()["values"]["agent"], "opencode");
+    }
+
     #[test]
     fn initial_choice_has_no_default_and_persists_only_after_scope_approval() {
         for (input, agent) in [("1", "opencode"), ("claude", "claude"), ("3", "codex")] {
@@ -1416,7 +1523,7 @@ mod terminal {
 
     #[test]
     fn implicit_initialization_uses_the_same_choice_and_never_skips_scope_approval() {
-        for args in [vec![], vec!["up"], vec!["create"], vec!["run"]] {
+        for args in [vec!["up"], vec!["create"]] {
             let f = Fixture::new();
             let mut terminal = Terminal::spawn(f.command(), &args);
             terminal.until("Harness [1-3 or name; no default]:");
@@ -1426,19 +1533,171 @@ mod terminal {
             terminal.finish(false);
             assert_eq!(f.config()["values"]["agent"], "claude");
         }
-        for args in [
-            vec!["run", "opencode"],
-            vec!["run", "codex"],
-            vec!["attach"],
-        ] {
-            let f = Fixture::new();
-            let mut terminal = Terminal::spawn(f.command(), &args);
-            terminal.default_configuration(args == ["run", "opencode"] || args == ["attach"]);
-            assert!(!terminal.text.contains("Choose this project's harness"));
-            terminal.send("n\n");
-            terminal.finish(false);
-            assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
-        }
+        let f = Fixture::new();
+        let mut terminal = Terminal::spawn(f.command(), &["attach"]);
+        terminal.default_configuration(true);
+        assert!(!terminal.text.contains("Choose this project's harness"));
+        terminal.send("n\n");
+        terminal.finish(false);
+        assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn first_bare_launch_offers_setup_without_saving_on_cancel() {
+        let f = Fixture::new();
+        let mut terminal = Terminal::spawn(f.command(), &[]);
+        terminal.until("Apply this setup?");
+        terminal.send("n\n");
+        let text = terminal.finish(false);
+        assert!(
+            text.contains("plain containers do not enforce OpenShell policy"),
+            "{text}"
+        );
+        assert!(text.contains("ghcr.io/nvidia/openshell-community/sandboxes/base:latest"));
+        assert!(
+            !text.contains("Runtime [") && !text.contains("Image ["),
+            "{text}"
+        );
+        assert!(text.contains("setup cancelled; no changes made"), "{text}");
+        assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn first_bare_launch_continues_from_setup_to_project_review() {
+        use std::os::unix::net::UnixListener;
+
+        let f = Fixture::new();
+        let bin = f.home.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let stub = bin.join("podman");
+        fs::write(
+            &stub,
+            r#"#!/bin/sh
+shift 3
+case "$1:$2" in
+  info:--format) printf '%s\n' '{"host":{"os":"linux","security":{"rootless":true},"idMappings":{}},"store":{"graphRoot":"/synthetic"}}';;
+  image:inspect) printf '%s\n' '[{"Config":{}}]';;
+  *) exit 9;;
+esac
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(stub, fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = f.root.path().join("engine.sock");
+        let _listener = UnixListener::bind(&socket).unwrap();
+        let defaults = f.home.join("config/dungeon/container-defaults.json");
+        fs::create_dir_all(defaults.parent().unwrap()).unwrap();
+        // An endpoint preference alone does not mark setup complete.
+        fs::write(
+            &defaults,
+            json!({"container":{"engine":"podman", "endpoint":format!("unix://{}", socket.display())}, "image":"localhost/synthetic:1"}).to_string(),
+        )
+        .unwrap();
+        fs::set_permissions(&defaults, fs::Permissions::from_mode(0o600)).unwrap();
+        let mut command = f.command();
+        command.env("PATH", bin);
+        let mut terminal = Terminal::spawn(command, &[]);
+        terminal.until("Apply this setup?");
+        terminal.send("y\n");
+        terminal.until("Save this private configuration and continue?");
+        assert!(terminal.text.contains("localhost/synthetic:1"));
+        terminal.send("n\n");
+        let text = terminal.finish(false);
+        assert!(!text.contains("Choose this project's harness"), "{text}");
+        assert!(
+            !text.contains("Use a reviewed copy") && !text.contains("Image ["),
+            "{text}"
+        );
+        let saved: Value = serde_json::from_slice(&fs::read(defaults).unwrap()).unwrap();
+        assert_eq!(saved["runtime"], "container");
+        assert_eq!(saved["image"], "localhost/synthetic:1");
+        assert!(!f.home.join("config/dungeon/projects").exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn first_bare_launch_does_not_execute_a_tool_aliased_into_the_selected_project() {
+        use std::os::unix::net::UnixListener;
+
+        let f = Fixture::new();
+        let bin = f.home.join("bin");
+        fs::create_dir(&bin).unwrap();
+        let podman = f.project.join("podman");
+        fs::write(
+            &podman,
+            "#!/bin/sh\nprintf contacted > \"$HOME/contacted\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&podman, fs::Permissions::from_mode(0o700)).unwrap();
+        std::os::unix::fs::symlink(podman, bin.join("podman")).unwrap();
+        let socket = f.root.path().join("engine.sock");
+        let _listener = UnixListener::bind(&socket).unwrap();
+        let defaults = f.home.join("config/dungeon/container-defaults.json");
+        fs::create_dir_all(defaults.parent().unwrap()).unwrap();
+        let saved = json!({"container":{"engine":"podman", "endpoint":format!("unix://{}", socket.display())}}).to_string();
+        fs::write(&defaults, &saved).unwrap();
+        fs::set_permissions(&defaults, fs::Permissions::from_mode(0o600)).unwrap();
+        let mut command = f.command();
+        command.current_dir(&f.home).env("PATH", bin);
+        let mut terminal = Terminal::spawn(command, &[f.project.to_str().unwrap()]);
+        terminal.until("Apply this setup?");
+        terminal.send("y\n");
+        let text = terminal.finish(false);
+        assert!(
+            text.contains("no usable selected container service"),
+            "{text}"
+        );
+        assert!(!f.home.join("contacted").exists());
+        assert_eq!(fs::read_to_string(defaults).unwrap(), saved);
+        assert!(!f.home.join("config/dungeon/projects").exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn direct_launch_saves_the_first_agent_choice_with_the_setup_image() {
+        let f = Fixture::new();
+        let defaults = f.home.join("config/dungeon/container-defaults.json");
+        fs::create_dir_all(defaults.parent().unwrap()).unwrap();
+        let saved = br#"{"runtime":"container","container":{"engine":"auto"},"image":"localhost/reviewed:1"}"#;
+        fs::write(&defaults, saved).unwrap();
+        fs::set_permissions(&defaults, fs::Permissions::from_mode(0o600)).unwrap();
+        let mut command = f.command();
+        command.current_dir(&f.home);
+        let mut terminal =
+            Terminal::spawn(command, &[f.project.to_str().unwrap(), "--agent", "claude"]);
+        terminal.until("Save this private configuration and continue?");
+        terminal.send("y\n");
+        let text = terminal.finish(false); // No native engine on the fixture PATH.
+        assert!(!text.contains("Choose this project's harness"), "{text}");
+        let config = f.config();
+        assert_eq!(config["values"]["agent"], "claude");
+        assert_eq!(config["values"]["image"], "localhost/reviewed:1");
+        assert_eq!(fs::read(defaults).unwrap(), saved);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn bare_launch_saves_opencode_without_asking_for_an_agent() {
+        let f = Fixture::new();
+        let defaults = f.home.join("config/dungeon/container-defaults.json");
+        fs::create_dir_all(defaults.parent().unwrap()).unwrap();
+        fs::write(
+            &defaults,
+            br#"{"runtime":"container","container":{"engine":"auto"},"image":"localhost/reviewed:1"}"#,
+        )
+        .unwrap();
+        fs::set_permissions(&defaults, fs::Permissions::from_mode(0o600)).unwrap();
+        let mut terminal = Terminal::spawn(f.command(), &[]);
+        terminal.until("Save this private configuration and continue?");
+        terminal.send("y\n");
+        let text = terminal.finish(false);
+        assert!(!text.contains("Choose this project's harness"), "{text}");
+        assert!(!text.contains("Use a reviewed copy"), "{text}");
+        let config = f.config();
+        assert_eq!(config["values"]["agent"], "opencode");
+        assert!(config["values"]["harness"].is_null());
     }
 
     #[test]
@@ -1462,39 +1721,38 @@ mod terminal {
         }
     }
 
-    #[test]
-    fn bare_and_run_share_guest_launch_and_overrides_do_not_change_the_default() {
-        for agent in ["opencode", "claude", "codex"] {
-            let f = Fixture::new();
-            assert!(
-                f.run(&[
-                    "init",
-                    "--yes",
-                    "--agent",
-                    agent,
-                    "--project-transfer",
-                    "copy"
-                ])
-                .status
-                .success()
-            );
-            let config = f.config();
-            let path = PathBuf::from(config["config"].as_str().unwrap());
-            let before = fs::read(&path).unwrap();
-            let plan: Value = serde_json::from_slice(&f.run(&["plan"]).stdout).unwrap();
-            let policy: Value =
-                serde_json::from_slice(&fs::read(path.with_file_name("policy.json")).unwrap())
-                    .unwrap();
-            fs::write(f.home.join("remote.json"), json!({"id":"synthetic-id", "name":config["values"]["name"], "workspace":"default", "phase":"Ready", "policy_source":"sandbox", "labels":{"agentarchaeology.ai/dungeon-config":plan["fingerprint"]}, "policy":policy}).to_string()).unwrap();
-            let bin = f.home.join("bin");
-            fs::create_dir(&bin).unwrap();
-            let stub = bin.join("openshell");
-            fs::write(&stub, r#"#!/bin/sh
+    fn openshell_launch_fixture<'a>(f: &'a Fixture, agent: &str) -> impl Fn() -> Command + 'a {
+        assert!(
+            f.run(&[
+                "init",
+                "--yes",
+                "--agent",
+                agent,
+                "--project-transfer",
+                "copy"
+            ])
+            .status
+            .success()
+        );
+        let config = f.config();
+        let path = PathBuf::from(config["config"].as_str().unwrap());
+        let plan: Value = serde_json::from_slice(&f.run(&["plan"]).stdout).unwrap();
+        let policy: Value =
+            serde_json::from_slice(&fs::read(path.with_file_name("policy.json")).unwrap()).unwrap();
+        fs::write(f.home.join("remote.json"), json!({"id":"synthetic-id", "name":config["values"]["name"], "workspace":"default", "phase":"Ready", "policy_source":"sandbox", "labels":{"agentarchaeology.ai/dungeon-config":plan["fingerprint"]}, "policy":policy}).to_string()).unwrap();
+        let bin = f.home.join("bin");
+        fs::create_dir(&bin).unwrap();
+        let stub = bin.join("openshell");
+        fs::write(&stub, r#"#!/bin/sh
 if test "$1" = --version; then echo 'openshell 0.0.116'; exit 0; fi
 shift 4
 printf '%s\n' "$*" >> "$HOME/calls"
 case "$1:$2" in
- sandbox:create) echo Ready > "$HOME/phase"; echo '{}';;
+ sandbox:create)
+   if test -p "$HOME/create-gate"; then
+     read -r _ < "$HOME/create-gate" || exit 7
+   fi
+   echo Ready > "$HOME/phase"; echo '{}';;
  sandbox:get) test -e "$HOME/phase" || exit 7; sed "s/\"phase\":\"Ready\"/\"phase\":\"$(cat "$HOME/phase")\"/" "$HOME/remote.json";;
  sandbox:upload|sandbox:download) exit 0;;
  sandbox:stop) echo Stopped > "$HOME/phase";;
@@ -1503,12 +1761,70 @@ case "$1:$2" in
  *) exit 93;;
 esac
 "#).unwrap();
-            fs::set_permissions(stub, fs::Permissions::from_mode(0o700)).unwrap();
-            let command = || {
-                let mut command = f.command();
-                command.env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
-                command
-            };
+        fs::set_permissions(stub, fs::Permissions::from_mode(0o700)).unwrap();
+        move || {
+            let mut command = f.command();
+            command.env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+            command
+        }
+    }
+
+    #[test]
+    fn simultaneous_interactive_launches_wait_for_one_native_startup() {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
+        let f = Fixture::new();
+        let command = openshell_launch_fixture(&f, "opencode");
+        let gate = f.home.join("create-gate");
+        let name = CString::new(gate.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let first = Terminal::spawn(command(), &[]);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut gate = loop {
+            use std::os::unix::fs::OpenOptionsExt;
+            match fs::OpenOptions::new()
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(&gate)
+            {
+                Ok(file) => break file,
+                Err(e) if e.raw_os_error() == Some(libc::ENXIO) && Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => panic!("native create did not enter the fixture gate: {e}"),
+            }
+        };
+        let mut second = Terminal::spawn(command(), &["run", "codex"]);
+        second.until("Waiting for the current environment operation");
+        gate.write_all(b"continue\n").unwrap();
+        assert!(first.finish(true).contains("guest-launch:opencode"));
+        assert!(second.finish(true).contains("guest-launch:codex"));
+        let calls = fs::read_to_string(f.home.join("calls")).unwrap();
+        assert_eq!(
+            calls
+                .lines()
+                .filter(|line| line.starts_with("sandbox create"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            calls
+                .lines()
+                .filter(|line| line.starts_with("sandbox upload"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn bare_and_run_share_guest_launch_and_overrides_do_not_change_the_default() {
+        for agent in ["opencode", "claude", "codex"] {
+            let f = Fixture::new();
+            let command = openshell_launch_fixture(&f, agent);
+            let config = f.config();
+            let path = PathBuf::from(config["config"].as_str().unwrap());
+            let before = fs::read(&path).unwrap();
             let out = command()
                 .args(["run", agent, "--", "fail-fixture"])
                 .output()
@@ -1537,6 +1853,14 @@ esac
             let text = Terminal::spawn(command(), &[]).finish(true);
             assert!(text.contains(&format!("guest-launch:{agent}")), "{text}");
             assert!(!text.contains("Choose this project's harness"));
+            let text = Terminal::spawn(command(), &["-a", "codex"]).finish(true);
+            assert!(text.contains("guest-launch:codex"), "{text}");
+            let text = Terminal::spawn(
+                command(),
+                &["--config", path.to_str().unwrap(), "--agent", "claude"],
+            )
+            .finish(true);
+            assert!(text.contains("guest-launch:claude"), "{text}");
             for args in [vec!["run"], vec!["run", agent]] {
                 let text = Terminal::spawn(command(), &args).finish(true);
                 assert!(text.contains(&format!("guest-launch:{agent}")), "{text}");
@@ -1566,6 +1890,11 @@ esac
                     vec!["run", "codex", "--", "exec", "--", "--version"],
                     "codex exec -- --version".into(),
                 ),
+                (
+                    vec!["run", "--", "-a", "never"],
+                    format!("{agent} -a never"),
+                ),
+                (vec!["run", "codex", "-a", "never"], "codex -a never".into()),
             ] {
                 let out = command().args(arguments).output().unwrap();
                 assert!(out.status.success(), "{out:?}");

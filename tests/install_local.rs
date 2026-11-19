@@ -11,6 +11,60 @@ struct Fixture {
     home: PathBuf,
 }
 
+#[test]
+fn prebuilt_install_needs_no_checkout_or_cargo_and_dry_run_does_not_install() {
+    let f = Fixture::new();
+    fs::remove_file(f.checkout.join("Cargo.toml")).unwrap();
+    let body = b"#!/bin/sh\nprintf \"dungeon 0.0.2\\n\"\n";
+    let artifact = f.root.path().join("pilot dungeon");
+    fs::write(&artifact, body).unwrap();
+    let args = [
+        "--binary",
+        artifact.to_str().unwrap(),
+        "--sha256",
+        "ff4b9c0677b005e3737c6598cad0e415f72eb9889aa7389925ba84891b6c7275",
+    ];
+    let preview = f.run(&[args.as_slice(), &["--dry-run"]].concat());
+    assert!(preview.status.success(), "{preview:?}");
+    assert!(!f.home.join(".local").exists());
+    let out = f.run(&args);
+    assert!(out.status.success(), "{out:?}");
+    assert!(!f.home.join("cargo-calls").exists());
+    let installed = f.home.join(".local/bin/dungeon");
+    assert_eq!(fs::read(&installed).unwrap(), body);
+    let out = Command::new(installed).arg("--version").output().unwrap();
+    assert_eq!(out.stdout, b"dungeon 0.0.2\n");
+}
+
+#[test]
+fn checksum_mismatch_does_not_execute_the_artifact_or_replace_the_install() {
+    let f = Fixture::new();
+    let dir = f.home.join(".local/bin");
+    fs::create_dir_all(&dir).unwrap();
+    let installed = dir.join("dungeon");
+    fs::write(&installed, "keep this binary").unwrap();
+    let artifact = f.root.path().join("wrong-artifact");
+    fs::write(
+        &artifact,
+        "#!/bin/sh\ntouch \"$HOME/executed\"\nprintf 'dungeon 0.0.2\\n'\n",
+    )
+    .unwrap();
+    let out = f.run(&[
+        "--binary",
+        artifact.to_str().unwrap(),
+        "--sha256",
+        "ff4b9c0677b005e3737c6598cad0e415f72eb9889aa7389925ba84891b6c7275",
+        "--replace",
+    ]);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("SHA-256 mismatch"),
+        "{out:?}"
+    );
+    assert!(!f.home.join("executed").exists());
+    assert_eq!(fs::read(installed).unwrap(), b"keep this binary");
+}
+
 impl Fixture {
     fn new() -> Self {
         let root = tempfile::tempdir().unwrap();

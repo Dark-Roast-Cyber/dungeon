@@ -5,11 +5,11 @@ not a requirement to use a particular agent protocol.
 
 | Workflow | Dungeon path | Validation status |
 | --- | --- | --- |
-| OpenCode CLI | `run opencode` | Synthetic edit/test passed in one OpenShell Podman guest; other providers/accounts untested. |
-| Claude Code CLI | `run claude` | Reached onboarding/login-method screen; authenticated task not tested (Issue #11). |
-| Codex CLI | `run codex` | Synthetic task passed after two one-time approvals outside Codex's inner `bwrap` sandbox, within OpenShell. |
+| OpenCode CLI | `dungeon` or `run opencode` | Actual TUI, Ollama inference, conversation resume, and independently verified edit/test passed on one plain Podman host. |
+| Claude Code CLI | `dungeon -a claude` or `run claude` | Headless Ollama prompt passed on plain Podman; [separate guest login and edit/test evidence](validation.md#node-security-candidate-and-real-claude-workflow). |
+| Codex CLI | `dungeon -a codex` or `run codex` | Headless Ollama prompt passed with read-only sandbox settings; a separate OpenShell tool task required two one-time approvals outside Codex's inner sandbox. |
 | Codex login | `auth codex` | ChatGPT device login succeeded in guest; retained guest login checked after restart. |
-| Claude Code login | `auth claude`, then `/login` | Reached login-method screen; account-dependent completion not tested (Issue #11). |
+| Claude Code login | `auth claude`, then `/login` | Guest browser login passed on the [recorded image/runtime](validation.md#node-security-candidate-and-real-claude-workflow); long-duration refresh was not tested. |
 | Other compatible CLI | `exec -- COMMAND ARG...` | Generic argument transport tested. |
 | Interactive shell | `shell` | PTY/Ctrl-C tested on the Issue #1 OpenShell Podman combination. |
 | VS Code | `code` | NOT TESTABLE: client/Remote SSH extension/display unavailable in the recorded Issue #30 checkpoint. |
@@ -27,8 +27,9 @@ remote execution arrangement. Actual host/runtime combinations need validation.
 ## Terminal use
 
 Interactive `dungeon` and `dungeon run` launch the same configured guest harness.
-First use selects a harness and approves project scope; later use reuses that
-binding. `run AGENT` overrides only this invocation. No host harness CLI is needed.
+First use defaults to OpenCode and asks for project approval; later use reuses
+the binding. `-a AGENT` or `run AGENT` overrides an existing project's agent
+for this invocation. No host harness CLI is needed.
 Bare `dungeon` requires a terminal; explicit `run` also accepts noninteractive
 native flags, for example `dungeon run -- --version`.
 
@@ -65,6 +66,21 @@ API-key/provider authentication is configured through OpenShell before creation.
 That path is distinct from guest OAuth and can avoid exposing the original
 provider secret to the workload when OpenShell supports credential brokering.
 OpenCode remains provider-dependent and has no `dungeon auth opencode` command.
+
+### Local models
+
+Dungeon does not configure providers automatically. One
+[plain Podman test](validation.md#real-agent-workflows-with-host-ollama)
+used an already reachable Ollama service at
+`http://host.containers.internal:11434`. For this setup, configure OpenCode's
+[guest provider endpoint](https://opencode.ai/docs/providers/#ollama) with
+`/v1`, Claude Code's
+[`ANTHROPIC_BASE_URL`](https://docs.ollama.com/integrations/claude-code#manual-setup)
+with the base URL, or Codex's
+[Responses provider](https://docs.ollama.com/integrations/codex#profile-based-setup)
+with `/v1`. `127.0.0.1` inside the guest is not the host. If the service is
+unreachable, don't widen listener, firewall or OpenShell policy just to make
+the test pass. Shared Ollama endpoints are still a data and access boundary.
 
 ## SSH, editors, and desktop clients
 

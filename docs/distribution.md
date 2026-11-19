@@ -4,14 +4,45 @@ The Rust `dungeon` binary is the only implementation. Every distribution path mu
 
 ## Current availability
 
-Rust 0.0.2 on main is source-only; follow the [source installation](../README.md#installation).
-The optional [local install helper](../scripts/install-local.sh) builds that
-same binary with locked Cargo dependencies and installs it to a user bin
-directory. It neither publishes a release nor installs/starts OpenShell.
+Rust 0.0.2 has no public binary release; follow the
+[source installation](../README.md#installation) or the internal pilot path
+below.
+The optional [local install helper](../scripts/install-local.sh) can build
+that same binary with locked Cargo dependencies, or install a verified
+prebuilt copy to a user bin directory. It neither publishes a release nor
+installs/starts OpenShell.
 CI builds native archives and npm tarballs, but no Rust 0.0.2 release or npm
 package is published. The latest published release, v0.0.1, contains the older
 Python wheel/source archive and does not implement this Rust manual. The
 [reviewed agent image](../images/agent/README.md) also requires a local build.
+
+## Internal Linux pilot
+
+The pilot owner builds from a clean, reviewed revision with
+`cargo build --release --locked` on a Linux build host compatible with the
+participants' systems. Share the exact source revision, the `dungeon` binary,
+the matching `install-local.sh`, and the binary SHA-256 from
+`sha256sum target/release/dungeon` through a trusted internal channel. Include
+the target architecture and approved OCI image digest. The file hash verifies
+the bytes; it does not establish who built them or whether they are safe.
+
+Participants need no Rust toolchain. From the downloaded bundle:
+
+```sh
+sh ./install-local.sh --binary "$PWD/dungeon" --sha256 "$DUNGEON_SHA256" --dry-run
+sh ./install-local.sh --binary "$PWD/dungeon" --sha256 "$DUNGEON_SHA256"
+export PATH="$HOME/.local/bin:$PATH"
+command -v dungeon
+dungeon --version
+```
+
+Set `DUNGEON_SHA256` to the 64-character lowercase hash from the pilot owner.
+The helper never fetches a binary, checks the staged bytes before running
+`--version`, and refuses to replace a different binary without `--replace`.
+For a side-by-side trial, pass `--bin-dir "$HOME/.local/dungeon-pilot/bin"` to
+both invocations and add that directory to your PATH instead. A separate binary
+path does **not** isolate Dungeon's defaults or bindings; use a disposable user
+if you need separate state.
 
 ## Clean local uninstall
 

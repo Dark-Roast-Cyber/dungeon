@@ -18,7 +18,10 @@ body:
     id: versions
     attributes:
       label: Versions
-      description: Dungeon commit or version, OpenShell version, and operating system
+      description: >-
+        Dungeon commit or version, OS and architecture, container engine version,
+        and OpenShell version if used. Include the approved image digest if it
+        can be shared.
     validations:
       required: true
   - type: textarea
