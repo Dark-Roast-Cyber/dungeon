@@ -916,12 +916,6 @@ mod tests {
                 expected
             );
             assert_eq!(serde_json::to_value(&values).unwrap(), value);
-            assert!(
-                serde_json::to_value(&values)
-                    .unwrap()
-                    .get("guest_preferences")
-                    .is_none()
-            );
         }
     }
 

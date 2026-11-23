@@ -6,6 +6,17 @@ tool upgrades, client installation, release/tagging, or publication.
 
 ## 0.3.0 release preparation (2026-11-23)
 
+Adversarial follow-up to #51: repair plain-container reload/disable/exclusion
+validation, capture hash-checked seed bytes before native creation, replace
+writer-thread stdin and `mv -n` publication, and expose the seed in scope review.
+Keep the narrow one-time guest-owned-copy design and historical identities.
+Local regression and native storage evidence is in
+[validation](docs/validation.md#opencode-import-preferences-47-48); native
+OpenCode UI/compatibility acceptance remains open. The user then authorized
+committing these corrections, pushing them, and tagging `v0.3.0`. The tag
+publishes the existing engineering-preview workflow only; npm and image
+publication remain unauthorized.
+
 The user subsequently authorized merging this candidate: commit, push, PR, final
 checks/review and merge are now in scope. Tagging/release publication remain
 separate approval boundaries; dependency PRs remain separate.
@@ -23,7 +34,7 @@ Reviewed GitHub work:
 | #19/#31 capabilities/network UX | Defer broader model/default changes; starter network policy unchanged |
 | #11 Claude account test | Historical native login/edit/test/resume evidence exists in validation; reconcile issue separately, no new credential test or closure here |
 | #21/#30/#32 integration/remotes | Not release gates for the supported local CLI; unsupported integrations stay explicit |
-| PR #44 Actions pins / #46 Rust dependencies | Both green at review; no formal review or merge performed. Existing checks do not validate this combined release candidate |
+| PR #44 Actions pins / #46 Rust dependencies | Subsequently merged separately; remain pinned Actions / lockfile-only updates, not runtime architecture changes |
 | Pilot branch `6de3643` | Preserve larger onboarding/install changes separately; include only its small fail-closed inspection-protocol validation correction |
 
 Candidate: synchronize Cargo/lockfile and all launcher/platform versions to

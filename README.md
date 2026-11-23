@@ -5,9 +5,10 @@ environments, using their normal CLIs. Dungeon manages the environment; your
 agent still owns prompts, models, permissions and conversations.
 Part of [Agent Archaeology](https://agentarchaeology.ai/).
 
-**Engineering preview:** this checkout prepares Rust 0.3.0. Until its tag is
-published, install from source; the existing v0.0.1 release is the older Python
-implementation. npm packages remain unpublished. Dungeon is not audited isolation.
+**Engineering preview:** Rust 0.3.0 is the first Rust release. Install its
+GitHub release archive or build from the `v0.3.0` tag. The existing v0.0.1
+release is the older Python implementation. npm packages remain unpublished.
+Dungeon is not audited isolation.
 
 ## Overview
 

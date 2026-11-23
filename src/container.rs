@@ -16,41 +16,30 @@ use std::time::Duration;
 
 const LABEL: &str = "agentarchaeology.ai/dungeon-config";
 const RUNTIME_LABEL: &str = "agentarchaeology.ai/dungeon-runtime";
-// Fixed guest destination only. The seed body after the marker is what the unit test runs
-// against a temp directory; production exec uses this whole constant and never a host path.
+// The caller supplies the fixed image-owned parent, never a path from configuration.
 const PREFERENCE_SEED_SCRIPT: &str = r#"set -eu
-dest=$1
-if [ "$dest" != "/sandbox/.config/opencode/cli.json" ]; then
-  cat >/dev/null || true
-  echo refusing >&2
-  exit 1
-fi
-# seed-body
-parent=${dest%/*}
+parent=$1
 if [ -L "$parent" ] || [ ! -d "$parent" ]; then
-  cat >/dev/null || true
   echo refusing >&2
   exit 1
 fi
-if [ -L "$dest" ]; then
-  cat >/dev/null || true
+cd -P -- "$parent"
+if [ -L cli.json ]; then
   echo refusing >&2
   exit 1
 fi
-if [ -e "$dest" ]; then
-  cat >/dev/null
+if [ -f cli.json ]; then
   exit 0
 fi
-umask 077
-set -C
-tmp="$parent/.dungeon-cli.json"
-cat > "$tmp"
-chmod 600 "$tmp"
-mv -n "$tmp" "$dest"
-if [ -e "$tmp" ]; then
-  rm -f "$tmp"
+if [ -e cli.json ]; then
+  echo refusing >&2
   exit 1
 fi
+umask 077
+tmp=$(mktemp .dungeon-cli.XXXXXXXXXX)
+trap 'rm -f -- "$tmp"' 0
+cat > "$tmp"
+ln -T -- "$tmp" cli.json
 "#;
 
 struct Native {
@@ -558,6 +547,7 @@ pub(crate) fn plan(config: &Config) -> Value {
         "selinux_isolation":{"requested":config.values.selinux_isolation,"verification":"not-inspected"},
         "project":{"source":config.values.project,"target":GUEST_PROJECT,"read_only":false},
         "configuration_mounts":crate::imports::harness::mounts(config),
+        "guest_preference_seed":crate::imports::harness::preference_seed_plan(config),
         "editor_snapshot":crate::imports::mount_source(config),
         "policy_enforcement":false,"network":"container bridge; outbound unrestricted",
         "verification":"offline plan; no service contacted"});
@@ -923,6 +913,7 @@ impl<'a> Runtime<'a> {
         if !self.config.values.project.is_dir() {
             return Err(Error::new("project directory is unavailable"));
         }
+        let preference_seed = crate::imports::harness::preference_seed_bytes(self.config)?;
         self.output.message(format_args!(
             "Selected {} at {}; plain container policy is not enforced.{}",
             self.native.binding.engine.name(),
@@ -1059,13 +1050,7 @@ impl<'a> Runtime<'a> {
         self.checked(false)?;
         lock.verify_environment(self.config)?;
         // First create only. start_locked does not seed again; a failure stays pending.
-        let seeded =
-            crate::imports::harness::preference_seed_bytes(self.config).map_err(|error| {
-                Error::new(format!(
-                    "guest preference seed failed; container initialization incomplete: {error}"
-                ))
-            })?;
-        if let Some(bytes) = seeded {
+        if let Some(bytes) = preference_seed {
             self.seed_preference(&state.id, &bytes)?;
         }
         state.initial_upload_pending = false;
@@ -1088,7 +1073,7 @@ impl<'a> Runtime<'a> {
             "-c".into(),
             PREFERENCE_SEED_SCRIPT.into(),
             "dungeon-seed".into(),
-            crate::imports::harness::GUEST_CLI_JSON.into(),
+            "/sandbox/.config/opencode".into(),
         ];
         self.native.query_stdin(&args, bytes, 30).map_err(|error| {
             Error::new(format!(
@@ -1260,50 +1245,33 @@ mod setup_tests {
 mod preference_seed_tests {
     use super::PREFERENCE_SEED_SCRIPT;
     use std::fs;
-    use std::io::Write;
+    use std::io::{Seek, Write};
     use std::os::unix::fs::{PermissionsExt, symlink};
     use std::path::Path;
     use std::process::{Command, Output, Stdio};
 
-    fn seed_body() -> String {
-        let body = PREFERENCE_SEED_SCRIPT
-            .split_once("# seed-body\n")
-            .expect("seed body marker")
-            .1;
-        format!("set -eu\ndest=$1\n{body}")
-    }
-
-    fn run_seed(script: &str, dest: &Path, input: &[u8]) -> Output {
-        let mut child = Command::new("sh")
+    fn run_seed(parent: &Path, input: &[u8]) -> Output {
+        let mut stdin = tempfile::tempfile().unwrap();
+        stdin.write_all(input).unwrap();
+        stdin.rewind().unwrap();
+        Command::new("/bin/sh")
             .arg("-c")
-            .arg(script)
+            .arg(PREFERENCE_SEED_SCRIPT)
             .arg("dungeon-seed")
-            .arg(dest)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut stdin = child.stdin.take().unwrap();
-        match stdin.write_all(input) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
-            Err(error) => panic!("{error}"),
-        }
-        drop(stdin);
-        child.wait_with_output().unwrap()
+            .arg(parent)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .stdin(Stdio::from(stdin))
+            .output()
+            .unwrap()
     }
 
     #[test]
-    fn preference_seed_script_writes_once_and_rejects_other_destinations() {
-        assert!(PREFERENCE_SEED_SCRIPT.contains(crate::imports::harness::GUEST_CLI_JSON));
-        assert!(!PREFERENCE_SEED_SCRIPT.contains("/home/"));
-        let body = seed_body();
+    fn preference_seed_publishes_exact_private_bytes_once() {
         let bytes = b"{\"theme\":\"synthetic\"}\n\xff";
-
         let root = tempfile::tempdir().unwrap();
         let dest = root.path().join("cli.json");
-        let created = run_seed(&body, &dest, bytes);
+        let created = run_seed(root.path(), bytes);
         assert!(created.status.success(), "{created:?}");
         assert_eq!(fs::read(&dest).unwrap(), bytes);
         assert_eq!(
@@ -1311,53 +1279,89 @@ mod preference_seed_tests {
             0o600
         );
 
-        let unchanged = run_seed(&body, &dest, b"replacement");
+        let unchanged = run_seed(root.path(), b"replacement");
         assert!(unchanged.status.success(), "{unchanged:?}");
         assert_eq!(fs::read(&dest).unwrap(), bytes);
         assert_eq!(
             fs::metadata(&dest).unwrap().permissions().mode() & 0o777,
             0o600
         );
+    }
 
+    #[test]
+    fn preference_seed_preserves_image_owned_preferences() {
         let prior = tempfile::tempdir().unwrap();
         let prior_file = prior.path().join("cli.json");
         fs::write(&prior_file, b"keep").unwrap();
         fs::set_permissions(&prior_file, fs::Permissions::from_mode(0o644)).unwrap();
-        let kept = run_seed(&body, &prior_file, b"overwrite");
+        let kept = run_seed(prior.path(), b"overwrite");
         assert!(kept.status.success(), "{kept:?}");
         assert_eq!(fs::read(&prior_file).unwrap(), b"keep");
         assert_eq!(
             fs::metadata(&prior_file).unwrap().permissions().mode() & 0o777,
             0o644
         );
+    }
 
+    #[test]
+    fn preference_seed_refuses_symlink_destinations() {
         let linked = tempfile::tempdir().unwrap();
         let target = linked.path().join("target");
         let link = linked.path().join("cli.json");
         symlink(&target, &link).unwrap();
-        let denied = run_seed(&body, &link, b"through-link");
+        let denied = run_seed(linked.path(), b"through-link");
         assert!(!denied.status.success(), "{denied:?}");
         assert!(!target.exists());
         assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+    }
 
+    #[test]
+    fn preference_seed_refuses_symlink_parents() {
         let parent = tempfile::tempdir().unwrap();
         let real = parent.path().join("real");
         fs::create_dir(&real).unwrap();
         let via = parent.path().join("via");
         symlink(&real, &via).unwrap();
-        let through = via.join("cli.json");
-        let parent_denied = run_seed(&body, &through, b"through-parent");
+        let parent_denied = run_seed(&via, b"through-parent");
         assert!(!parent_denied.status.success(), "{parent_denied:?}");
         assert!(!real.join("cli.json").exists());
+    }
 
-        let wrong_root = tempfile::tempdir().unwrap();
-        let wrong = wrong_root.path().join("cli.json");
-        let rejected = run_seed(PREFERENCE_SEED_SCRIPT, &wrong, b"not-seeded");
+    #[test]
+    fn preference_seed_refuses_non_file_destinations() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("cli.json")).unwrap();
+        let rejected = run_seed(root.path(), b"not-seeded");
         assert!(!rejected.status.success(), "{rejected:?}");
-        assert!(!wrong.exists());
-        assert!(!wrong_root.path().join(".dungeon-cli.json").exists());
-        let stderr = String::from_utf8_lossy(&rejected.stderr);
-        assert!(stderr.contains("refusing"));
-        assert!(!stderr.contains(wrong.to_str().unwrap()));
+        assert_eq!(
+            fs::read_dir(root.path().join("cli.json")).unwrap().count(),
+            0
+        );
+    }
+
+    #[test]
+    fn preference_seed_never_moves_data_into_a_racing_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        let ln = bin.path().join("ln");
+        fs::write(&ln, "#!/bin/sh\n/bin/mkdir cli.json\nexec /bin/ln \"$@\"\n").unwrap();
+        fs::set_permissions(&ln, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut stdin = tempfile::tempfile().unwrap();
+        stdin.write_all(b"private-seed").unwrap();
+        stdin.rewind().unwrap();
+        let output = Command::new("/bin/sh")
+            .args(["-c", PREFERENCE_SEED_SCRIPT, "dungeon-seed"])
+            .arg(root.path())
+            .env_clear()
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.path().display()))
+            .stdin(Stdio::from(stdin))
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{output:?}");
+        assert_eq!(
+            fs::read_dir(root.path().join("cli.json")).unwrap().count(),
+            0
+        );
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
     }
 }

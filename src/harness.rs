@@ -24,8 +24,8 @@ fn home() -> Result<PathBuf> {
     Ok(home)
 }
 pub(crate) const WARNING: &str = "Read-only prevents host writes, not credential reading, use or exfiltration. Config/plugins execute in the guest. OpenCode 2.1.2 database credentials and sessions are NOT shared; readable legacy auth.json does not establish usable guest authentication. Original-source imports are refused on enforcing SELinux hosts; choose copy explicitly. Read-only auth may prevent login refresh, and snapshots may become stale. Host-only paths are not remapped. No network policy is widened.";
-pub(crate) const VERSION_NOTE: &str = "Selected image agent version is unverified; a version mismatch is not a refusal, and an existing guest is never rebuilt.";
-#[cfg(target_os = "linux")]
+pub(crate) const VERSION_NOTE: &str = "The selected image's OpenCode version and imported configuration compatibility have not been checked; the reviewed recipe pin does not verify this image. Existing guests are not rebuilt.";
+pub(crate) const PREFERENCE_NOTE: &str = "cli.json will be copied once into guest-owned writable state, not mounted. An existing guest file is preserved; host configuration and approved snapshots are never written back.";
 pub(crate) const GUEST_CLI_JSON: &str = "/sandbox/.config/opencode/cli.json";
 const CLI_JSON: &str = "cli.json";
 const CLI_JSON_FILE: &str = "config/cli.json";
@@ -237,7 +237,7 @@ pub(crate) fn refuse_openshell_guest_preferences(config: &Config) -> Result<()> 
     {
         return Err(Error::refusal(
             crate::ErrorCode::Unsupported,
-            "OpenShell cannot seed guest preferences, so this combination is refused before any OpenShell command; cli.json is neither mounted nor dropped. Remove guest_preferences or use a plain container",
+            "OpenShell cannot seed guest preferences; this combination is unsupported. Reselect imports on an unbound environment or initialize a separate binding; do not hand-edit a bound configuration",
         ));
     }
     Ok(())
@@ -269,19 +269,7 @@ pub(crate) fn mounts(config: &Config) -> Vec<Value> {
         .iter()
         .filter(|file| !preference_omitted(h, file))
         .map(|file| {
-            let source = if h.mode == HarnessMode::Copy {
-                config
-                    .path
-                    .parent()
-                    .expect("config parent")
-                    .join("harness")
-                    .join(h.snapshot.as_deref().unwrap_or(
-                        "0000000000000000000000000000000000000000000000000000000000000000",
-                    ))
-                    .join(file)
-            } else {
-                source(h, file)
-            };
+            let source = import_source(config, h, file);
             let target = file
                 .strip_prefix("config/")
                 .map(|p| format!("{CONFIG_TARGET}/{p}"))
@@ -297,6 +285,40 @@ pub(crate) fn mounts(config: &Config) -> Vec<Value> {
         .collect()
 }
 
+fn import_source(config: &Config, h: &HarnessConfig, file: &str) -> PathBuf {
+    if h.mode == HarnessMode::Copy {
+        config
+            .path
+            .parent()
+            .expect("config parent")
+            .join("harness")
+            .join(
+                h.snapshot
+                    .as_deref()
+                    .unwrap_or("0000000000000000000000000000000000000000000000000000000000000000"),
+            )
+            .join(file)
+    } else {
+        source(h, file)
+    }
+}
+
+pub(crate) fn preference_seed_plan(config: &Config) -> Option<Value> {
+    let h = config
+        .values
+        .harness
+        .as_ref()
+        .filter(|h| h.mode != HarnessMode::Disabled && preference_omitted(h, CLI_JSON_FILE))?;
+    Some(json!({
+        "source": import_source(config, h, CLI_JSON_FILE),
+        "target": GUEST_CLI_JSON,
+        "mode": "guest-owned-copy-once",
+        "overwrite": false,
+        "runtime_support": if config.values.container.is_some() { "plain-container" } else { "unsupported" },
+        "verification": "offline declaration; native OpenCode preference persistence not verified",
+    }))
+}
+
 fn source(h: &HarnessConfig, file: &str) -> PathBuf {
     file.strip_prefix("config/")
         .map(|p| h.source.join(p))
@@ -310,6 +332,7 @@ pub(crate) fn plan(config: &Config) -> Value {
     let mut plan = json!({
         "configuration":h,
         "mounts":mounts(config),
+        "guest_preference_seed":preference_seed_plan(config),
         "warning":WARNING,
         "auth_exclusion": "exclude_provider_auth omits legacy auth.json and entire opencode.json/jsonc/cli.json files, not a secret scanner for arbitrary code or other files",
         "refresh": "reload reselects unbound files/snapshots only; --harness-config copy|disabled explicitly changes import mode; bound runtime refresh is refused; live file replacement may leave an old inode mounted",
@@ -563,35 +586,56 @@ mod linux {
         {
             return Ok(None);
         }
-        if super::mounts(config)
-            .iter()
-            .any(|mount| mount["target"] == super::GUEST_CLI_JSON)
-        {
-            return Ok(None);
-        }
-        let mut file = if h.mode == HarnessMode::Copy {
-            let digest = h.snapshot.as_deref().ok_or_else(|| {
-                Error::new("harness snapshot not approved; guest preference seed unavailable")
-            })?;
-            let root = directory(
-                &config
-                    .path
-                    .parent()
-                    .expect("config parent")
-                    .join("harness")
-                    .join(digest),
-                true,
-            )?;
-            let file = child_file(&root, super::CLI_JSON_FILE)?;
-            metadata(&file, false, true)?;
-            if file.metadata().map_err(|_| error())?.len() > MAX_FILE {
-                return Err(error());
-            }
-            file
+        let data = if h.mode == HarnessMode::Copy {
+            let (root, manifest) = approved_snapshot(config, h)?;
+            let digest = manifest.files.get(super::CLI_JSON_FILE).ok_or_else(error)?;
+            snapshot_bytes(&root, super::CLI_JSON_FILE, digest)?
         } else {
-            source_file(h, super::CLI_JSON_FILE)?
+            bytes(&mut source_file(h, super::CLI_JSON_FILE)?, MAX_FILE)?
         };
-        Ok(Some(bytes(&mut file, MAX_FILE)?))
+        Ok(Some(data))
+    }
+
+    fn approved_snapshot(config: &Config, h: &HarnessConfig) -> Result<(File, Manifest)> {
+        let digest = h.snapshot.as_deref().ok_or_else(|| {
+            Error::new("harness snapshot not approved; run reload before first up")
+        })?;
+        let root = directory(
+            &config
+                .path
+                .parent()
+                .expect("config parent")
+                .join("harness")
+                .join(digest),
+            true,
+        )?;
+        let (_, data) = private_bytes(&root, "manifest.json", MAX_MANIFEST)?;
+        let m: Manifest = serde_json::from_value(
+            crate::config::read_json_text(std::str::from_utf8(&data).map_err(|_| error())?)
+                .map_err(|_| error())?,
+        )
+        .map_err(|_| error())?;
+        if m.schema != 1
+            || m.source != h.source
+            || m.legacy_auth != h.legacy_auth
+            || m.exclude_provider_auth != h.exclude_provider_auth
+            || m.exclude != h.exclude
+            || m.files.keys().collect::<BTreeSet<_>>() != h.files.iter().collect::<BTreeSet<_>>()
+            || hash(&encoded(&m)?) != digest
+        {
+            return Err(error());
+        }
+        Ok((root, m))
+    }
+
+    fn snapshot_bytes(root: &File, path: &str, digest: &str) -> Result<Vec<u8>> {
+        let mut file = child_file(root, path)?;
+        metadata(&file, false, true)?;
+        let data = bytes(&mut file, MAX_FILE)?;
+        if file.metadata()?.mode() & 0o777 != 0o400 || hash(&data) != digest {
+            return Err(error());
+        }
+        Ok(data)
     }
 
     pub(crate) fn verify(config: &Config) -> Result<()> {
@@ -602,46 +646,12 @@ mod linux {
             HarnessMode::Disabled => Ok(()),
             HarnessMode::ReadOnly => verify_original_sources(h),
             HarnessMode::Copy => {
-                let digest = h.snapshot.as_deref().ok_or_else(|| {
-                    Error::new("harness snapshot not approved; run reload before first up")
-                })?;
-                let root = directory(
-                    &config
-                        .path
-                        .parent()
-                        .expect("config parent")
-                        .join("harness")
-                        .join(digest),
-                    true,
-                )?;
-                let (_, data) = private_bytes(&root, "manifest.json", MAX_MANIFEST)?;
-                let m: Manifest = serde_json::from_value(
-                    crate::config::read_json_text(std::str::from_utf8(&data).map_err(|_| error())?)
-                        .map_err(|_| error())?,
-                )
-                .map_err(|_| error())?;
-                if m.schema != 1
-                    || m.source != h.source
-                    || m.legacy_auth != h.legacy_auth
-                    || m.exclude_provider_auth != h.exclude_provider_auth
-                    || m.exclude != h.exclude
-                    || m.files.keys().collect::<BTreeSet<_>>()
-                        != h.files.iter().collect::<BTreeSet<_>>()
-                    || hash(&encoded(&m)?) != digest
-                {
-                    return Err(error());
-                }
+                let (root, m) = approved_snapshot(config, h)?;
                 for (path, digest) in &m.files {
                     if !allowed_file(h, path) {
                         return Err(error());
                     }
-                    let mut file = child_file(&root, path)?;
-                    metadata(&file, false, true)?;
-                    if file.metadata()?.mode() & 0o777 != 0o400
-                        || hash(&bytes(&mut file, MAX_FILE)?) != *digest
-                    {
-                        return Err(error());
-                    }
+                    snapshot_bytes(&root, path, digest)?;
                 }
                 Ok(())
             }
@@ -801,6 +811,7 @@ mod linux {
         if refresh && let Some(h) = &mut values.harness {
             h.files.clear();
             h.snapshot = None;
+            h.guest_preferences.clear();
         }
         let candidate = crate::config::load_config_data(
             config.path.clone(),
@@ -871,6 +882,9 @@ mod linux {
             {
                 writeln!(std::io::stdout(), "{}", super::VERSION_NOTE)?;
             }
+            if super::preference_seed_plan(candidate).is_some() {
+                writeln!(std::io::stdout(), "{}", super::PREFERENCE_NOTE)?;
+            }
             if !yes {
                 write!(
                     std::io::stdout(),
@@ -896,6 +910,45 @@ mod linux {
     mod tests {
         use super::*;
         use std::io::{Error as IoError, ErrorKind};
+
+        #[test]
+        fn seed_reader_rechecks_the_consumed_snapshot_bytes() {
+            let root = tempfile::tempdir().unwrap();
+            let source = root.path().join("host/opencode");
+            let private = root.path().join("private");
+            fs::create_dir_all(&source).unwrap();
+            fs::create_dir(&private).unwrap();
+            fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::write(source.join("cli.json"), b"approved").unwrap();
+            let config = crate::config::load_config_data(
+                private.join("dungeon.json"),
+                json!({
+                    "schema":2, "name":"seed-test", "gateway":"local", "workspace":"default",
+                    "project":root.path().join("project"), "project_transfer":"live",
+                    "container":{"engine":"podman"}, "image":"localhost/synthetic:1",
+                    "agent":"opencode", "providers":[],
+                    "harness":{
+                        "agent":"opencode", "mode":"copy", "source":source,
+                        "legacy_auth":root.path().join("data/opencode/auth.json"),
+                    },
+                }),
+                |path| Ok((path.to_owned(), crate::policy::starter_policy())),
+            )
+            .unwrap();
+            let mut prepared = prepare(config, false).unwrap();
+            let config = prepared.config.clone();
+            prepared.publish(&config).unwrap();
+            verify(&config).unwrap();
+            let seed = super::super::import_source(
+                &config,
+                config.values.harness.as_ref().unwrap(),
+                "config/cli.json",
+            );
+            fs::set_permissions(&seed, fs::Permissions::from_mode(0o600)).unwrap();
+            fs::write(&seed, b"changed-after-verification").unwrap();
+            fs::set_permissions(&seed, fs::Permissions::from_mode(0o400)).unwrap();
+            assert!(preference_seed_bytes(&config).is_err());
+        }
 
         #[test]
         fn original_source_selinux_gate_is_conservative_and_sanitized() {

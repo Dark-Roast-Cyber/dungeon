@@ -142,6 +142,23 @@ Local setup keeps only private gateway TLS/configuration, persistent database fi
 
 The npm tree is distribution only: a tiny Node launcher selects a platform package and executes its Rust binary. It must never parse Dungeon config, apply policy, coordinate auth, or contact OpenShell.
 
+### Imported preferences in plain containers
+
+New selections can classify only OpenCode `cli.json` as a one-time guest-owned
+copy. The same harness selection owns its source, snapshot hash and mount omission;
+there is no second guest-state registry or synchronization loop. Empty
+`guest_preferences` preserves historical serialization and fingerprints.
+Creation captures verified bytes before native mutations, sends them through
+private anonymous-file stdin under the existing subprocess deadline, and publishes
+the file as the guest user using an atomic no-clobber hard link. Existing regular
+files are preserved; symlinks and non-files refuse. Failure retains the pending
+binding. Resume never re-seeds.
+
+The parent is a fixed image-owned path supplied by Rust, not project/configuration
+input. Other selected files stay read-only mounts. OpenShell has no seeding path
+and rejects a nonempty preference request. This is storage behavior, not a
+configuration-schema compatibility check or validated native OpenCode UI action.
+
 ## OpenShell adoption boundary
 
 Dungeon should make supported OpenShell paths easier to adopt without pretending OpenShell is a Dungeon implementation detail.

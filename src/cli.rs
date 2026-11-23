@@ -1714,6 +1714,9 @@ fn approve_environment(config: &Config, yes: bool) -> Result<()> {
     {
         writeln!(io::stdout(), "{}", crate::imports::harness::WARNING)?;
         writeln!(io::stdout(), "{}", crate::imports::harness::VERSION_NOTE)?;
+        if crate::imports::harness::preference_seed_plan(config).is_some() {
+            writeln!(io::stdout(), "{}", crate::imports::harness::PREFERENCE_NOTE)?;
+        }
         if h.mode == HarnessMode::Copy {
             writeln!(
                 io::stdout(),

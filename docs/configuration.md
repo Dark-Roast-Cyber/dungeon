@@ -857,9 +857,8 @@ retain no harness import. Codex and Claude Code sharing follow separately.
 
 ### Known OpenCode import limitations (#47, #48)
 
-Imports are optional and default off. The two reported issues now have a bounded
-contract. Neither was accepted by a native OpenCode UI toggle, an atomic preference
-save, or an image-compatibility probe.
+Imports are optional and default off. Both issues remain open: the compatibility
+check in #47 is not implemented, and #48 still needs a native OpenCode UI test.
 
 - [#47](https://github.com/Dark-Roast-Cyber/dungeon/issues/47): a version mismatch
   is not a confirmed incompatibility and is not a refusal. Dungeon does not probe
@@ -875,8 +874,12 @@ save, or an image-compatibility probe.
   `guest_preferences: ["cli.json"]`, omits that file from mounts, keeps the
   approved bytes in the copy snapshot, and seeds them once into guest-owned
   `/sandbox/.config/opencode/cli.json` if that path is absent. An existing guest
-  file is never overwritten. Nothing is written back to the host or the snapshot.
-  Host configuration stays read-only. Docker and Podman share this path.
+  regular file is never overwritten; symlinks and other file types refuse.
+  The seed plan shows the source, destination and no-overwrite behavior. Copy-mode
+  bytes are hash-checked and captured before native creation. Original-source mode
+  copies the selected file as observed at first creation, not a reviewed snapshot.
+  Nothing is written back to the host or snapshot. Docker and Podman share this
+  implementation; only rootless Podman has native seed validation.
   Historical configs omit the field, keep the read-only `cli.json` mount, and
   keep the same fingerprint. Bound edits stay refused. An unbound reload or edit
   that rediscovers files may gain the field; that is a new selection, not guest
@@ -884,14 +887,19 @@ save, or an image-compatibility probe.
   OpenShell does not seed. New OpenShell selections do not set
   `guest_preferences` and keep the read-only mount. A config that nevertheless
   has the field is refused before any OpenShell command, including version
-  lookup; the file is neither mounted nor dropped. Remove the field to recover
-  the binding.
+  lookup. Reselect imports with `reload --yes` on an unbound environment, or
+  initialize a separate binding. Never hand-edit a bound configuration to remove
+  the field: it is part of the fingerprint.
   `--harness-exclude cli.json` and `--exclude-provider-auth` omit the file and
   leave `guest_preferences` empty. That remains the opt-out: no seed and no mount.
 
-No native side-panel persistence or atomic-save acceptance was run. Do not treat
-seeding as proof that the selected OpenCode can persist UI preferences, or that
-the selected image accepts the imported configuration.
+A disposable Podman guest passed filesystem-level atomic replacement and
+stop/resume persistence, with unchanged host/snapshot contents and read-only static
+imports. No native OpenCode side-panel action or configuration-compatibility probe
+was run. See [validation](validation.md#opencode-import-preferences-47-48).
+The selected Linux image needs `mktemp` and `ln -T` for private, atomic no-clobber
+publication. A missing utility or failed seed leaves initialization pending for
+explicit stop/destroy; it never reports the guest ready or retries on resume.
 
 Any runtime marker refuses import/image edits. Do not make original sources or
 approved snapshots writable, refresh over guest preferences, or hand-edit bound
@@ -903,7 +911,7 @@ files; it is not needed merely to acknowledge the limitation.
 
 | Choice | Behavior |
 | --- | --- |
-| `--harness-config read-only` | Select individual existing native files; derive read-only original-source binds without relabeling |
+| `--harness-config read-only` | Read-only original-source binds without relabeling; new plain-container `cli.json` selections are instead copied once into guest-owned state at creation |
 | `--harness-config copy` | Capture/review a private snapshot in the same initialization/edit approval; no separate reload; snapshot files are mounted read-only, except `cli.json` on a new plain-container selection, which is seeded once into guest-owned state |
 | `--harness-config disabled` (default) | No harness mounts or source inventory |
 | `--exclude-provider-auth` | Omit legacy auth and entire `opencode.json`, `opencode.jsonc`, `cli.json` files that may mix credentials with settings |

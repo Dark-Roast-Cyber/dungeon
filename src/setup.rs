@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
 use std::os::unix::process::CommandExt;
@@ -70,13 +70,37 @@ pub(crate) fn query(
     args: &[&str],
     timeout: Duration,
 ) -> Option<Reply> {
+    query_stdio(binary, env, args, timeout, Stdio::null())
+}
+
+// A private anonymous file avoids pipe backpressure and writer-thread lifetimes.
+pub(crate) fn query_with_stdin(
+    binary: &Path,
+    env: &HashMap<OsString, OsString>,
+    args: &[&str],
+    timeout: Duration,
+    stdin: &[u8],
+) -> Option<Reply> {
+    let mut input = tempfile::tempfile().ok()?;
+    input.write_all(stdin).ok()?;
+    input.rewind().ok()?;
+    query_stdio(binary, env, args, timeout, Stdio::from(input))
+}
+
+fn query_stdio(
+    binary: &Path,
+    env: &HashMap<OsString, OsString>,
+    args: &[&str],
+    timeout: Duration,
+    stdin: Stdio,
+) -> Option<Reply> {
     let mut command = Command::new(binary);
     command
         .args(args)
         .current_dir("/")
         .env_clear()
         .envs(env)
-        .stdin(Stdio::null())
+        .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .process_group(0);
@@ -93,47 +117,6 @@ pub(crate) fn query(
         }
     };
     collect_query(child, timeout.saturating_sub(start.elapsed()))
-}
-
-// Seed stdin stays off the shared query path so ordinary commands keep null stdin.
-pub(crate) fn query_with_stdin(
-    binary: &Path,
-    env: &HashMap<OsString, OsString>,
-    args: &[&str],
-    timeout: Duration,
-    stdin: &[u8],
-) -> Option<Reply> {
-    let mut command = Command::new(binary);
-    command
-        .args(args)
-        .current_dir("/")
-        .env_clear()
-        .envs(env)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .process_group(0);
-    let start = Instant::now();
-    let mut child = loop {
-        match command.spawn() {
-            Ok(child) => break child,
-            Err(error)
-                if error.raw_os_error() == Some(libc::ETXTBSY) && start.elapsed() < timeout =>
-            {
-                thread::sleep(Duration::from_millis(5));
-            }
-            Err(_) => return None,
-        }
-    };
-    let mut input = child.stdin.take()?;
-    let payload = stdin.to_vec();
-    let writer = thread::spawn(move || input.write_all(&payload));
-    let reply = collect_query(child, timeout.saturating_sub(start.elapsed()));
-    let wrote = matches!(writer.join(), Ok(Ok(())));
-    match reply {
-        Some(reply) if wrote || reply.code != 0 => Some(reply),
-        _ => None,
-    }
 }
 
 pub(super) fn collect_query(mut child: std::process::Child, timeout: Duration) -> Option<Reply> {
@@ -1483,6 +1466,34 @@ fn verify_health(tools: &Tools, attempts: usize) -> Result<()> {
 mod tests {
     use super::*;
     use std::os::unix::fs::{PermissionsExt, symlink};
+
+    #[test]
+    fn finite_stdin_allows_success_without_consuming_the_payload() {
+        let reply = query_with_stdin(
+            Path::new("/bin/sh"),
+            &HashMap::new(),
+            &["-c", "exit 0"],
+            Duration::from_secs(2),
+            &vec![b'x'; 4 * 1024 * 1024],
+        )
+        .expect("an early successful exit must not depend on pipe capacity");
+        assert_eq!(reply.code, 0);
+        assert_eq!(reply.text, "");
+    }
+
+    #[test]
+    fn finite_stdin_delivers_the_full_supported_payload() {
+        let reply = query_with_stdin(
+            Path::new("/usr/bin/wc"),
+            &HashMap::new(),
+            &["-c"],
+            Duration::from_secs(2),
+            &vec![b'x'; 4 * 1024 * 1024],
+        )
+        .unwrap();
+        assert_eq!(reply.code, 0);
+        assert_eq!(reply.text.trim(), "4194304");
+    }
 
     pub(super) fn host_maps() -> Value {
         serde_json::json!({"uidmap":[{"container_id":0,"host_id":unsafe { libc::geteuid() },"size":1},{"container_id":1,"host_id":524288,"size":65536}],"gidmap":[{"container_id":0,"host_id":unsafe { libc::getegid() },"size":1},{"container_id":1,"host_id":524288,"size":65536}]})

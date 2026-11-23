@@ -403,7 +403,7 @@ fn new_opencode_binding_selects_only_reviewed_native_leaves_and_no_session_datab
     ]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("database credentials and sessions are NOT shared"));
-    assert!(stdout.contains("Selected image agent version is unverified"));
+    assert!(stdout.contains("compatibility have not been checked"));
     let config = f.config();
     assert_eq!(config["values"]["harness"]["mode"], "read-only");
     assert_eq!(
@@ -525,7 +525,7 @@ fn headless_mode_recovery_captures_and_preserves_exclusions_in_one_approval() {
     let out = f.success(&["reload", "--harness-config", "copy", "--yes"]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("Harness selection approved"));
-    assert!(stdout.contains("Selected image agent version is unverified"));
+    assert!(stdout.contains("compatibility have not been checked"));
     let h = &f.config()["values"]["harness"];
     assert_eq!(h["mode"], "copy");
     assert_eq!(h["exclude_provider_auth"], true);
@@ -980,8 +980,7 @@ fn plain_container_seeds_cli_json_without_a_writable_import_mount() {
             mode,
         ]);
         assert!(
-            String::from_utf8_lossy(&out.stdout)
-                .contains("Selected image agent version is unverified")
+            String::from_utf8_lossy(&out.stdout).contains("compatibility have not been checked")
         );
         let config = f.config();
         let harness = &config["values"]["harness"];
@@ -994,6 +993,15 @@ fn plain_container_seeds_cli_json_without_a_writable_import_mount() {
                 .any(|file| file == "config/cli.json")
         );
         let plan = f.plan();
+        assert_eq!(
+            plan["guest_preference_seed"]["target"],
+            "/sandbox/.config/opencode/cli.json"
+        );
+        assert_eq!(
+            plan["guest_preference_seed"]["mode"],
+            "guest-owned-copy-once"
+        );
+        assert_eq!(plan["guest_preference_seed"]["overwrite"], false);
         let mounts = plan["configuration_mounts"].as_array().unwrap();
         assert!(mounts.iter().all(|mount| mount["read_only"] == true));
         assert!(mounts.iter().all(|mount| {
@@ -1070,6 +1078,88 @@ fn plain_container_seeds_cli_json_without_a_writable_import_mount() {
                 .all(|mount| mount["target"] != "/sandbox/.config/opencode/cli.json")
         );
     }
+}
+
+#[test]
+fn plain_container_reload_recaptures_guest_preferences() {
+    let f = Fixture::new();
+    f.success(&[
+        "init",
+        "--yes",
+        "--agent",
+        "opencode",
+        "--runtime",
+        "container",
+        "--harness-config",
+        "copy",
+    ]);
+    fs::write(f.source.join("cli.json"), b"{\"theme\":\"updated\"}").unwrap();
+    f.success(&["reload", "--yes"]);
+    let config = f.config();
+    let harness = &config["values"]["harness"];
+    assert_eq!(harness["guest_preferences"], json!(["cli.json"]));
+    let seed = f
+        .config_path()
+        .parent()
+        .unwrap()
+        .join("harness")
+        .join(harness["snapshot"].as_str().unwrap())
+        .join("config/cli.json");
+    assert_eq!(fs::read(seed).unwrap(), b"{\"theme\":\"updated\"}");
+    assert!(!f.config_path().with_file_name("runtime.json").exists());
+}
+
+#[test]
+fn plain_container_imports_can_be_disabled_without_reopening_sources() {
+    let f = Fixture::new();
+    f.success(&[
+        "init",
+        "--yes",
+        "--agent",
+        "opencode",
+        "--runtime",
+        "container",
+        "--harness-config",
+        "copy",
+    ]);
+    symlink(
+        "/unavailable-synthetic-plugin",
+        f.source.join("plugins/bad"),
+    )
+    .unwrap();
+    f.success(&["reload", "--harness-config", "disabled", "--yes"]);
+    let config = f.config();
+    let harness = &config["values"]["harness"];
+    assert_eq!(harness["mode"], "disabled");
+    assert_eq!(harness["files"], json!([]));
+    assert!(harness.get("guest_preferences").is_none());
+    assert_eq!(f.plan()["configuration_mounts"], json!([]));
+}
+
+#[test]
+fn plain_container_preference_exclusion_removes_the_seed_on_edit() {
+    let f = Fixture::new();
+    f.success(&[
+        "init",
+        "--yes",
+        "--agent",
+        "opencode",
+        "--runtime",
+        "container",
+        "--harness-config",
+        "copy",
+    ]);
+    f.success(&["config", "--edit", "--yes", "--harness-exclude", "cli.json"]);
+    let config = f.config();
+    let harness = &config["values"]["harness"];
+    assert!(harness.get("guest_preferences").is_none());
+    assert!(
+        !harness["files"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("config/cli.json"))
+    );
+    assert!(!f.config_path().with_file_name("runtime.json").exists());
 }
 
 #[test]

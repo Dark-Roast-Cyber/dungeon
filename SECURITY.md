@@ -178,6 +178,14 @@ denial is not permission to disable enforcement. After explicit opt-in, copy mod
 stages private bytes for review; final initialization/edit/reload approval
 publishes those copies. Only private copies may be relabeled. Interrupted review
 can leave private staging files; this is not secure erasure.
+For new plain-container selections, `cli.json` is instead copied once into
+guest-owned writable state. Copy-mode seed bytes are checked against the approved
+snapshot before creation; original-source mode captures that selected file at
+creation. Seeds never write back or mount the host source writable. The fixed
+guest-user initializer preserves an existing regular file and refuses symlinks
+and non-files. A failed seed leaves the guest pending; resume does not retry it.
+Historical selections retain their read-only mount. No native authentication or
+session database is added to this exception.
 Excluded and known credential/native-state paths, including all `.env` names,
 are skipped before content reads. Auth exclusion conservatively omits whole
 OpenCode JSON config files that could mix credentials with ordinary settings;

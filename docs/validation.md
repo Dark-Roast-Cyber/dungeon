@@ -65,13 +65,57 @@ receipts: `/tmp/opencode/dungeon-030-prep-20261123/`.
 
 ## OpenCode import preferences (#47, #48)
 
-New plain-container selections seed `cli.json` once into guest-owned state when
-that file is selected. Historical bindings and OpenShell keep the read-only
-mount. Exclude remains the opt-out. This was not run against a real OpenCode
-UI, atomic preference save, or selected image. `dungeon versions` reports
-`selected_image_agent_version` as `unverified`; a mismatch does not refuse
-creation and does not rebuild an existing guest. See
-[configuration](configuration.md#known-opencode-import-limitations-47-48).
+PR #51 introduced a one-time guest-owned `cli.json` copy for new plain-container
+selections. Its passing CI did not validate a live seed or a native OpenCode UI.
+Historical bindings and OpenShell retain read-only mounts.
+
+The subsequent adversarial review reproduced three unbound-operation failures:
+reload, disabling imports, and excluding `cli.json` all failed because refresh
+cleared `files` without clearing the derived preference selection. A separate
+regression reproduced a successful subprocess being reported as unavailable when
+it exited before consuming a large stdin payload. Static review also found an
+unbounded writer-thread join after subprocess timeout. The corrected path uses
+private anonymous-file stdin and the existing bounded collector, without a writer
+thread or mandatory drain.
+
+The original seed script reported success for an existing `cli.json` directory.
+A deterministic directory insertion before its `mv -n` also moved the seed
+*inside* that directory and returned success. The corrected complete script
+refuses non-files and uses `ln -T` for atomic, no-clobber publication, with private
+random temporary files and cleanup. Tests no longer splice a different script out
+of a production-only marker. Copy-mode bytes are now hash-checked on the consumed
+descriptor and captured before native mutations; a synthetic engine changing the
+snapshot during start cannot change the seed sent to the guest.
+
+On 2026-11-23, a fresh synthetic rootless-Podman5.8.9 guest on Fedora44,
+kernel7.3.4, enforcing SELinux, passed:
+
+- actual image ID `8c6ce253c5f62a40a0bff0b8f4d8ff494b705a0a15f444e760afbbc8619fd17f`,
+  empty process label, and no `cli.json` bind;
+- exact approved bytes with UID/GID998 and mode0600;
+- guest filesystem atomic replacement of `cli.json`, while a static theme bind
+  refused writes;
+- same-ID stop/resume retaining the guest replacement, with unchanged original
+  config and snapshot contents.
+
+Only that new guest was stopped/destroyed. All20 existing container ID/name/state/
+start records matched afterward; no service, image or host-enforcement change was
+made. Receipt:
+`/tmp/opencode/dungeon-import-review-20261123/native-u3vr1t4i/receipt.json`.
+This qualifies the corrected storage/process path on that combination, **not** an
+OpenCode side-panel action, authentication/session behavior, Docker, OpenShell or
+image/configuration compatibility.
+
+The combined corrections passed297 locked Rust tests (166 unit +131 integration),
+fmt, locked warnings-denied all-target Clippy, and33 Node24.22.2 tests. Red/green
+regressions, seed-reader/timing/stdin-position sensitivity checks, original script
+reproductions and native logs are under
+`/tmp/opencode/dungeon-import-review-20261123/`. Corrections remain local; hosted
+cross-platform CI has not run on them.
+
+`versions` still reports `selected_image_agent_version: unverified`: #47 has a
+warning, not implemented precreation incompatibility detection. Both issues remain
+open. See [configuration](configuration.md#known-opencode-import-limitations-47-48).
 
 ## Selectable SELinux separation (#49, 2026-11-23)
 

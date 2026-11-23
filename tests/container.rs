@@ -54,11 +54,11 @@ case "$1 ${{2:-}}" in
   'ps --all') test ! -e fail-ps; if [ -e exists ]; then printf '%s\n' '{ID}'; fi; case "$*" in *'--filter id='*) ;; *) if [ -e extra ]; then /bin/cat extra; fi;; esac;;
   'container inspect') test -e exists; test ! -e fail-inspect; /bin/cat inspect.json;;
   'create --name') if [ -e fail-before-create ]; then exit 17; fi; : > exists; /bin/cp stopped.json inspect.json; if [ -e lose-create-reply ]; then exit 17; fi; printf '%s\n' '{ID}';;
-  'start '*) /bin/cp running.json inspect.json;;
+  'start '*) /bin/cp running.json inspect.json; if [ -e replace-seed-at-start ]; then /bin/chmod 600 "$(/bin/cat replace-seed-at-start)"; printf 'changed-after-validation' > "$(/bin/cat replace-seed-at-start)"; fi;;
   'unpause '*) /bin/cp running.json inspect.json;;
   'stop '*) /bin/cp stopped.json inspect.json;;
   'rm '*) if [ ! -e leave-container ]; then /bin/rm exists; fi; if [ -e fail-after-rm ]; then : > fail-ps; fi;;
-  'exec '*) for a in "$@"; do if [ "$a" = fail-fixture ]; then exit 23; fi; if [ "$a" = output-fixture ]; then printf '{{"fixture":true}}\n'; printf 'guest diagnostic\n' >&2; exit 23; fi; done;;
+  'exec '*) if [ "${{2:-}}" = --interactive ]; then /bin/cat > seeded-stdin; if [ -e fail-seed ]; then exit 29; fi; fi; for a in "$@"; do if [ "$a" = fail-fixture ]; then exit 23; fi; if [ "$a" = output-fixture ]; then printf '{{"fixture":true}}\n'; printf 'guest diagnostic\n' >&2; exit 23; fi; done;;
   *) exit 9;;
 esac
 "##,
@@ -145,6 +145,103 @@ esac
     fn state(&self) -> PathBuf {
         self.config.with_file_name("runtime.json")
     }
+    fn import_preferences(&self, bytes: &[u8]) -> PathBuf {
+        let source = self.home.join(".config/opencode");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("cli.json"), bytes).unwrap();
+        self.ok(&[
+            "config",
+            "--edit",
+            "--yes",
+            "--agent",
+            "opencode",
+            "--harness-config",
+            "copy",
+        ]);
+        let config: Value = serde_json::from_slice(&self.ok(&["config"]).stdout).unwrap();
+        let plan: Value = serde_json::from_slice(&self.ok(&["plan"]).stdout).unwrap();
+        let fingerprint = plan["fingerprint"].as_str().unwrap();
+        for file in ["stopped.json", "running.json"] {
+            let mut native: Value =
+                serde_json::from_slice(&fs::read(self.root.path().join(file)).unwrap()).unwrap();
+            native[0]["Config"]["Labels"]["agentarchaeology.ai/dungeon-config"] =
+                json!(fingerprint);
+            native[0]["Name"] = json!(format!(
+                "/dungeon-{}-{}",
+                config["values"]["name"].as_str().unwrap(),
+                &fingerprint[..8],
+            ));
+            self.write(file, &native);
+        }
+        self.config
+            .with_file_name("harness")
+            .join(config["values"]["harness"]["snapshot"].as_str().unwrap())
+            .join("config/cli.json")
+    }
+}
+
+#[test]
+fn first_create_seeds_exact_snapshot_bytes_and_resume_preserves_guest_changes() {
+    let f = Fixture::new("podman");
+    let snapshot = f.import_preferences(b"approved\0\xff");
+    f.ok(&["up"]);
+    assert_eq!(
+        fs::read(f.root.path().join("seeded-stdin")).unwrap(),
+        b"approved\0\xff"
+    );
+    fs::write(f.root.path().join("seeded-stdin"), b"guest-preference").unwrap();
+    f.ok(&["down"]);
+    f.ok(&["up"]);
+    assert_eq!(
+        fs::read(f.root.path().join("seeded-stdin")).unwrap(),
+        b"guest-preference"
+    );
+    assert_eq!(fs::read(snapshot).unwrap(), b"approved\0\xff");
+}
+
+#[test]
+fn seed_failure_preserves_pending_state_and_allows_explicit_destruction() {
+    let f = Fixture::new("podman");
+    f.import_preferences(b"approved");
+    fs::write(f.root.path().join("fail-seed"), "").unwrap();
+    let output = f.run(&["up"]);
+    assert!(!output.status.success(), "{output:?}");
+    let state: Value = serde_json::from_slice(&fs::read(f.state()).unwrap()).unwrap();
+    assert_eq!(state["initial_upload_pending"], true);
+    assert!(!f.run(&["run", "codex"]).status.success());
+    f.ok(&["down"]);
+    f.ok(&["destroy", "--yes"]);
+    assert!(!f.state().exists());
+}
+
+#[test]
+fn creation_freezes_approved_seed_bytes_before_native_mutations() {
+    let f = Fixture::new("podman");
+    let snapshot = f.import_preferences(b"approved");
+    fs::write(
+        f.root.path().join("replace-seed-at-start"),
+        snapshot.as_os_str().as_encoded_bytes(),
+    )
+    .unwrap();
+    f.ok(&["up"]);
+    assert_eq!(
+        fs::read(f.root.path().join("seeded-stdin")).unwrap(),
+        b"approved"
+    );
+    assert_eq!(fs::read(snapshot).unwrap(), b"changed-after-validation");
+}
+
+#[test]
+fn tampered_seed_is_refused_before_container_creation() {
+    let f = Fixture::new("podman");
+    let snapshot = f.import_preferences(b"approved");
+    fs::set_permissions(&snapshot, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(&snapshot, b"changed-before-validation").unwrap();
+    fs::set_permissions(&snapshot, fs::Permissions::from_mode(0o400)).unwrap();
+    let output = f.run(&["up"]);
+    assert!(!output.status.success(), "{output:?}");
+    assert!(!f.state().exists());
+    assert!(!f.root.path().join("exists").exists());
 }
 
 #[test]

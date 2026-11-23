@@ -49,10 +49,11 @@ establish runtime support or containment certification. Dungeon is not audited.
   upstream `base:latest` ([#47](https://github.com/Dark-Roast-Cyber/dungeon/issues/47)).
   The image tag does not imply the latest agent. Prefer imports disabled until
   the selected image/config combination is validated.
-- Imported `cli.json` is read-only and can block UI preference writes
-  ([#48](https://github.com/Dark-Roast-Cyber/dungeon/issues/48)). Guest-private
-  writable preference seeding is not implemented; avoid importing this file for
-  a new binding. Never make the host source writable as a workaround.
+- Historical and OpenShell `cli.json` imports are read-only and can block UI
+  preference writes ([#48](https://github.com/Dark-Roast-Cyber/dungeon/issues/48)).
+  New plain-container selections copy it once into guest-owned writable state;
+  native OpenCode UI acceptance remains outstanding. The host source is never
+  made writable.
 - The current Fedora/Podman disabled/private SELinux and full-container gates pass;
   older exit137 observations remain undiagnosed, not generally fixed by this release.
   Evidence is combination-specific. Desktop, EDR, remote-host and broader-platform

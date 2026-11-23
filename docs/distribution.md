@@ -4,8 +4,8 @@ The Rust `dungeon` binary is the only implementation. Every distribution path mu
 
 ## Current availability
 
-This checkout prepares Rust **0.3.0**, the first Rust tag release. Until its tag is
-published, follow the [source installation](../README.md#installation).
+Rust **0.3.0** is the first Rust tag release. Install a GitHub release archive
+or follow the [source installation](../README.md#installation) at tag `v0.3.0`.
 The optional [local install helper](../scripts/install-local.sh) builds that
 same binary with locked Cargo dependencies and installs it to a user bin
 directory. It neither publishes a release nor installs/starts OpenShell.
