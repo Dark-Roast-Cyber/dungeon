@@ -382,7 +382,19 @@ fn closed_output_consumers_are_errors_not_panics() {
 
 #[test]
 fn machine_init_selects_plain_containers_without_contact_or_host_imports() {
-    for engine in ["podman", "docker", "auto"] {
+    #[cfg(target_os = "linux")]
+    let cases = [
+        ("podman", "podman", json!("disabled")),
+        ("docker", "docker", Value::Null),
+        ("auto", "podman", json!("disabled")),
+    ];
+    #[cfg(not(target_os = "linux"))]
+    let cases = [
+        ("podman", "podman", Value::Null),
+        ("docker", "docker", Value::Null),
+        ("auto", "auto", Value::Null),
+    ];
+    for (engine, saved_engine, selinux) in cases {
         let f = Fixture::new();
         let directory = f.home.join("machine-private");
         let mut args = vec![
@@ -418,7 +430,8 @@ fn machine_init_selects_plain_containers_without_contact_or_host_imports() {
         assert_eq!(result["result"]["phase"], "uncreated");
         let values: Value =
             serde_json::from_slice(&fs::read(directory.join("dungeon.json")).unwrap()).unwrap();
-        assert_eq!(values["container"]["engine"], engine);
+        assert_eq!(values["container"]["engine"], saved_engine);
+        assert_eq!(values["selinux_isolation"], selinux);
         assert_eq!(values["project_transfer"], "live");
         assert_eq!(values["agent"], "claude");
         assert!(values["harness"].is_null());
@@ -1101,6 +1114,11 @@ mod terminal {
         fn default_configuration(&mut self, opencode: bool) {
             self.until("Image [");
             self.send("\n");
+            #[cfg(target_os = "linux")]
+            {
+                self.until("SELinux separation [private/disabled; default: disabled]:");
+                self.send("\n");
+            }
             if opencode {
                 self.until("Use a reviewed copy of your OpenCode configuration?");
                 self.send("\n");
@@ -1148,6 +1166,8 @@ mod terminal {
                 Terminal::spawn(f.command(), &["run", "opencode", "--", "--version"]);
             terminal.until("Image [");
             terminal.send("ghcr.io/example/agent:Reviewed\n");
+            terminal.until("SELinux separation [private/disabled; default: disabled]:");
+            terminal.send("\n");
             terminal.until("Use a reviewed copy of your OpenCode configuration?");
             assert!(terminal.text.contains("can expose credentials"));
             terminal.send("y\n");

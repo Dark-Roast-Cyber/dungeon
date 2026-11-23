@@ -237,6 +237,7 @@ mod tests {
             &path,
             &ConfigDoc {
                 openshell_contract: None,
+                selinux_isolation: Default::default(),
                 container: None,
                 schema: 2,
                 name: "demo".into(),

@@ -4,13 +4,19 @@
 
 Do not disclose a suspected vulnerability in a public issue, pull request, or discussion. Use [private vulnerability reporting](https://github.com/Dark-Roast-Cyber/dungeon/security/advisories/new). If that form is unavailable, send the report privately to `public@christiant.io`, the maintainer contact on the [Dark Roast Cyber profile](https://github.com/Dark-Roast-Cyber). Include a minimal synthetic reproduction, the affected commit or tag, and the impact. Do not send credentials, tokens, session stores, or live project data. No response deadline is promised. Fixes are evaluated for current `main` and the latest published release, when one exists.
 
-Dungeon 0.0.x is an engineering preview and has not undergone an independent security audit. Issue #1 performed live synthetic validation of one OpenShell 0.0.116 + rootless Podman 5.8.4 combination; that evidence does not generalize to other drivers, platforms, images, desktop clients, or EDR products.
+Dungeon 0.3.0 is an engineering preview and has not undergone an independent security audit. Issue #1 performed live synthetic validation of one OpenShell 0.0.116 + rootless Podman 5.8.4 combination; that evidence does not generalize to other drivers, platforms, images, desktop clients, or EDR products.
+See [security controls and tradeoffs](docs/security-controls.md) for the
+runtime-specific controls, selection guidance and verification limits.
 
 Trust the host administrator, Dungeon binary/configuration, OpenShell CLI/gateway/driver, selected image, and explicitly exposed credential/tool services. Treat the coding agent, project content, downloaded code, and agent-authored session records as untrusted.
 
 In OpenShell environments, OpenShell owns filesystem/process/network enforcement.
 Dungeon requires Landlock `hard_requirement` in accepted policy and refuses
 inspected audit-only endpoints, but policy readback is not kernel attestation.
+Inspection protocol names are recognized case-insensitively and require explicit
+`enforcement: "enforce"`; unknown or non-string protocol selectors refuse rather
+than being treated as uninspected. This validation does not enable OpenShell 0.1.x or
+establish that the pinned runtime supports each newer protocol.
 
 Plain-container environments explicitly use standard Linux rootless Podman or
 rootful Docker CE. They do not apply `policy.json`, restrict outbound networking,
@@ -18,10 +24,19 @@ or promise OpenShell/Landlock containment. Docker daemon access is effectively
 host-root authority. Runtime selection is reviewed at initialization and recorded;
 an existing OpenShell binding never falls back when OpenShell is unavailable.
 Only the project is mounted read/write; existing reviewed import selection supplies
-read-only leaves/snapshots. The project and private snapshots use SELinux private
-relabeling; original configuration files are never relabeled. Imported native
+read-only leaves/snapshots. New Linux rootless-Podman bindings explicitly default
+to `selinux_isolation: "disabled"`: workload-only `label=disable` without
+relabeling either mount type. This removes an extra MAC/MCS boundary, not host
+SELinux enforcement; it changes no other containment or networking control.
+Explicit private mode retains project/private-snapshot MCS relabeling.
+OpenShell and Docker retain their existing private requests and refuse disabled
+mode. Historical omitted fields and bound environments are unchanged; adopting
+the default needs [explicit replacement](docs/configuration.md#adopt-relaxed-labeling-for-an-existing-environment).
+Controlled native behavior establishes the developer workflow; missing AVC
+access remains a diagnostic limitation, not permission to bypass it.
+Original configuration files are never relabeled. Imported native
 databases, host home and guest engine sockets remain excluded.
-Concurrent live sandboxes must use separate host project directories: private
+Concurrent private-label live sandboxes must use separate host project directories: private
 SELinux relabeling for a later mount can deny an earlier sandbox access to the
 same directory. Identity checks do not attest continued SELinux access.
 

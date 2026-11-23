@@ -1,6 +1,6 @@
 {
   "name": "@agent-archaeology/dungeon-darwin-x64",
-  "version": "0.0.2",
+  "version": "0.3.0",
   "description": "Dungeon native binary for darwin-x64",
   "license": "Apache-2.0",
   "private": true,

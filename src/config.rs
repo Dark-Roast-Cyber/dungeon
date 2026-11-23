@@ -49,6 +49,54 @@ impl ProjectTransfer {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, clap::ValueEnum, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+#[value(rename_all = "lower")]
+pub(crate) enum SelinuxIsolation {
+    Disabled,
+    #[default]
+    Private,
+}
+
+impl<'de> Deserialize<'de> for SelinuxIsolation {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        match String::deserialize(deserializer)?.as_str() {
+            "disabled" => Ok(Self::Disabled),
+            "private" => Ok(Self::Private),
+            _ => Err(de::Error::custom(
+                "selinux_isolation must be disabled or private",
+            )),
+        }
+    }
+}
+
+impl SelinuxIsolation {
+    pub(crate) fn for_new_binding(container: &mut Option<ContainerOptions>) -> Self {
+        if cfg!(target_os = "linux")
+            && let Some(container) = container
+            && (container.engine == Engine::Podman
+                || (container.engine == Engine::Auto && container.endpoint.is_none()))
+        {
+            // Offline creation cannot review a Podman-only default and later fall back to Docker.
+            container.engine = Engine::Podman;
+            Self::Disabled
+        } else {
+            Self::Private
+        }
+    }
+
+    pub(crate) fn is_private(&self) -> bool {
+        *self == Self::Private
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::Private => "private",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ConfigDoc {
@@ -61,6 +109,8 @@ pub(crate) struct ConfigDoc {
         deserialize_with = "deserialize_openshell_contract"
     )]
     pub(crate) openshell_contract: Option<OpenShellContract>,
+    #[serde(default, skip_serializing_if = "SelinuxIsolation::is_private")]
+    pub(crate) selinux_isolation: SelinuxIsolation,
     pub(crate) name: String,
     pub(crate) gateway: String,
     pub(crate) workspace: String,
@@ -274,6 +324,20 @@ pub(crate) fn load_config_data(
 
     if values.schema != 2 {
         return Err(Error::new("expected configuration schema 2"));
+    }
+    if values.selinux_isolation == SelinuxIsolation::Disabled {
+        let container = values.container.as_ref().ok_or_else(|| {
+            Error::refusal(
+                crate::ErrorCode::Unsupported,
+                "OpenShell 0.0.116 cannot disable per-workload SELinux separation through its supported driver contract; retain private isolation; no runtime fallback",
+            )
+        })?;
+        if !cfg!(target_os = "linux") || container.engine != Engine::Podman {
+            return Err(Error::refusal(
+                crate::ErrorCode::Unsupported,
+                "disabled SELinux isolation requires Linux rootless Podman and an explicit --engine podman; Docker and automatic engine fallback are not supported for this selection",
+            ));
+        }
     }
     if let Some(container) = &values.container {
         if values.openshell_contract.is_some() {
@@ -850,6 +914,51 @@ mod tests {
             );
             assert_eq!(serde_json::to_value(&values).unwrap(), value);
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn selinux_selection_preserves_private_identity_and_distinguishes_disabled() {
+        let value = json!({
+            "schema": 2, "name": "fixture", "gateway": "local", "workspace": "default",
+            "project": "/synthetic/project", "project_transfer":"live",
+            "image": "localhost/synthetic:1", "agent": "opencode", "providers": [],
+            "container":{"engine":"podman"}
+        });
+        let load = |value| {
+            load_config_data(
+                PathBuf::from("/synthetic/private/dungeon.json"),
+                value,
+                |p| Ok((p.to_owned(), starter_policy())),
+            )
+            .unwrap()
+        };
+        let historical = load(value.clone());
+        assert_eq!(
+            historical.values.selinux_isolation,
+            SelinuxIsolation::Private
+        );
+        assert_eq!(serde_json::to_value(&historical.values).unwrap(), value);
+        let mut selected = value;
+        selected["selinux_isolation"] = json!("private");
+        assert_eq!(load(selected.clone()).fingerprint, historical.fingerprint);
+        selected["selinux_isolation"] = json!("disabled");
+        let disabled = load(selected);
+        assert_ne!(disabled.fingerprint, historical.fingerprint);
+        assert_eq!(
+            serde_json::to_value(disabled.values).unwrap()["selinux_isolation"],
+            "disabled"
+        );
+    }
+
+    #[test]
+    fn selinux_selection_accepts_only_the_two_string_values() {
+        assert!(serde_json::from_value::<SelinuxIsolation>(json!("disabled")).is_ok());
+        assert!(serde_json::from_value::<SelinuxIsolation>(json!("private")).is_ok());
+        assert!(serde_json::from_value::<SelinuxIsolation>(json!("shared")).is_err());
+        assert!(serde_json::from_value::<SelinuxIsolation>(Value::Null).is_err());
+        assert!(serde_json::from_value::<SelinuxIsolation>(json!(false)).is_err());
+        assert!(serde_json::from_value::<SelinuxIsolation>(json!({"disabled":null})).is_err());
     }
 
     #[test]

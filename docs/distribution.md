@@ -4,12 +4,13 @@ The Rust `dungeon` binary is the only implementation. Every distribution path mu
 
 ## Current availability
 
-Rust 0.0.2 on main is source-only; follow the [source installation](../README.md#installation).
+This checkout prepares Rust **0.3.0**, the first Rust tag release. Until its tag is
+published, follow the [source installation](../README.md#installation).
 The optional [local install helper](../scripts/install-local.sh) builds that
 same binary with locked Cargo dependencies and installs it to a user bin
 directory. It neither publishes a release nor installs/starts OpenShell.
-CI builds native archives and npm tarballs, but no Rust 0.0.2 release or npm
-package is published. The latest published release, v0.0.1, contains the older
+CI builds native archives and npm tarballs; npm registry publication remains
+disabled. The existing published release, v0.0.1, contains the older
 Python wheel/source archive and does not implement this Rust manual. The
 [reviewed agent image](../images/agent/README.md) also requires a local build.
 
@@ -131,11 +132,38 @@ CI packages the same native targets that it compiles:
 
 Each archive contains only the native binary, `LICENSE`, and `README.md`.
 
-A tag matching `vMAJOR.MINOR.PATCH` triggers `.github/workflows/release.yml`. The workflow verifies the tag exactly matches the package version in `Cargo.toml`, runs locked quality/tests once, rebuilds all four native targets, creates the archives, generates `SHA256SUMS`, and publishes a GitHub prerelease.
+A tag matching `vMAJOR.MINOR.PATCH` triggers `.github/workflows/release.yml`.
+`scripts/check-release.mjs` requires agreement between the tag, Cargo manifest/
+lockfile, five npm manifests and launcher dependency pins, plus nonempty curated
+changelog notes. The workflow installs Node24 for the same Rust/Node quality
+checks as CI, rebuilds all four native targets, creates the archives, generates
+`SHA256SUMS`, and publishes a GitHub prerelease with those notes.
+Checksums detect changed downloads; they are not a signing or provenance claim.
+macOS/Windows compilation and packaging do not establish runtime support there.
 
 Creating a tag is therefore the native-release authorization boundary. Ordinary pushes and pull requests never create a GitHub release.
 
 The release workflow intentionally rebuilds rather than promoting an earlier CI binary so every published asset is tied directly to the tagged source tree and locked dependency graph.
+
+### 0.3.0 preparation and publication boundary
+
+Preparation does not create or push a tag. Before authorizing publication:
+
+1. Review and commit the accepted candidate; resolve the release decisions in
+   `PLAN.md`. Preserve unrelated pilot work and existing guests.
+2. Run `node scripts/check-release.mjs v0.3.0`, the documented Rust/Node checks,
+   release compilation/version execution and Linux archive/launcher smoke checks.
+3. Obtain passing **final-commit** CI, including all four native builds and the
+   five real-binary npm tarballs. Older dependency-PR checks do not qualify a
+   newly combined candidate.
+4. Explicitly authorize the reviewed `v0.3.0` tag and its push. The existing
+   workflow publishes an **engineering-preview prerelease**, not an npm package
+   or an agent image. Preserve Git signing/review requirements.
+5. Inspect the tag workflow and its four archives plus `SHA256SUMS`; do not
+   report publication successful merely because the tag exists.
+
+There is already a Python `v0.0.1` tag/prerelease; do not move or replace it.
+Changing to a non-prerelease or publishing npm/images requires a separate decision.
 
 ## npm / npx
 
@@ -151,6 +179,10 @@ The launcher resolves an OS/CPU-specific optional dependency and executes its bu
 Checked-in platform manifests remain `private` templates. CI downloads the real four-platform binaries it just built, runs `npm/stage-packages.mjs` into a temporary tree, removes `private` only in that staged tree, then runs `npm pack` for the four platform packages and the launcher. The resulting five tarballs are retained as CI artifacts.
 
 This proves package assembly without contacting npm and without putting compiled binaries in the source tree.
+Packing deliberately uses `npm pack`, matching CI. The packed Linux launcher
+test extracts the real tarballs and checks executable/argv/exit behavior with a
+synthetic native program. Local pnpm10.33.0 packing instead produced a0644 native
+file despite755 staging; do not substitute packers without that smoke check.
 
 Registry publication is intentionally not implemented yet. The provisional `@agent-archaeology` scope must first have verified ownership, provenance, and publishing credentials. When publication is approved, platform packages must publish before the launcher so optional dependencies resolve immediately.
 

@@ -1,6 +1,6 @@
 use crate::config::{
-    Agent, Config, ConfigDoc, ContainerOptions, Engine, ProjectTransfer, canonical_project,
-    load_config,
+    Agent, Config, ConfigDoc, ContainerOptions, Engine, ProjectTransfer, SelinuxIsolation,
+    canonical_project, load_config,
 };
 use crate::openshell::GUEST_PROJECT;
 use crate::runtime::Runtime;
@@ -44,6 +44,8 @@ enum Operation {
         engine: Engine,
         #[arg(long)]
         endpoint: Option<String>,
+        #[arg(long, value_enum)]
+        selinux_isolation: Option<SelinuxIsolation>,
         #[arg(long)]
         directory: PathBuf,
         #[arg(long)]
@@ -217,7 +219,8 @@ fn environment(config: &Config, remote: Option<&Value>) -> Value {
         "sandbox_id":remote.and_then(|v|v["id"].as_str()),"guest_project":GUEST_PROJECT,
         "execution_location":"local","project_transfer":config.values.project_transfer,
         "runtime":if config.values.container.is_some(){"container"}else{"openshell"},
-        "engine":remote.and_then(|v|v["engine"].as_str())})
+        "engine":remote.and_then(|v|v["engine"].as_str()),
+        "selinux_isolation":remote.and_then(|v|v.get("selinux_isolation")).cloned().unwrap_or_else(|| json!({"requested":config.values.selinux_isolation,"verification":"not-inspected"}))})
 }
 fn capability(state: &str, reason: Option<&str>) -> Value {
     json!({"state":state,"reason":reason})
@@ -338,6 +341,7 @@ fn dispatch(explicit: Option<PathBuf>, operation: Operation) -> Response {
             runtime,
             engine,
             endpoint,
+            selinux_isolation,
             directory,
             project,
             name,
@@ -355,7 +359,7 @@ fn dispatch(explicit: Option<PathBuf>, operation: Operation) -> Response {
                 ));
             }
             approve(yes)?;
-            let container = match runtime.as_str() {
+            let mut container = match runtime.as_str() {
                 "container" if gateway.is_none() => Some(ContainerOptions { engine, endpoint }),
                 "openshell" if engine == Engine::Auto && endpoint.is_none() => None,
                 _ => {
@@ -370,10 +374,13 @@ fn dispatch(explicit: Option<PathBuf>, operation: Operation) -> Response {
             } else {
                 ProjectTransfer::Copy
             });
+            let selinux_isolation = selinux_isolation
+                .unwrap_or_else(|| SelinuxIsolation::for_new_binding(&mut container));
             let config = crate::cli::write_environment(
                 directory,
                 ConfigDoc {
                     openshell_contract: None,
+                    selinux_isolation,
                     container,
                     schema: 2,
                     name,

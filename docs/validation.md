@@ -2,6 +2,195 @@
 
 CI checks formatting, Clippy, locked Rust tests, release compilation, CLI version execution, npm launcher behavior, distribution version synchronization, native archive creation, and full npm package assembly on explicit supported runners.
 
+## 0.3.0 preparation checkpoint (2026-11-23, not published)
+
+The candidate on `feat/49-selectable-selinux`, based on `bcbbfa8`, now synchronizes
+Cargo/lockfile, all five npm manifests and launcher dependency pins to **0.3.0**.
+The existing Python `v0.0.1` prerelease/tag is unchanged; this prepares the first
+Rust release, not the first historical tag.
+
+Included improvements: the validated #49 change below; the independently useful
+inspection-protocol enforcement correction from preserved pilot commit`6de3643`
+(source bytes match, larger onboarding work not included); curated release notes;
+shared version/tag/notes validation; Node24 and CI's Node checks in tag quality.
+The starter policy/network defaults, modern OpenShell admission, original import
+contract and foreign-binding uninstall guard are not widened.
+
+Final local results:
+
+- **277 locked Rust tests**:155 unit +122 integration, normal parallel execution,
+  with Node24 on PATH.
+- **33 Node24.22.2 tests**, including the new metadata and packed-launcher checks;
+  no skips. The official Node archive matched publisher SHA-256
+  `48cc0e21e048790e54c0cf5749c2725005313d652651c40b7a21feb9697aaf75`;
+  only its executable was extracted into task scratch, not installed.
+- `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`,
+  locked release compilation, shell/Python syntax, workflow YAML parsing and
+  whitespace checks passed. YAML parsing is not hosted-workflow execution.
+- Release execution reports `dungeon 0.3.0`; Linux binary SHA-256:
+  `ece93ae4ecaa1d8ac625c1ca4f4a4b5dfe3bd363f17c0e4aeeeaedf3a523f78e`.
+- Actual Linux archive content/extraction/hash/version and checksum verification
+  passed. Five npm tarballs were assembled locally, and the packed Linux launcher
+  ran the real binary with matching help/version and native usage exit2.
+  **Non-Linux package binaries were explicit synthetic fixtures**, not usable
+  artifacts or cross-platform compilation evidence. No registry install occurred.
+
+The policy regressions first failed on the old validator (uppercase REST and
+unknown selector accepted); the corrected validator passed. All six new metadata
+tests and the packed executable test also rejected individually broken scratch
+copies of their behavior; repository implementation files were not mutated by
+that sensitivity check. Initial formatting caught an import-order mismatch;
+standard `cargo fmt` corrected it without weakening the check.
+
+The first packaging smoke used pnpm10.33.0 and failed because its tarball changed
+the native binary from755 to644. The repository's existing `npm pack` path
+preserved755 and passed; no chmod-on-install workaround or runtime change was
+added. One npm comparison initially failed because the new output directory was
+absent; the corrected fixture created it before packing. These failed attempts
+are retained, not counted as passes.
+
+Issue/PR review: #47 image/import compatibility and #48 writable UI preferences
+remain open and are documented with bounded new-binding workarounds. #19/#31
+and broader remotes/integrations are separate work. PRs #44/#46 have passing
+checks for their own heads and are narrow Actions-pin/lockfile updates; neither
+was merged, formally approved or folded into this candidate. Historical Claude
+evidence for #11 was identified without reading credentials or rerunning login.
+
+Unchanged #49 native evidence below is reused; no container/gateway, installed
+binary, existing guest or host enforcement setting was changed for this
+preparation. Final-commit cross-platform CI and review remain pending. No commit,
+push, PR, merge, tag, GitHub release, npm or image publication was performed.
+Logs, private test controllers, review snapshots and packaging/sensitivity
+receipts: `/tmp/opencode/dungeon-030-prep-20261123/`.
+
+## Selectable SELinux separation (#49, 2026-11-23)
+
+The accepted default decision now uses controlled native behavioral evidence:
+new Linux rootless-Podman bindings explicitly persist disabled separation;
+private remains selectable, OpenShell/Docker retain their contracts and
+historical missing fields still load as private. Missing AVC access is a
+diagnostic limitation, not a hard acceptance prerequisite. New default bindings
+pin unresolved engines to Podman offline rather than silently falling back to
+Docker/private; explicit private mode keeps auto discovery.
+
+### Developer-default and complete-container gates
+
+The revised combined candidate passed **275 locked Rust tests** (153 unit
++122 integration), fmt, warnings-denied all-target locked Clippy, **11 Node
+22.22.2 tests**, shell/Python syntax and debug compilation. Actual CLI/PTY cases
+cover new human/machine defaults, review before approval, private/auto selection,
+historical omitted-field reuse, unchanged fingerprints and foreign-binding
+uninstall refusal. Initial focused runs caught an endpoint without an explicit
+engine being accidentally normalized, stale PTY prompt input and an engine mock
+that incorrectly returned foreign IDs for an exact-ID query; these were corrected
+without loosening production checks or test deadlines.
+
+On the same Fedora44/kernel7.3.4/Podman5.8.9 enforcing host, a new isolated engine
+used independent graph/run/tmp/network/volume paths and a private Unix API.
+The cached reviewed image was exported/imported and its actual image ID checked
+against `8c6ce253c5f62a40a0bff0b8f4d8ff494b705a0a15f444e760afbbc8619fd17f`.
+Its private test tag was never applied to the normal host store.
+The first image import refused a digest-named OCI archive before any workload
+or API service started; exporting the same frozen image by ID resolved that
+fixture transport problem, with no image/tool upgrade or policy relaxation.
+
+Both native gates then returned **0**:
+
+- `tests/container-live.sh`: default-disabled initialization, all three harness
+  version commands, pre-existing/new/edited/atomic JavaScript execution,
+  stdout/stderr/stdin/argv/exit-code behavior, read-only imports, same-ID
+  persistence, uninstall preview and **actual uninstall** with state/binary
+  removal and original project/import preservation.
+- `tests/selinux-live.py`: omission of the mode flag really selected/persisted
+  disabled, all live-file cases and bidirectional edits passed without host label
+  changes, the native process/security/map/seccomp/capability checks passed,
+  private mode retained MCS and its moved-file denial, and host SELinux remained
+  enforcing afterward.
+
+The isolated inventory was empty after both gates. Its API process was stopped
+and imported image removed; all20 normal-host container ID/name/state/start
+records matched before/after. The uninstall guard was **not changed**: the
+earlier failure below was the correct refusal of foreign Dungeon bindings
+from a disposable HOME against the shared store. The full gate now declares and
+preflights the isolated-engine prerequisite instead of skipping uninstall.
+
+A separate native check exercised the documented explicit replacement:
+private guest with a synthetic session marker, stop/destroy, approved unbound
+`config --edit --selinux-isolation disabled`, then `up`. It created a different
+container, read the previously denied moved file without changing its label,
+and no longer had the old guest-only marker. Cleanup removed only its two
+fixture guests; all20 pre-existing records and enforcing SELinux were unchanged.
+This is not credential copying, real login or vendor-session migration proof.
+
+Current evidence and isolated-engine/replacement receipts:
+`/tmp/opencode/dungeon-49-default-20261123/`. OpenShell relaxed labeling remains
+an explicit unsupported capability pending upstream per-workload support and
+hard Landlock/network-denial qualification. Docker live validation and other
+platforms were not rerun.
+
+### Initial opt-in checkpoint (superseded default decision)
+
+**Explicit Podman modes validated; default initially held private.** On Fedora44,
+kernel7.3.4-200.fc44.x86_64, enforcing SELinux and rootless Podman5.8.9, a
+synthetic same-filesystem rename preserved inode/device, UID/GID1000 and0644.
+An existing private-label container read its original file but denied the moved
+file: `container_file_t`/matching private MCS versus the incoming `user_tmp_t`.
+The matching AVC could not be collected: audit configuration/log access returned
+Permission denied. No elevated access, alternative protected-log route or
+global SELinux change was attempted. This is controlled label/EACCES evidence,
+not attribution of a specific audit event. The later user decision above
+supersedes the initial requirement to block default promotion on that event.
+
+The dedicated `tests/selinux-live.py` gate then passed with the actual Dungeon
+binary and cached reviewed image
+`localhost/dungeon-agent@sha256:aec5c7934784335454b510e6961c00d30b68ef66ae2b5d26a170d49dcdc6d75e`
+(image ID `8c6ce253c5f62a40a0bff0b8f4d8ff494b705a0a15f444e760afbbc8619fd17f`).
+Disabled mode passed existing/host-created/copied/moved/atomic-replaced reads,
+bidirectional edits, UID/mode checks, unchanged project/source/snapshot labels,
+read-only synthetic imports, outside-project/host-home/socket absence,
+keep-id maps, no-new-privileges, seccomp mode2, excluded NET_RAW and same-ID
+stop/start. Private mode retained matching process/mount MCS categories and
+deliberately denied the moved file. Both guests were destroyed; all20 pre-existing
+container ID/name/state/start records matched afterward.
+
+Earlier native attempts are not passes: the first fixture refused initialization
+because its HOME was beneath the invocation project; the runner now invokes
+commands from its disposable HOME. The second created but never started a
+workload, because verification wrongly required an empty `MountLabel`.
+Podman5.8.9 reports an empty `ProcessLabel` and native `label=disable`, but retains
+a nonempty storage `MountLabel`. The correction checks the process label and
+security option and separately tests host-bind label preservation. That exact
+pending fixture was removed through Dungeon after correction, not replayed.
+
+The unchanged ordinary `tests/container-live.sh` also passed its script-edit,
+headless I/O and same-ID persistence assertions on the default private mode.
+Its **overall result is failed**, not passed: uninstall dry-run correctly refused
+foreign Dungeon bindings on the shared engine. Its trap removed only its fixture;
+no other containers were removed or services changed. A full uninstall gate needs
+an independently isolated engine, not bypassing the inventory guard.
+
+The combined source passed **269 locked Rust tests** (153 unit +116 integration),
+formatting, warnings-denied all-target locked Clippy, **11 Node22.22.2 tests**
+(4 launcher/staging +7 image-layout), debug compilation, native-test Python
+syntax and shell syntax.
+The new tests first exposed the missing CLI option and Serde's non-string enum
+map acceptance; string-only parsing now rejects the latter. These checks are not
+cross-platform runtime or packaging qualification.
+An additional regression first caught unintended Docker label validation; the
+new mode checks are now Podman-only, preserving Docker's existing contract and
+reporting its SELinux request as not inspected. The final combined binary
+repeated the dedicated two-mode native gate successfully.
+
+Pinned upstream OpenShell0.0.116 source at
+`d1155aa70042d3e2ee49dbfa15346b108b7c1d92` exposes only CDI/mount sandbox
+driver options and no process-label control in its container specification.
+Disabled mode is refused, not emulated by removing bind labels or changing the
+gateway. Installed OpenShell0.1.7 was observed only; no OpenShell workload,
+upgrade, gateway change, Docker live gate, credential login or other-platform
+qualification was performed. Native evidence/logs:
+`/tmp/opencode/dungeon-49-20261123/`; use the
+[runbook](live-validation.md#selinux-separation-gate-49) for the remaining gate.
+
 ## OpenCode V2 pin update (2026-11-10)
 
 The optional local image now pins `@opencode/cli` **2.2.7**, the official

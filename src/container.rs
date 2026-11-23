@@ -1,6 +1,7 @@
 //! Local native container lifecycle; no OpenShell policy is claimed or emulated.
 use crate::config::{
-    Config, ContainerBinding, ContainerOptions, Engine, RuntimeState, digest, read_json_text,
+    Config, ContainerBinding, ContainerOptions, Engine, RuntimeState, SelinuxIsolation, digest,
+    read_json_text,
 };
 use crate::openshell::{GUEST_PROJECT, find_executable, host_environment, local_setup::query};
 use crate::{Error, ErrorCode, Result};
@@ -20,6 +21,7 @@ struct Native {
     binding: ContainerBinding,
     binary: PathBuf,
     env: HashMap<OsString, OsString>,
+    selinux_enabled: Option<bool>,
 }
 
 impl Native {
@@ -188,9 +190,11 @@ fn connect(engine: Engine, endpoint: &str, project: &Path) -> Result<Native> {
         },
         binary,
         env,
+        selinux_enabled: None,
     };
     let info = read_json_text(&native.query(&strings(&["info", "--format", "{{json .}}"]), 5)?)?;
     native.binding.daemon = service_identity(engine, &info)?;
+    native.selinux_enabled = info["host"]["security"]["selinuxEnabled"].as_bool();
     Ok(native)
 }
 
@@ -400,7 +404,8 @@ pub(crate) fn diagnostic(config: Option<&Config>) -> Result<Value> {
         .map(|c| c.values.project.clone())
         .unwrap_or(std::env::current_dir()?.canonicalize()?);
     let (native, engines) = select(&options, &project)?;
-    Ok(json!({"selected":native.binding,"engines":engines}))
+    Ok(json!({"selected":native.binding,"engines":engines,
+        "selinux_isolation":config.map(|c| json!({"requested":c.values.selinux_isolation,"verification":"not-inspected"}))}))
 }
 
 pub(crate) fn resolved_options(options: &ContainerOptions) -> Result<ContainerOptions> {
@@ -494,6 +499,7 @@ pub(crate) fn plan(config: &Config) -> Value {
     json!({"runtime":"container", "container":config.values.container,"image":config.values.image,
         "environment":{"config":config.path,"project":config.values.project,"name":config.values.name},
         "fingerprint":config.fingerprint,
+        "selinux_isolation":{"requested":config.values.selinux_isolation,"verification":"not-inspected"},
         "project":{"source":config.values.project,"target":GUEST_PROJECT,"read_only":false},
         "configuration_mounts":crate::imports::harness::mounts(config),
         "editor_snapshot":crate::imports::mount_source(config),
@@ -537,6 +543,14 @@ impl<'a> Runtime<'a> {
             }
             Err(e) => return Err(e.into()),
         };
+        if config.values.selinux_isolation == SelinuxIsolation::Disabled
+            && native.binding.engine != Engine::Podman
+        {
+            return Err(Error::refusal(
+                ErrorCode::Unsupported,
+                "disabled SELinux isolation requires rootless Podman; refusing engine fallback",
+            ));
+        }
         Ok(Self {
             config,
             native,
@@ -569,13 +583,14 @@ impl<'a> Runtime<'a> {
             .project
             .to_str()
             .ok_or_else(|| Error::new("container project path must be UTF-8"))?;
-        let mut mounts = vec![(source.into(), GUEST_PROJECT.into(), false, true)];
+        let relabel = self.config.values.selinux_isolation.is_private();
+        let mut mounts = vec![(source.into(), GUEST_PROJECT.into(), false, relabel)];
         if let Some(source) = crate::imports::mount_source(self.config) {
             mounts.push((
                 source.to_string_lossy().into_owned(),
                 "/sandbox/.config/nvim".into(),
                 true,
-                true,
+                relabel,
             ));
         }
         for mount in crate::imports::harness::mounts(self.config) {
@@ -623,6 +638,41 @@ impl<'a> Runtime<'a> {
         Ok(c.clone())
     }
     fn specification(&self, c: &Value) -> Result<Value> {
+        let disabled = c["HostConfig"]["SecurityOpt"]
+            .as_array()
+            .is_some_and(|options| options.iter().any(|o| o == "label=disable"));
+        match (
+            self.native.binding.engine,
+            self.config.values.selinux_isolation,
+        ) {
+            (Engine::Podman, SelinuxIsolation::Disabled)
+                if !disabled || c["ProcessLabel"] != "" =>
+            {
+                return Err(Error::new(
+                    "native SELinux configuration differs from requested disabled isolation",
+                ));
+            }
+            (Engine::Podman, SelinuxIsolation::Private) if disabled => {
+                return Err(Error::new(
+                    "native SELinux configuration disables requested private isolation",
+                ));
+            }
+            (Engine::Podman, SelinuxIsolation::Private)
+                if self.native.selinux_enabled == Some(true) =>
+            {
+                let process = c["ProcessLabel"].as_str().unwrap_or("");
+                let mount = c["MountLabel"].as_str().unwrap_or("");
+                let categories = process.splitn(4, ':').nth(3).unwrap_or("");
+                if !categories.starts_with("s0:c")
+                    || mount.splitn(4, ':').nth(3) != Some(categories)
+                {
+                    return Err(Error::new(
+                        "native SELinux private process/mount MCS labels are missing or mismatched",
+                    ));
+                }
+            }
+            _ => {}
+        }
         let mut mounts = Vec::new();
         for m in c["Mounts"]
             .as_array()
@@ -897,6 +947,9 @@ impl<'a> Runtime<'a> {
         if self.native.binding.engine == Engine::Podman {
             args.push("--userns=keep-id:uid=998,gid=998".into());
         }
+        if self.config.values.selinux_isolation == SelinuxIsolation::Disabled {
+            args.extend(strings(&["--security-opt", "label=disable"]));
+        }
         for (source, target, ro, relabel) in self.mounts()? {
             args.extend([
                 "--volume".into(),
@@ -996,7 +1049,8 @@ impl<'a> Runtime<'a> {
         Ok(
             json!({"id":s.id,"name":self.config.values.name,"workspace":self.config.values.workspace,
             "phase":if c["State"]["Running"] == true {"Ready"} else {"Stopped"},
-            "runtime":"container","engine":self.native.binding.engine,"policy_enforcement":false,"initial_upload_pending":s.initial_upload_pending}),
+            "runtime":"container","engine":self.native.binding.engine,"policy_enforcement":false,"initial_upload_pending":s.initial_upload_pending,
+            "selinux_isolation":{"requested":self.config.values.selinux_isolation,"verification":if self.native.binding.engine == Engine::Podman {"native-configuration"} else {"not-inspected"},"process_label":c["ProcessLabel"],"mount_label":c["MountLabel"],"host_selinux_enabled":self.native.selinux_enabled}}),
         )
     }
     pub(crate) fn inspect_for_destroy(&self) -> Result<Value> {

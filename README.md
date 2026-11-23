@@ -5,9 +5,9 @@ environments, using their normal CLIs. Dungeon manages the environment; your
 agent still owns prompts, models, permissions and conversations.
 Part of [Agent Archaeology](https://agentarchaeology.ai/).
 
-**Development preview:** Rust 0.0.2 is source-only. Published v0.0.1 is the older
-Python implementation; Rust release archives and npm packages are not published
-yet. Dungeon is not an audited isolation product.
+**Engineering preview:** this checkout prepares Rust 0.3.0. Until its tag is
+published, install from source; the existing v0.0.1 release is the older Python
+implementation. npm packages remain unpublished. Dungeon is not audited isolation.
 
 ## Overview
 
@@ -32,7 +32,8 @@ yet. Dungeon is not an audited isolation product.
 
 Dungeon does not orchestrate agents, select models, synchronize credentials or
 provision remote machines. Tools must be installed **in the image**, not just on
-your host. See [architecture](docs/architecture.md) and [security](SECURITY.md).
+your host. See [architecture](docs/architecture.md), [security](SECURITY.md), and
+the [security controls and tradeoffs](docs/security-controls.md).
 
 ## Installation
 
@@ -190,9 +191,10 @@ exit codes propagate. The first `--` belongs to Dungeon; subsequent separators
 are passed to the agent. Agents own session selection, including native resume
 flags. See [headless examples](docs/adoption.md#4-headless-use).
 
-**Known unresolved native failure:** new/edited JavaScript exits 137 on the tested
-Podman host, including without Dungeon. Edit/test acceptance is blocked there;
-see [current findings](docs/validation.md#headless-follow-up-2026-11-06-source-checkout).
+**Validation limit:** the current Fedora/Podman native container and SELinux gates
+pass, including live-written JavaScript. Earlier exit137 failures remain
+undiagnosed; this is not a general fix or broader-platform qualification. See
+[current evidence](docs/validation.md).
 
 ### Commands to remember
 
@@ -234,6 +236,7 @@ runtime/service/project identity changes still require separate initialization.
 | `--engine podman\|docker\|auto`, `--endpoint unix:///absolute/socket` | Plain-container service selection; an endpoint needs an explicit engine |
 | `--image OCI_REFERENCE` | Override setup's image; accepts a tag or immutable digest |
 | `--project-transfer live\|copy` | Immediate host edits or OpenShell copy/review/export |
+| `--selinux-isolation private\|disabled` | New rootless-Podman bindings default to disabled; private is the hardened option; existing bindings unchanged |
 | `--project PATH`, `--name NAME` | Override the current project and generated environment name |
 | `--gateway NAME`, `--workspace NAME` | Select an existing OpenShell gateway/workspace |
 | `--provider NAME` | Attach an existing named OpenShell provider; repeatable, never a secret |
@@ -246,6 +249,14 @@ repository. Review `dungeon.json` and adjacent `policy.json` before creation;
 bound scope/policy changes fail identity checks rather than silently rebuilding.
 Read-only imports can still expose secrets; native authentication/session
 databases are never imported. See [configuration](docs/configuration.md).
+OpenCode imports also have known [version-compatibility and writable-preference
+limits](docs/configuration.md#known-opencode-import-limitations-47-48). Keep them
+disabled unless the selected image/config combination has been checked.
+New Linux Podman bindings avoid private SELinux relabeling for developer
+workflows; OpenShell and Docker remain private-only. This removes an extra MAC
+boundary, not host enforcement. Existing guests need an
+[explicit replacement](docs/configuration.md#adopt-relaxed-labeling-for-an-existing-environment),
+not just a new CLI version.
 
 On enforcing SELinux, launching with original-source imports offers to review a
 private copy or disable imports before first creation. For headless recovery use
@@ -317,6 +328,8 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --locked
 node --test npm/launcher/test/platform.test.mjs npm/test/stage-packages.test.mjs
+node --test scripts/check-release.test.mjs
+node scripts/check-release.mjs v0.3.0
 ```
 
 Read the [architecture](docs/architecture.md), [adoption guide](docs/adoption.md)

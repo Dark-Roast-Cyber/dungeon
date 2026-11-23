@@ -60,6 +60,97 @@ preparation fails, stop and destroy the pending binding before retrying.
 can be destroyed after identity and scope checks. A failed engine operation still
 retains state for inspection and retry.
 
+## SELinux separation
+
+Private schema-2 `selinux_isolation` accepts only `"private"` or `"disabled"`.
+Omission means private and serializes exactly as before, preserving historical
+fingerprints; disabled is explicitly persisted and changes environment identity.
+For **new Linux rootless-Podman bindings**, human and machine initialization
+explicitly save disabled by default. New OpenShell and Docker bindings remain
+private; all existing bindings retain their current configuration.
+
+Offline initialization cannot discover which engine `auto` would later choose.
+Unless Docker is selected explicitly or through setup, the new developer default
+pins `container.engine` to Podman without contacting it. An explicit endpoint
+still needs an explicit engine. To retain automatic Podman/Docker discovery for
+a new binding, explicitly select `--selinux-isolation private --engine auto`.
+No selected disabled mode can silently fall back to Docker/private.
+
+```sh
+dungeon init --runtime container --engine podman --selinux-isolation disabled
+dungeon config --edit --selinux-isolation private
+```
+
+Disabled requires Linux and explicit rootless Podman, not Docker or automatic
+engine fallback. OpenShell 0.0.116 cannot express this per workload and refuses
+disabled mode without runtime contact. Configuration/first-use/plan show the
+request; plain-Podman status and bound doctor also inspect effective native
+security options and process/mount labels. Machine schema 1 exposes the same
+observation under `environment.selinux_isolation`, without a schema change.
+Offline observations are `not-inspected`; native configuration is not kernel
+attestation. Invalid values and mismatched native labels refuse.
+
+Disabled mode adds workload-only `--security-opt label=disable` and omits project
+and private-snapshot relabeling; snapshot mounts remain read-only. The existing
+original-source import compatibility gate is unchanged. No host SELinux or
+gateway settings change. Any runtime marker refuses edits, including stopped
+guests: use separate initialization, not manual config changes or automatic
+recreation. Deliberate destruction loses guest-only auth/session state.
+See [security controls](security-controls.md) before selecting weaker separation.
+
+### Adopt relaxed labeling for an existing environment
+
+New defaults **do not repair an existing guest**. Inspect `config`, `plan` and
+`status` first. Quiesce agents/host writers and save any copy-mode work with
+reviewed `export` while its guest is Ready. Do not hand-edit bound configuration,
+relabel the host project, or delete runtime markers.
+
+**Retain the old guest for rollback:** stop it, then explicitly initialize a
+separate plain-Podman environment. Select a reviewed image and agent; do not
+silently change either because an example uses a different image.
+
+```sh
+OLD_CONFIG="$(dungeon config --path)"
+dungeon --config "$OLD_CONFIG" down
+dungeon init --runtime container --engine podman --selinux-isolation disabled \
+  --agent opencode --name myproj-relaxed \
+  --directory "$HOME/.config/dungeon/replacements/myproj-relaxed" \
+  --image REGISTRY/IMAGE@sha256:REVIEWED_DIGEST
+NEW_CONFIG="$HOME/.config/dungeon/replacements/myproj-relaxed/dungeon.json"
+dungeon --config "$NEW_CONFIG" plan
+dungeon --config "$NEW_CONFIG" up
+dungeon --config "$NEW_CONFIG" status
+```
+
+Review/approve initialization and verify native `label=disable`/empty
+`ProcessLabel`. Reauthenticate inside the **new** guest: its auth, sessions and
+guest-only files start fresh and are not copied from the old guest. The stopped
+old guest retains its own state. Continue using `--config "$NEW_CONFIG"`:
+bare `dungeon` still selects the old deterministic project binding. For rollback,
+stop the replacement and deliberately resume `--config "$OLD_CONFIG"`. This
+does not roll back project edits. Use separate checkouts if both environments
+must run concurrently, especially with private labeling.
+
+**Replace a plain-Podman guest in its current binding:** this requires saved
+`container.engine: "podman"`. After reviewing what will be lost, use the existing
+destructive workflow:
+
+```sh
+dungeon down
+dungeon destroy                                  # explicit name confirmation
+dungeon config --edit --selinux-isolation disabled # review/approve after destruction
+dungeon up
+```
+
+Destroy permanently loses that guest's login, conversations, sessions and
+guest-only files; it retains the project and private configuration. There is no
+automatic credential/session migration. The edit is permitted only after the
+runtime binding is retired. Historical `engine: "auto"` and OpenShell/Docker
+bindings should use separate initialization: the editor does not change engine,
+service or runtime identity.
+Selecting plain Podman instead of OpenShell **loses OpenShell's hard policy**,
+which must be an explicit tradeoff, never an automatic fallback.
+
 ## Machine callers
 
 Use the [machine schema-1 contract](machine.md) for deterministic lifecycle,
@@ -763,6 +854,33 @@ in the existing scope review. `init --yes --agent opencode` with that flag
 explicitly approves the displayed scope; it still
 creates no sandbox. Existing configs omitting `harness`, and machine initialization,
 retain no harness import. Codex and Claude Code sharing follow separately.
+
+### Known OpenCode import limitations (#47, #48)
+
+Imports are optional and default off. Two usability issues remain open:
+
+- [#47](https://github.com/Dark-Roast-Cyber/dungeon/issues/47): upstream
+  `base:latest` supplied OpenCode1.2.18 in the reported reproduction, which rejected
+  a host2.3.2 configuration. The image tag does not select the newest agent.
+  Dungeon does not yet test configuration compatibility before creation.
+  `versions` reports the reviewed recipe/host, not the selected image's actual CLI.
+  Use a deliberately built/validated image or leave imports disabled; version
+  equality alone is not proof of configuration/plugin compatibility.
+- [#48](https://github.com/Dark-Roast-Cyber/dungeon/issues/48): an imported
+  `cli.json` is a read-only leaf mount and can block UI preference writes.
+  For a **new/uncreated** binding, exclude it with
+  `init --agent opencode --harness-config copy --harness-exclude cli.json`
+  (plus the normal project/runtime options). This leaves that native path
+  guest-private; it does not seed host preferences. Exact native UI/atomic-save
+  acceptance for the selected OpenCode version is still required.
+
+Any runtime marker refuses import/image edits. Do not make original sources or
+approved snapshots writable, refresh over guest preferences, or hand-edit bound
+config. Preserve an existing guest, or deliberately stop/destroy and review a new
+binding/image/import selection. Destruction loses guest-only login, sessions and
+files; it is not needed merely to acknowledge the limitation.
+
+### Import choices and storage
 
 | Choice | Behavior |
 | --- | --- |

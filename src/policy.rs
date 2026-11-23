@@ -94,8 +94,16 @@ pub(crate) fn validate_policy(policy: &Value) -> Result<()> {
             let endpoint = endpoint
                 .as_object()
                 .ok_or_else(|| Error::new("network endpoints must be objects"))?;
-            let inspected = endpoint.get("protocol").and_then(Value::as_str) == Some("rest")
-                || endpoint.get("tls").and_then(Value::as_str) == Some("terminate");
+            let protocol = match endpoint.get("protocol") {
+                None => "",
+                Some(Value::String(protocol)) => protocol.as_str(),
+                _ => return Err(Error::new("endpoint protocol must be a string")),
+            };
+            let inspected = match protocol.to_ascii_lowercase().as_str() {
+                "" | "tcp" => false,
+                "rest" | "websocket" | "graphql" | "sql" | "json-rpc" | "mcp" => true,
+                _ => return Err(Error::new("unsupported endpoint inspection protocol")),
+            } || endpoint.get("tls").and_then(Value::as_str) == Some("terminate");
             if inspected && endpoint.get("enforcement").and_then(Value::as_str) != Some("enforce") {
                 return Err(Error::new(
                     "inspected endpoints must use enforcement=enforce",
@@ -116,6 +124,48 @@ mod tests {
         let mut policy = starter_policy();
         policy["landlock"]["compatibility"] = json!("best_effort");
         assert!(validate_policy(&policy).is_err());
+    }
+
+    #[test]
+    fn every_inspected_protocol_requires_explicit_enforcement() {
+        for protocol in ["rest", "websocket", "graphql", "sql", "json-rpc", "mcp"] {
+            for protocol in [protocol.to_owned(), protocol.to_ascii_uppercase()] {
+                for enforcement in [Value::Null, json!(""), json!("audit"), json!(true)] {
+                    let mut policy = starter_policy();
+                    policy["network_policies"]["default"]["endpoints"][0]["protocol"] =
+                        json!(protocol);
+                    policy["network_policies"]["default"]["endpoints"][0]["enforcement"] =
+                        enforcement;
+                    assert!(validate_policy(&policy).is_err(), "{protocol}");
+                    policy["network_policies"]["default"]["endpoints"][0]["enforcement"] =
+                        json!("enforce");
+                    assert!(validate_policy(&policy).is_ok(), "{protocol}");
+                }
+                let mut policy = starter_policy();
+                policy["network_policies"]["default"]["endpoints"][0]["protocol"] = json!(protocol);
+                assert!(validate_policy(&policy).is_err(), "{protocol}");
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_or_mistyped_protocols_refuse_instead_of_becoming_uninspected() {
+        for protocol in [json!("future-inspector"), json!(true), Value::Null] {
+            let mut policy = starter_policy();
+            policy["network_policies"]["default"]["endpoints"][0]["protocol"] = protocol;
+            policy["network_policies"]["default"]["endpoints"][0]["enforcement"] = json!("enforce");
+            assert!(validate_policy(&policy).is_err());
+        }
+        for protocol in ["", "tcp", "TCP"] {
+            let mut policy = starter_policy();
+            policy["network_policies"]["default"]["endpoints"][0]["protocol"] = json!(protocol);
+            assert!(validate_policy(&policy).is_ok());
+        }
+        let mut policy = starter_policy();
+        policy["network_policies"]["default"]["endpoints"][0]["tls"] = json!("terminate");
+        assert!(validate_policy(&policy).is_err());
+        policy["network_policies"]["default"]["endpoints"][0]["enforcement"] = json!("enforce");
+        assert!(validate_policy(&policy).is_ok());
     }
 
     #[test]

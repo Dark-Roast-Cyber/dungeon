@@ -3,7 +3,7 @@ use crate::config::{
     Agent, Config, ConfigDoc, HarnessMode, ProjectTransfer, canonical_project, create_private_dir,
     load_config, load_config_data, write_new,
 };
-use crate::config::{ContainerOptions, Engine};
+use crate::config::{ContainerOptions, Engine, SelinuxIsolation};
 use crate::openshell::{GUEST_PROJECT, plan_create_arguments, project_transfer_plan};
 use crate::policy::starter_policy;
 use crate::runtime::{Runtime, RuntimeChoice};
@@ -28,6 +28,9 @@ enum AuthAgent {
 
 #[derive(Debug, Default, clap::Args)]
 struct EditOptions {
+    /// Per-workload SELinux separation; disabled requires explicit rootless Podman.
+    #[arg(long, value_enum, requires = "edit")]
+    selinux_isolation: Option<SelinuxIsolation>,
     /// Saved agent choice; invocation-only overrides remain available with run.
     #[arg(long, value_enum, requires = "edit")]
     agent: Option<Agent>,
@@ -143,6 +146,9 @@ enum Commands {
         engine: Engine,
         #[arg(long, help = "local Unix socket; requires an explicit engine")]
         endpoint: Option<String>,
+        /// Per-workload SELinux separation (new Podman: disabled; OpenShell/Docker: private).
+        #[arg(long, value_enum)]
+        selinux_isolation: Option<SelinuxIsolation>,
         #[arg(long, help = "private config directory (default: the project binding)")]
         directory: Option<PathBuf>,
         #[arg(long, default_value = ".", help = "host project directory")]
@@ -425,6 +431,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
             runtime,
             engine,
             endpoint,
+            selinux_isolation,
             directory,
             project: init_project,
             project_transfer,
@@ -466,6 +473,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
                 runtime,
                 engine,
                 endpoint,
+                selinux_isolation,
             )
         }
         Some(Commands::Config {
@@ -493,6 +501,7 @@ fn dispatch(cli: Cli) -> Result<i32> {
                         "policy": config.policy_path,
                         "values": config.values,
                         "project_transfer": config.values.project_transfer,
+                        "selinux_isolation": config.values.selinux_isolation,
                     }))?
                 )?;
             }
@@ -803,8 +812,10 @@ fn create_project_binding(project: &Path, agent: Agent) -> Result<Config> {
     let path = binding::config_path(project)?;
     let directory = path.parent().expect("binding config parent").to_path_buf();
     let mut values = environment_defaults(project.to_path_buf(), agent)?;
+    values.selinux_isolation = SelinuxIsolation::for_new_binding(&mut values.container);
     require_configuration_terminal(false)?;
     choose_environment(&mut values, true, true)?;
+    choose_selinux(&mut values)?;
     values.harness = crate::imports::harness::defaults(
         agent,
         choose_copy(agent)?,
@@ -877,6 +888,34 @@ fn choose_environment(values: &mut ConfigDoc, image: bool, transfer: bool) -> Re
     Ok(())
 }
 
+fn choose_selinux(values: &mut ConfigDoc) -> Result<()> {
+    if !values
+        .container
+        .as_ref()
+        .is_some_and(|c| c.engine == Engine::Podman)
+    {
+        return Ok(());
+    }
+    loop {
+        let answer = configuration_answer(&format!(
+            "SELinux separation [private/disabled; default: {}]: ",
+            values.selinux_isolation.as_str()
+        ))?;
+        match answer.as_str() {
+            "" => return Ok(()),
+            "private" => values.selinux_isolation = SelinuxIsolation::Private,
+            "disabled" => values.selinux_isolation = SelinuxIsolation::Disabled,
+            _ => {
+                println!(
+                    "Choose private (MCS separation) or disabled (no project relabeling; weaker MAC boundary)."
+                );
+                continue;
+            }
+        }
+        return Ok(());
+    }
+}
+
 fn choose_copy(agent: Agent) -> Result<HarnessMode> {
     if agent == Agent::Opencode {
         println!(
@@ -905,6 +944,7 @@ fn edit_environment(config: &Config, mut options: EditOptions) -> Result<i32> {
         && options.agent.is_none()
         && options.image.is_none()
         && options.project_transfer.is_none()
+        && options.selinux_isolation.is_none()
         && options.harness_config.is_none()
         && !options.exclude_provider_auth
         && options.harness_exclude.is_empty();
@@ -927,6 +967,7 @@ fn edit_environment(config: &Config, mut options: EditOptions) -> Result<i32> {
             break;
         }
         choose_environment(&mut values, true, true)?;
+        choose_selinux(&mut values)?;
         if values.agent == Agent::Opencode {
             loop {
                 let answer = configuration_answer(
@@ -953,6 +994,9 @@ fn edit_environment(config: &Config, mut options: EditOptions) -> Result<i32> {
     }
     if let Some(transfer) = options.project_transfer {
         values.project_transfer = transfer;
+    }
+    if let Some(mode) = options.selinux_isolation {
+        values.selinux_isolation = mode;
     }
     let refresh = options.harness_config.is_some()
         || options.exclude_provider_auth
@@ -1023,6 +1067,7 @@ fn environment_defaults(project: PathBuf, agent: Agent) -> Result<ConfigDoc> {
     let plain = preferences.runtime_choice() != RuntimeChoice::Openshell;
     Ok(ConfigDoc {
         openshell_contract: None,
+        selinux_isolation: SelinuxIsolation::Private,
         container: if plain {
             Some(preferences.container.unwrap_or_default())
         } else {
@@ -1084,6 +1129,7 @@ fn print_plan(config: &Config) -> Result<i32> {
             "adapter": "openshell",
             "version": OPEN_SHELL_VERSION,
             "openshell_contract": config.values.openshell_contract,
+            "selinux_isolation": {"requested":config.values.selinux_isolation,"verification":"not-inspected"},
             "environment": {
                 "name": config.values.name,
                 "config": config.path,
@@ -1235,6 +1281,7 @@ fn run_command(config: &Config, command: Commands) -> Result<i32> {
                     "runtime": if config.values.container.is_some() {"container"} else {"openshell"},
                     "engine": remote["engine"],
                     "policy_enforcement": remote["policy_enforcement"],
+                    "selinux_isolation": remote.get("selinux_isolation").cloned().unwrap_or_else(|| json!({"requested":config.values.selinux_isolation,"verification":"not-inspected"})),
                 }))?
             )?;
             Ok(0)
@@ -1494,6 +1541,7 @@ fn initialize(
     runtime: RuntimeChoice,
     engine: Engine,
     endpoint: Option<String>,
+    selinux_isolation: Option<SelinuxIsolation>,
 ) -> Result<i32> {
     let project = canonical_project(&project)?;
     require_configuration_terminal(yes)?;
@@ -1551,8 +1599,13 @@ fn initialize(
         values.project_transfer = transfer;
     }
     values.providers = providers;
+    values.selinux_isolation = selinux_isolation
+        .unwrap_or_else(|| SelinuxIsolation::for_new_binding(&mut values.container));
     if !yes {
         choose_environment(&mut values, choose_image, project_transfer.is_none())?;
+        if selinux_isolation.is_none() {
+            choose_selinux(&mut values)?;
+        }
     }
     let harness_config = match harness_config {
         Some(mode) => mode,
@@ -1613,6 +1666,7 @@ fn approve_environment(config: &Config, yes: bool) -> Result<()> {
             "harness": values.agent,
             "project": values.project,
             "project_transfer": values.project_transfer,
+            "selinux_isolation": values.selinux_isolation,
             "gateway": values.gateway,
             "workspace": values.workspace,
             "image": values.image,
@@ -1622,6 +1676,12 @@ fn approve_environment(config: &Config, yes: bool) -> Result<()> {
             "container": values.container,
         }))?
     )?;
+    if values.selinux_isolation == SelinuxIsolation::Disabled {
+        writeln!(
+            io::stdout(),
+            "SELinux container separation DISABLED for this workload: no private MCS boundary or project relabeling. Host SELinux stays enforcing if enabled; other controls are unchanged. See docs/security-controls.md."
+        )?;
+    }
     if values.container.is_some() {
         writeln!(
             io::stdout(),
@@ -1852,6 +1912,7 @@ mod tests {
             &path,
             &ConfigDoc {
                 openshell_contract: None,
+                selinux_isolation: SelinuxIsolation::Private,
                 container: None,
                 schema: 2,
                 name: "demo".into(),
@@ -2039,6 +2100,7 @@ mod tests {
             &path,
             &ConfigDoc {
                 openshell_contract: None,
+                selinux_isolation: SelinuxIsolation::Private,
                 container: None,
                 schema: 2,
                 name: "demo".into(),
@@ -2135,6 +2197,7 @@ mod tests {
         write_new(&private.join("policy.json"), &starter_policy()).unwrap();
         let mut doc = serde_json::to_value(ConfigDoc {
             openshell_contract: None,
+            selinux_isolation: SelinuxIsolation::Private,
             container: None,
             schema: 2,
             name: "demo".into(),

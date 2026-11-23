@@ -1,6 +1,6 @@
 {
   "name": "@agent-archaeology/dungeon",
-  "version": "0.0.2",
+  "version": "0.3.0",
   "description": "Native Dungeon launcher for policy-managed coding-agent environments",
   "license": "Apache-2.0",
   "type": "module",
@@ -15,10 +15,10 @@
     "node": "^24.0.0"
   },
   "optionalDependencies": {
-    "@agent-archaeology/dungeon-linux-x64": "0.0.2",
-    "@agent-archaeology/dungeon-darwin-arm64": "0.0.2",
-    "@agent-archaeology/dungeon-darwin-x64": "0.0.2",
-    "@agent-archaeology/dungeon-win32-x64": "0.0.2"
+    "@agent-archaeology/dungeon-linux-x64": "0.3.0",
+    "@agent-archaeology/dungeon-darwin-arm64": "0.3.0",
+    "@agent-archaeology/dungeon-darwin-x64": "0.3.0",
+    "@agent-archaeology/dungeon-win32-x64": "0.3.0"
   },
   "repository": {
     "type": "git",
