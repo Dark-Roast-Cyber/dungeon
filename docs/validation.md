@@ -63,6 +63,16 @@ push, PR, merge, tag, GitHub release, npm or image publication was performed.
 Logs, private test controllers, review snapshots and packaging/sensitivity
 receipts: `/tmp/opencode/dungeon-030-prep-20261123/`.
 
+## OpenCode import preferences (#47, #48)
+
+New plain-container selections seed `cli.json` once into guest-owned state when
+that file is selected. Historical bindings and OpenShell keep the read-only
+mount. Exclude remains the opt-out. This was not run against a real OpenCode
+UI, atomic preference save, or selected image. `dungeon versions` reports
+`selected_image_agent_version` as `unverified`; a mismatch does not refuse
+creation and does not rebuild an existing guest. See
+[configuration](configuration.md#known-opencode-import-limitations-47-48).
+
 ## Selectable SELinux separation (#49, 2026-11-23)
 
 The accepted default decision now uses controlled native behavioral evidence:

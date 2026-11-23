@@ -823,6 +823,7 @@ fn create_project_binding(project: &Path, agent: Agent) -> Result<Config> {
         vec![],
         project,
         &path,
+        values.container.is_some(),
     )?;
     save_environment(directory, values, false)
 }
@@ -1015,6 +1016,7 @@ fn edit_environment(config: &Config, mut options: EditOptions) -> Result<i32> {
                 options.harness_exclude.clone(),
                 &values.project,
                 &config.path,
+                values.container.is_some(),
             )?;
         } else if let Some(h) = &mut values.harness {
             if let Some(mode) = options.harness_config {
@@ -1515,6 +1517,7 @@ fn versions(check: bool, config: Option<&Path>) -> Result<i32> {
             "default_image": crate::runtime::DEFAULT_IMAGE,
             "default_container_image": crate::runtime::DEFAULT_IMAGE,
             "selected_project_image": selected,
+            "selected_image_agent_version": "unverified",
             "registry_stable": latest,
             "reviewed_update_available": latest.as_deref().and_then(stable_version).is_some_and(|version| version > reviewed_number),
             "selection": "both runtimes use setup's saved image, otherwise upstream base:latest; reviewed guest versions describe only the optional local recipe, not the upstream image; existing bindings unchanged",
@@ -1619,6 +1622,7 @@ fn initialize(
         harness_exclude,
         &values.project,
         &directory.join("dungeon.json"),
+        values.container.is_some(),
     )?;
     let config = save_environment(directory, values, yes)?;
 
@@ -1709,6 +1713,7 @@ fn approve_environment(config: &Config, yes: bool) -> Result<()> {
         .filter(|h| h.mode != HarnessMode::Disabled)
     {
         writeln!(io::stdout(), "{}", crate::imports::harness::WARNING)?;
+        writeln!(io::stdout(), "{}", crate::imports::harness::VERSION_NOTE)?;
         if h.mode == HarnessMode::Copy {
             writeln!(
                 io::stdout(),

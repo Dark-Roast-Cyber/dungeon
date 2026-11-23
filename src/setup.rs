@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
 use std::os::unix::process::CommandExt;
@@ -93,6 +93,47 @@ pub(crate) fn query(
         }
     };
     collect_query(child, timeout.saturating_sub(start.elapsed()))
+}
+
+// Seed stdin stays off the shared query path so ordinary commands keep null stdin.
+pub(crate) fn query_with_stdin(
+    binary: &Path,
+    env: &HashMap<OsString, OsString>,
+    args: &[&str],
+    timeout: Duration,
+    stdin: &[u8],
+) -> Option<Reply> {
+    let mut command = Command::new(binary);
+    command
+        .args(args)
+        .current_dir("/")
+        .env_clear()
+        .envs(env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .process_group(0);
+    let start = Instant::now();
+    let mut child = loop {
+        match command.spawn() {
+            Ok(child) => break child,
+            Err(error)
+                if error.raw_os_error() == Some(libc::ETXTBSY) && start.elapsed() < timeout =>
+            {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(_) => return None,
+        }
+    };
+    let mut input = child.stdin.take()?;
+    let payload = stdin.to_vec();
+    let writer = thread::spawn(move || input.write_all(&payload));
+    let reply = collect_query(child, timeout.saturating_sub(start.elapsed()));
+    let wrote = matches!(writer.join(), Ok(Ok(())));
+    match reply {
+        Some(reply) if wrote || reply.code != 0 => Some(reply),
+        _ => None,
+    }
 }
 
 pub(super) fn collect_query(mut child: std::process::Child, timeout: Duration) -> Option<Reply> {

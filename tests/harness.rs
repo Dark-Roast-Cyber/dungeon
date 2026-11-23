@@ -71,11 +71,17 @@ impl Fixture {
             .current_dir(&self.project)
             .stdin(Stdio::null())
             .args(args)
-            .args(if args.first() == Some(&"init") {
-                vec!["--runtime", "openshell"]
-            } else {
-                vec![]
-            })
+            .args(
+                if args.first() == Some(&"init")
+                    && !args
+                        .iter()
+                        .any(|arg| *arg == "--runtime" || arg.starts_with("--runtime="))
+                {
+                    vec!["--runtime", "openshell"]
+                } else {
+                    vec![]
+                },
+            )
             .output()
             .unwrap()
     }
@@ -395,10 +401,9 @@ fn new_opencode_binding_selects_only_reviewed_native_leaves_and_no_session_datab
         "--harness-config",
         "read-only",
     ]);
-    assert!(
-        String::from_utf8_lossy(&out.stdout)
-            .contains("database credentials and sessions are NOT shared")
-    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("database credentials and sessions are NOT shared"));
+    assert!(stdout.contains("Selected image agent version is unverified"));
     let config = f.config();
     assert_eq!(config["values"]["harness"]["mode"], "read-only");
     assert_eq!(
@@ -411,7 +416,34 @@ fn new_opencode_binding_selects_only_reviewed_native_leaves_and_no_session_datab
             "config/themes/synthetic.json"
         ])
     );
+    assert!(
+        config["values"]["harness"]
+            .get("guest_preferences")
+            .is_none()
+    );
     let plan = f.plan();
+    assert_eq!(
+        plan["harness"]["guest_agent_version"]["selected_image_agent_version"],
+        "unverified"
+    );
+    assert_eq!(
+        plan["harness"]["guest_agent_version"]["version_mismatch"],
+        "not a refusal"
+    );
+    assert_eq!(
+        plan["harness"]["guest_agent_version"]["existing_guest"],
+        "never rebuilt"
+    );
+    assert!(
+        plan["harness"]["mounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|mount| {
+                mount["target"] == "/sandbox/.config/opencode/cli.json"
+                    && mount["read_only"] == true
+            })
+    );
     for mount in plan["harness"]["mounts"].as_array().unwrap() {
         assert_eq!(mount["read_only"], true);
         assert!(mount.get("selinux_label").is_none());
@@ -491,7 +523,9 @@ fn headless_mode_recovery_captures_and_preserves_exclusions_in_one_approval() {
     ]);
     let original = fs::read(f.source.join("plugins/local/index.js")).unwrap();
     let out = f.success(&["reload", "--harness-config", "copy", "--yes"]);
-    assert!(String::from_utf8_lossy(&out.stdout).contains("Harness selection approved"));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Harness selection approved"));
+    assert!(stdout.contains("Selected image agent version is unverified"));
     let h = &f.config()["values"]["harness"];
     assert_eq!(h["mode"], "copy");
     assert_eq!(h["exclude_provider_auth"], true);
@@ -928,5 +962,161 @@ fn selinux_preflight_precedes_runtime_contact_and_preserves_control_independence
         fs::remove_file(path.with_file_name("runtime.json")).unwrap();
         f.success(&["plan"]);
         assert_eq!(fs::read(&path).unwrap(), before);
+    }
+}
+
+#[test]
+fn plain_container_seeds_cli_json_without_a_writable_import_mount() {
+    for mode in ["copy", "read-only"] {
+        let f = Fixture::new();
+        let out = f.success(&[
+            "init",
+            "--yes",
+            "--agent",
+            "opencode",
+            "--runtime",
+            "container",
+            "--harness-config",
+            mode,
+        ]);
+        assert!(
+            String::from_utf8_lossy(&out.stdout)
+                .contains("Selected image agent version is unverified")
+        );
+        let config = f.config();
+        let harness = &config["values"]["harness"];
+        assert_eq!(harness["guest_preferences"], json!(["cli.json"]));
+        assert!(
+            harness["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|file| file == "config/cli.json")
+        );
+        let plan = f.plan();
+        let mounts = plan["configuration_mounts"].as_array().unwrap();
+        assert!(mounts.iter().all(|mount| mount["read_only"] == true));
+        assert!(mounts.iter().all(|mount| {
+            mount["target"] != "/sandbox/.config/opencode/cli.json"
+                && !mount["source"].as_str().unwrap().ends_with("/cli.json")
+        }));
+        assert!(mounts.len() >= 2, "{mounts:?}");
+        assert_eq!(
+            plan["guest_agent_version"]["selected_image_agent_version"],
+            "unverified"
+        );
+        assert_eq!(
+            plan["guest_agent_version"]["version_mismatch"],
+            "not a refusal"
+        );
+        assert_eq!(
+            plan["guest_agent_version"]["existing_guest"],
+            "never rebuilt"
+        );
+        if mode == "copy" {
+            let digest = harness["snapshot"].as_str().unwrap();
+            let snapshot = f
+                .config_path()
+                .parent()
+                .unwrap()
+                .join("harness")
+                .join(digest)
+                .join("config/cli.json");
+            assert_eq!(
+                fs::read(&snapshot).unwrap(),
+                fs::read(f.source.join("cli.json")).unwrap()
+            );
+            assert_eq!(
+                fs::metadata(&snapshot).unwrap().permissions().mode() & 0o777,
+                0o400
+            );
+        } else {
+            assert_eq!(fs::read(f.source.join("cli.json")).unwrap(), b"{}");
+        }
+    }
+    for extra in [
+        vec!["--harness-exclude", "cli.json"],
+        vec!["--exclude-provider-auth"],
+    ] {
+        let f = Fixture::new();
+        let mut args = vec![
+            "init",
+            "--yes",
+            "--agent",
+            "opencode",
+            "--runtime",
+            "container",
+            "--harness-config",
+            "copy",
+        ];
+        args.extend(extra);
+        f.success(&args);
+        let config = f.config();
+        let harness = &config["values"]["harness"];
+        assert!(harness.get("guest_preferences").is_none(), "{harness}");
+        assert!(
+            !harness["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|file| file == "config/cli.json")
+        );
+        let plan = f.plan();
+        let mounts = plan["configuration_mounts"].as_array().unwrap();
+        assert!(mounts.iter().all(|mount| mount["read_only"] == true));
+        assert!(
+            mounts
+                .iter()
+                .all(|mount| mount["target"] != "/sandbox/.config/opencode/cli.json")
+        );
+    }
+}
+
+#[test]
+fn openshell_guest_preferences_are_refused_before_engine_contact() {
+    let f = Fixture::new();
+    f.success(&[
+        "init",
+        "--yes",
+        "--agent",
+        "opencode",
+        "--harness-config",
+        "copy",
+    ]);
+    let path = f.config_path();
+    let mut doc: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert!(doc["harness"].get("guest_preferences").is_none());
+    doc["harness"]["guest_preferences"] = json!(["cli.json"]);
+    fs::write(&path, serde_json::to_vec_pretty(&doc).unwrap()).unwrap();
+    let bin = f.home.join("bin");
+    fs::create_dir(&bin).unwrap();
+    let tool = bin.join("openshell");
+    fs::write(
+        &tool,
+        "#!/bin/sh\nprintf contacted > \"$HOME/openshell-contact\"\nexit 97\n",
+    )
+    .unwrap();
+    fs::set_permissions(&tool, fs::Permissions::from_mode(0o700)).unwrap();
+    let marker = f.home.join("openshell-contact");
+    f.success(&["plan"]);
+    for command in [
+        vec!["up"],
+        vec!["create"],
+        vec!["machine", "--schema", "1", "up", "--yes"],
+    ] {
+        let out = f.run_with_path(&command, bin.to_str().unwrap());
+        assert!(!out.status.success(), "{command:?}: {out:?}");
+        assert!(
+            !marker.exists(),
+            "refusal must precede OpenShell contact: {command:?}: {out:?}"
+        );
+        if command[0] != "machine" {
+            assert!(
+                String::from_utf8_lossy(&out.stderr).contains("guest preferences"),
+                "{out:?}"
+            );
+        }
+        assert!(!path.with_file_name("runtime.json").exists());
+        assert!(!String::from_utf8_lossy(&out.stderr).contains(SYNTHETIC_SECRET));
     }
 }

@@ -447,6 +447,7 @@ impl<'a> Runtime<'a> {
     }
 
     pub(crate) fn new(config: &'a Config) -> Result<Self> {
+        crate::imports::harness::refuse_openshell_guest_preferences(config)?;
         Self::require_enabled_contract(config)?;
         let env = host_environment(Some(&config.values.project))?;
         let binary =
@@ -505,6 +506,7 @@ impl<'a> Runtime<'a> {
         transfer: &export::TransferGuard,
         initial_upload_pending: bool,
     ) -> Result<bool> {
+        crate::imports::harness::refuse_openshell_guest_preferences(self.config)?;
         if crate::imports::configured(self.config) {
             #[cfg(target_os = "linux")]
             local_setup::verify_import_gateway(self.config, &self.output)?;

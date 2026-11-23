@@ -908,6 +908,7 @@ mod linux {
                 exclude: vec![],
                 files: vec![],
                 snapshot: None,
+                guest_preferences: vec![],
             });
             for i in 0..4096 {
                 f.config

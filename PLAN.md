@@ -17,8 +17,8 @@ Reviewed GitHub work:
 | Work | Release disposition |
 | --- | --- |
 | #49 selectable SELinux | Include validated plain-Podman default/private change and compatibility contract; OpenShell toggle still unsupported |
-| #47 OpenCode import/version mismatch | Open; no bounded precreation compatibility check yet. Document imports-disabled/validated-image recovery, not an exact-version gate |
-| #48 mutable OpenCode preferences | Open; document new-binding `cli.json` exclusion. Do not invent writable host mounts or unvalidated preference seeding |
+| #47 OpenCode import/version mismatch | Open; plan and `versions` report the selected image agent as unverified. A mismatch is not a refusal and does not rebuild a guest |
+| #48 mutable OpenCode preferences | Open for native UI acceptance. New plain-container selections seed approved `cli.json` once into guest-owned state and do not mount it; historical and OpenShell mounts stay read-only |
 | #18/#22/#24 adoption/setup/live workspace | Existing functionality included; remaining gateway migration and broader qualification are not release claims |
 | #19/#31 capabilities/network UX | Defer broader model/default changes; starter network policy unchanged |
 | #11 Claude account test | Historical native login/edit/test/resume evidence exists in validation; reconcile issue separately, no new credential test or closure here |
