@@ -21,16 +21,19 @@ const RUNTIME_LABEL: &str = "agentarchaeology.ai/dungeon-runtime";
 const PREFERENCE_SEED_SCRIPT: &str = r#"set -eu
 dest=$1
 if [ "$dest" != "/sandbox/.config/opencode/cli.json" ]; then
+  cat >/dev/null || true
   echo refusing >&2
   exit 1
 fi
 # seed-body
 parent=${dest%/*}
 if [ -L "$parent" ] || [ ! -d "$parent" ]; then
+  cat >/dev/null || true
   echo refusing >&2
   exit 1
 fi
 if [ -L "$dest" ]; then
+  cat >/dev/null || true
   echo refusing >&2
   exit 1
 fi
@@ -1281,7 +1284,13 @@ mod preference_seed_tests {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        child.stdin.take().unwrap().write_all(input).unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        match stdin.write_all(input) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
+            Err(error) => panic!("{error}"),
+        }
+        drop(stdin);
         child.wait_with_output().unwrap()
     }
 
