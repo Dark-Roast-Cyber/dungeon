@@ -24,6 +24,10 @@ fn home() -> Result<PathBuf> {
     Ok(home)
 }
 pub(crate) const WARNING: &str = "Read-only prevents host writes, not credential reading, use or exfiltration. Config/plugins execute in the guest. OpenCode 2.1.2 database credentials and sessions are NOT shared; readable legacy auth.json does not establish usable guest authentication. Original-source imports are refused on enforcing SELinux hosts; choose copy explicitly. Read-only auth may prevent login refresh, and snapshots may become stale. Host-only paths are not remapped. No network policy is widened.";
+pub(crate) const VERSION_NOTE: &str = "Selected image agent version is unverified; a version mismatch is not a refusal, and an existing guest is never rebuilt.";
+pub(crate) const GUEST_CLI_JSON: &str = "/sandbox/.config/opencode/cli.json";
+const CLI_JSON: &str = "cli.json";
+const CLI_JSON_FILE: &str = "config/cli.json";
 
 pub(crate) fn enabled(config: &Config) -> bool {
     config
@@ -134,6 +138,23 @@ pub(crate) fn validate(h: &HarnessConfig, project: &Path, config: &Path) -> Resu
             ));
         }
     }
+    if h.guest_preferences.len() > 1 || h.guest_preferences.iter().any(|pref| pref != CLI_JSON) {
+        return Err(Error::new(
+            "guest_preferences accepts only one cli.json entry",
+        ));
+    }
+    if h.mode == HarnessMode::Disabled && !h.guest_preferences.is_empty() {
+        return Err(Error::new(
+            "disabled harness imports cannot carry guest_preferences",
+        ));
+    }
+    if h.guest_preferences.iter().any(|pref| pref == CLI_JSON)
+        && !h.files.iter().any(|file| file == CLI_JSON_FILE)
+    {
+        return Err(Error::new(
+            "guest preference cli.json requires selected config/cli.json",
+        ));
+    }
     if h.snapshot
         .as_deref()
         .is_some_and(|s| !super::valid_digest(s))
@@ -153,6 +174,7 @@ pub(crate) fn defaults(
     exclude: Vec<String>,
     project: &Path,
     config: &Path,
+    plain_container: bool,
 ) -> Result<Option<HarnessConfig>> {
     if mode == HarnessMode::Disabled {
         return Ok(None);
@@ -182,12 +204,57 @@ pub(crate) fn defaults(
         exclude,
         files: vec![],
         snapshot: None,
+        guest_preferences: vec![],
     };
     validate(&h, project, config)?;
     if mode == HarnessMode::ReadOnly && cfg!(target_os = "linux") {
         h.files = discover(&h)?;
     }
+    apply_guest_preferences(&mut h, plain_container);
     Ok(Some(h))
+}
+
+fn apply_guest_preferences(h: &mut HarnessConfig, plain_container: bool) {
+    h.guest_preferences = if plain_container && h.files.iter().any(|file| file == CLI_JSON_FILE) {
+        vec![CLI_JSON.into()]
+    } else {
+        Vec::new()
+    };
+}
+
+fn preference_omitted(h: &HarnessConfig, file: &str) -> bool {
+    file == CLI_JSON_FILE && h.guest_preferences.iter().any(|pref| pref == CLI_JSON)
+}
+
+pub(crate) fn refuse_openshell_guest_preferences(config: &Config) -> Result<()> {
+    if config.values.container.is_none()
+        && config
+            .values
+            .harness
+            .as_ref()
+            .is_some_and(|harness| !harness.guest_preferences.is_empty())
+    {
+        return Err(Error::refusal(
+            crate::ErrorCode::Unsupported,
+            "OpenShell cannot seed guest preferences, so this combination is refused before any OpenShell command; cli.json is neither mounted nor dropped. Remove guest_preferences or use a plain container",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn guest_agent_version(config: &Config) -> Option<Value> {
+    config
+        .values
+        .harness
+        .as_ref()
+        .filter(|harness| harness.mode != HarnessMode::Disabled)
+        .map(|_| {
+            json!({
+                "selected_image_agent_version": "unverified",
+                "version_mismatch": "not a refusal",
+                "existing_guest": "never rebuilt",
+            })
+        })
 }
 
 pub(crate) fn mounts(config: &Config) -> Vec<Value> {
@@ -199,6 +266,7 @@ pub(crate) fn mounts(config: &Config) -> Vec<Value> {
     }
     h.files
         .iter()
+        .filter(|file| !preference_omitted(h, file))
         .map(|file| {
             let source = if h.mode == HarnessMode::Copy {
                 config
@@ -238,7 +306,7 @@ pub(crate) fn plan(config: &Config) -> Value {
     let Some(h) = &config.values.harness else {
         return Value::Null;
     };
-    json!({
+    let mut plan = json!({
         "configuration":h,
         "mounts":mounts(config),
         "warning":WARNING,
@@ -248,11 +316,17 @@ pub(crate) fn plan(config: &Config) -> Value {
         "native_paths": "selected image must supply empty guest-owned config/data/state/cache parents under /sandbox; external file:// plugins, host commands, environment and paths are not imported",
         "source_observation": "not read; plan never inventories or hashes harness source contents",
         "verification": "offline declaration only; not runtime or authentication validation"
-    })
+    });
+    if let Some(version) = guest_agent_version(config) {
+        plan["guest_agent_version"] = version;
+    }
+    plan
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) use linux::{discover, original_sources_compatible, prepare, reload, update, verify};
+pub(crate) use linux::{
+    discover, original_sources_compatible, preference_seed_bytes, prepare, reload, update, verify,
+};
 
 pub(crate) struct Prepared {
     pub(crate) config: Config,
@@ -476,6 +550,49 @@ mod linux {
         Ok(())
     }
 
+    pub(crate) fn preference_seed_bytes(config: &Config) -> Result<Option<Vec<u8>>> {
+        let Some(h) = config.values.harness.as_ref() else {
+            return Ok(None);
+        };
+        if h.mode == HarnessMode::Disabled
+            || !h
+                .guest_preferences
+                .iter()
+                .any(|pref| pref == super::CLI_JSON)
+        {
+            return Ok(None);
+        }
+        if super::mounts(config)
+            .iter()
+            .any(|mount| mount["target"] == super::GUEST_CLI_JSON)
+        {
+            return Ok(None);
+        }
+        let mut file = if h.mode == HarnessMode::Copy {
+            let digest = h.snapshot.as_deref().ok_or_else(|| {
+                Error::new("harness snapshot not approved; guest preference seed unavailable")
+            })?;
+            let root = directory(
+                &config
+                    .path
+                    .parent()
+                    .expect("config parent")
+                    .join("harness")
+                    .join(digest),
+                true,
+            )?;
+            let file = child_file(&root, super::CLI_JSON_FILE)?;
+            metadata(&file, false, true)?;
+            if file.metadata().map_err(|_| error())?.len() > MAX_FILE {
+                return Err(error());
+            }
+            file
+        } else {
+            source_file(h, super::CLI_JSON_FILE)?
+        };
+        Ok(Some(bytes(&mut file, MAX_FILE)?))
+    }
+
     pub(crate) fn verify(config: &Config) -> Result<()> {
         let Some(h) = &config.values.harness else {
             return Ok(());
@@ -555,13 +672,16 @@ mod linux {
 
     pub(crate) fn prepare(mut config: Config, refresh: bool) -> Result<Prepared> {
         let mut snapshot = None;
+        let plain_container = config.values.container.is_some();
         if let Some(h) = &mut config.values.harness {
             if h.mode == HarnessMode::Disabled {
                 h.files.clear();
                 h.snapshot = None;
+                h.guest_preferences.clear();
             } else if refresh || (h.mode == HarnessMode::Copy && h.snapshot.is_none()) {
                 h.files = discover(h)?;
                 h.snapshot = None;
+                super::apply_guest_preferences(h, plain_container);
             }
         }
         crate::openshell::validate_mount_request(&config)?;
@@ -742,6 +862,14 @@ mod linux {
                     &json!({"harness":candidate.values.harness, "warning":WARNING, "effect":"select files for an unbound environment only; no runtime contact or guest auth refresh"})
                 )?
             )?;
+            if candidate
+                .values
+                .harness
+                .as_ref()
+                .is_some_and(|harness| harness.mode != HarnessMode::Disabled)
+            {
+                writeln!(std::io::stdout(), "{}", super::VERSION_NOTE)?;
+            }
             if !yes {
                 write!(
                     std::io::stdout(),

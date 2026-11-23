@@ -762,6 +762,7 @@ fn versions_is_read_only_and_uses_the_reviewed_image_pin() {
     assert!(report["registry_stable"].is_null());
     assert_eq!(report["reviewed_update_available"], false);
     assert!(report["selected_project_image"].is_null());
+    assert_eq!(report["selected_image_agent_version"], "unverified");
     assert_eq!(fs::read_dir(&f.home).unwrap().count(), 0);
     assert!(
         f.run(&["init", "--yes", "--agent", "codex"])

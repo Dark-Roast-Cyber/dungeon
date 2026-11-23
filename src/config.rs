@@ -211,6 +211,9 @@ pub(crate) struct HarnessConfig {
     pub(crate) files: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) snapshot: Option<String>,
+    // Absent or empty serializes away so historical fingerprints stay identical.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) guest_preferences: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -913,7 +916,115 @@ mod tests {
                 expected
             );
             assert_eq!(serde_json::to_value(&values).unwrap(), value);
+            assert!(
+                serde_json::to_value(&values)
+                    .unwrap()
+                    .get("guest_preferences")
+                    .is_none()
+            );
         }
+    }
+
+    #[test]
+    fn empty_guest_preferences_do_not_change_historical_harness_identity() {
+        let mut value = json!({
+            "schema": 2, "name": "fixture", "gateway": "local", "workspace": "default",
+            "project": "/synthetic/project", "image": "localhost/synthetic:1",
+            "agent": "opencode", "providers": [],
+            "harness": {
+                "agent": "opencode",
+                "mode": "read-only",
+                "source": "/synthetic/config/opencode",
+                "legacy_auth": "/synthetic/data/opencode/auth.json",
+                "exclude_provider_auth": false,
+                "exclude": [],
+                "files": ["config/cli.json"]
+            }
+        });
+        let omitted: ConfigDoc = serde_json::from_value(value.clone()).unwrap();
+        assert!(
+            omitted
+                .harness
+                .as_ref()
+                .unwrap()
+                .guest_preferences
+                .is_empty()
+        );
+        assert_eq!(serde_json::to_value(&omitted).unwrap(), value);
+        let omitted_fingerprint = config_fingerprint(&omitted, &starter_policy()).unwrap();
+        value["harness"]["guest_preferences"] = json!([]);
+        let explicit: ConfigDoc = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            serde_json::to_value(&explicit).unwrap(),
+            serde_json::to_value(&omitted).unwrap()
+        );
+        assert_eq!(
+            config_fingerprint(&explicit, &starter_policy()).unwrap(),
+            omitted_fingerprint
+        );
+        let mut changed = serde_json::to_value(&explicit).unwrap();
+        changed["harness"]["guest_preferences"] = json!(["cli.json"]);
+        let changed: ConfigDoc = serde_json::from_value(changed).unwrap();
+        assert_ne!(
+            config_fingerprint(&changed, &starter_policy()).unwrap(),
+            omitted_fingerprint
+        );
+    }
+
+    #[test]
+    fn guest_preferences_accepts_only_one_cli_json_entry() {
+        let base = json!({
+            "schema": 2,
+            "name": "fixture",
+            "gateway": "local",
+            "workspace": "default",
+            "project": "/synthetic/project",
+            "project_transfer": "live",
+            "image": "localhost/synthetic:1",
+            "agent": "opencode",
+            "providers": [],
+            "container": {"engine": "podman"},
+            "harness": {
+                "agent": "opencode",
+                "mode": "copy",
+                "source": "/synthetic/config/opencode",
+                "legacy_auth": "/synthetic/data/opencode/auth.json",
+                "exclude_provider_auth": false,
+                "exclude": [],
+                "files": ["config/cli.json"],
+                "guest_preferences": ["cli.json"]
+            }
+        });
+        let load = |value: Value| {
+            load_config_data(
+                PathBuf::from("/synthetic/private/dungeon.json"),
+                value,
+                |path| Ok((path.to_owned(), starter_policy())),
+            )
+        };
+        assert!(load(base.clone()).is_ok());
+        let mut empty = base.clone();
+        empty["harness"]["guest_preferences"] = json!([]);
+        assert!(load(empty).is_ok());
+        for invalid in [
+            json!(["cli.json", "cli.json"]),
+            json!(["theme.json"]),
+            json!(["cli.json", "theme.json"]),
+        ] {
+            let mut value = base.clone();
+            value["harness"]["guest_preferences"] = invalid;
+            assert!(load(value).is_err());
+        }
+        let mut missing = base.clone();
+        missing["harness"]["files"] = json!([]);
+        assert!(load(missing).is_err());
+        let mut openshell = base;
+        openshell.as_object_mut().unwrap().remove("container");
+        openshell["project_transfer"] = json!("copy");
+        assert!(
+            load(openshell).is_ok(),
+            "OpenShell refusal is at sandbox creation, not historical load"
+        );
     }
 
     #[cfg(target_os = "linux")]

@@ -857,22 +857,41 @@ retain no harness import. Codex and Claude Code sharing follow separately.
 
 ### Known OpenCode import limitations (#47, #48)
 
-Imports are optional and default off. Two usability issues remain open:
+Imports are optional and default off. The two reported issues now have a bounded
+contract. Neither was accepted by a native OpenCode UI toggle, an atomic preference
+save, or an image-compatibility probe.
 
-- [#47](https://github.com/Dark-Roast-Cyber/dungeon/issues/47): upstream
-  `base:latest` supplied OpenCode1.2.18 in the reported reproduction, which rejected
-  a host2.3.2 configuration. The image tag does not select the newest agent.
-  Dungeon does not yet test configuration compatibility before creation.
-  `versions` reports the reviewed recipe/host, not the selected image's actual CLI.
-  Use a deliberately built/validated image or leave imports disabled; version
-  equality alone is not proof of configuration/plugin compatibility.
-- [#48](https://github.com/Dark-Roast-Cyber/dungeon/issues/48): an imported
-  `cli.json` is a read-only leaf mount and can block UI preference writes.
-  For a **new/uncreated** binding, exclude it with
-  `init --agent opencode --harness-config copy --harness-exclude cli.json`
-  (plus the normal project/runtime options). This leaves that native path
-  guest-private; it does not seed host preferences. Exact native UI/atomic-save
-  acceptance for the selected OpenCode version is still required.
+- [#47](https://github.com/Dark-Roast-Cyber/dungeon/issues/47): a version mismatch
+  is not a confirmed incompatibility and is not a refusal. Dungeon does not probe
+  the selected image, run `opencode`, or rebuild an existing guest because versions
+  differ. `dungeon versions` reports `selected_image_agent_version` as
+  `unverified`. Reviewed recipe versions describe only the optional local image,
+  not the selected image. When imports are enabled, plan states the same limit.
+  Leave imports disabled, or select a deliberately validated image, when
+  configuration compatibility matters. Version equality alone is still not proof
+  of configuration or plugin compatibility.
+- [#48](https://github.com/Dark-Roast-Cyber/dungeon/issues/48): a new
+  plain-container selection that includes `config/cli.json` records
+  `guest_preferences: ["cli.json"]`, omits that file from mounts, keeps the
+  approved bytes in the copy snapshot, and seeds them once into guest-owned
+  `/sandbox/.config/opencode/cli.json` if that path is absent. An existing guest
+  file is never overwritten. Nothing is written back to the host or the snapshot.
+  Host configuration stays read-only. Docker and Podman share this path.
+  Historical configs omit the field, keep the read-only `cli.json` mount, and
+  keep the same fingerprint. Bound edits stay refused. An unbound reload or edit
+  that rediscovers files may gain the field; that is a new selection, not guest
+  migration.
+  OpenShell does not seed. New OpenShell selections do not set
+  `guest_preferences` and keep the read-only mount. A config that nevertheless
+  has the field is refused before any OpenShell command, including version
+  lookup; the file is neither mounted nor dropped. Remove the field to recover
+  the binding.
+  `--harness-exclude cli.json` and `--exclude-provider-auth` omit the file and
+  leave `guest_preferences` empty. That remains the opt-out: no seed and no mount.
+
+No native side-panel persistence or atomic-save acceptance was run. Do not treat
+seeding as proof that the selected OpenCode can persist UI preferences, or that
+the selected image accepts the imported configuration.
 
 Any runtime marker refuses import/image edits. Do not make original sources or
 approved snapshots writable, refresh over guest preferences, or hand-edit bound
@@ -885,7 +904,7 @@ files; it is not needed merely to acknowledge the limitation.
 | Choice | Behavior |
 | --- | --- |
 | `--harness-config read-only` | Select individual existing native files; derive read-only original-source binds without relabeling |
-| `--harness-config copy` | Capture/review a private snapshot in the same initialization/edit approval; no separate reload; snapshot files are mounted read-only |
+| `--harness-config copy` | Capture/review a private snapshot in the same initialization/edit approval; no separate reload; snapshot files are mounted read-only, except `cli.json` on a new plain-container selection, which is seeded once into guest-owned state |
 | `--harness-config disabled` (default) | No harness mounts or source inventory |
 | `--exclude-provider-auth` | Omit legacy auth and entire `opencode.json`, `opencode.jsonc`, `cli.json` files that may mix credentials with settings |
 | `--harness-exclude PATH` (repeatable) | Omit an exact config-relative file/subtree, not a glob; legacy auth is controlled separately |
@@ -894,7 +913,9 @@ OpenCode sources use `${XDG_CONFIG_HOME:-$HOME/.config}/opencode` and legacy
 `${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json`. Absolute XDG roots are
 required. The private schema-2 `harness` declaration stores `agent: "opencode"`,
 `mode`, `source`, `legacy_auth`, exclusions, selected `files` and optional copy
-`snapshot`. These fields enter existing runtime identity; changing a bound config
+`snapshot`, and optional `guest_preferences`. Empty `guest_preferences` is
+omitted, so historical fingerprints stay identical. The only accepted value is
+`cli.json`. These fields enter existing runtime identity; changing a bound config
 does not reconfigure its sandbox. No repository file grants import authority.
 
 Selected config roots: `opencode.json`, `opencode.jsonc`, `cli.json`, `AGENTS.md`,
