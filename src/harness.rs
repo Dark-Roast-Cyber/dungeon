@@ -25,6 +25,7 @@ fn home() -> Result<PathBuf> {
 }
 pub(crate) const WARNING: &str = "Read-only prevents host writes, not credential reading, use or exfiltration. Config/plugins execute in the guest. OpenCode 2.1.2 database credentials and sessions are NOT shared; readable legacy auth.json does not establish usable guest authentication. Original-source imports are refused on enforcing SELinux hosts; choose copy explicitly. Read-only auth may prevent login refresh, and snapshots may become stale. Host-only paths are not remapped. No network policy is widened.";
 pub(crate) const VERSION_NOTE: &str = "Selected image agent version is unverified; a version mismatch is not a refusal, and an existing guest is never rebuilt.";
+#[cfg(target_os = "linux")]
 pub(crate) const GUEST_CLI_JSON: &str = "/sandbox/.config/opencode/cli.json";
 const CLI_JSON: &str = "cli.json";
 const CLI_JSON_FILE: &str = "config/cli.json";
