@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run with a disposable HOME and a local native engine; only this fixture is removed.
+# Run with a disposable HOME and an isolated local engine; includes full uninstall.
 set -eu
 umask 077
 test "${DUNGEON_CONTAINER_TEST:-}" = disposable-home || { echo 'set DUNGEON_CONTAINER_TEST=disposable-home with a disposable HOME' >&2; exit 1; }
@@ -7,6 +7,12 @@ binary=${DUNGEON_CONTAINER_BINARY:?absolute Dungeon binary required}
 engine=${DUNGEON_CONTAINER_ENGINE:?podman or docker required}
 endpoint=${DUNGEON_CONTAINER_ENDPOINT:?explicit local engine socket required}
 image=${DUNGEON_CONTAINER_IMAGE:-ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e}
+case "$engine" in
+    podman) foreign=$(podman --remote --url "$endpoint" ps --all --filter label=agentarchaeology.ai/dungeon-runtime=container --format '{{.ID}}');;
+    docker) foreign=$(docker --host "$endpoint" ps --all --filter label=agentarchaeology.ai/dungeon-runtime=container --format '{{.ID}}');;
+    *) echo 'use podman or docker' >&2; exit 1;;
+esac
+test -z "$foreign" || { echo 'full uninstall gate requires an engine without other Dungeon bindings; use an isolated store/API endpoint' >&2; exit 1; }
 test ! -e "$HOME/.config/dungeon"
 test ! -e "$HOME/.local/state/dungeon"
 mkdir -p "$HOME/project" "$HOME/bin"

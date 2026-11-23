@@ -1112,6 +1112,7 @@ mod tests {
             policy_path: config_dir.join("policy.json"),
             values: ConfigDoc {
                 openshell_contract: None,
+                selinux_isolation: Default::default(),
                 container: None,
                 schema: 2,
                 name: "demo".into(),

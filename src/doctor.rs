@@ -83,6 +83,13 @@ pub(crate) fn run(
                 "Selected private configuration and policy passed local validation.",
                 "Review dungeon plan before runtime operations.",
             );
+            report.add(
+                "selinux_isolation",
+                config.values.selinux_isolation.as_str(),
+                false,
+                "Requested per-workload SELinux separation only, not kernel attestation.",
+                "Use status and native engine inspection for effective labels; see docs/security-controls.md.",
+            );
             if config.values.openshell_contract.is_some() {
                 report.add(
                     "openshell_contract",
@@ -864,6 +871,7 @@ mod linux {
                 &path,
                 &ConfigDoc {
                     openshell_contract: None,
+                    selinux_isolation: Default::default(),
                     container: None,
                     schema: 2,
                     name: "fixture".into(),
@@ -1433,6 +1441,7 @@ esac
                 path: home.join("private/dungeon.json"),
                 values: ConfigDoc {
                     openshell_contract: None,
+                    selinux_isolation: Default::default(),
                     container: None,
                     schema: 2,
                     name: "fixture".into(),

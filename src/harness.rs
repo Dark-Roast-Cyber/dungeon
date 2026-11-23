@@ -220,7 +220,7 @@ pub(crate) fn mounts(config: &Config) -> Vec<Value> {
             let mut mount =
                 json!({"type":"bind", "source":source, "target":target, "read_only":true});
             // Never relabel original host files; only Dungeon-owned copies may be relabeled.
-            if h.mode == HarnessMode::Copy {
+            if h.mode == HarnessMode::Copy && config.values.selinux_isolation.is_private() {
                 mount["selinux_label"] = json!("private");
             }
             mount

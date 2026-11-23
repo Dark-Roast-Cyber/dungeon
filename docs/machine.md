@@ -54,6 +54,12 @@ engine). OpenShell options cannot be combined with container options. `auto` is
 not a machine runtime selection; choose `container` or `openshell`. Initialization
 uses the same config writer/validator, starts nothing and imports no host state.
 `--agent opencode|claude|codex` saves the agent choice, defaulting to OpenCode.
+`--selinux-isolation private|disabled` uses the same closed configuration option;
+disabled requires Linux, `--runtime container --engine podman`, and never falls
+back. New Linux container initialization defaults to disabled for Podman and
+private for explicit Docker. An unresolved new developer-default binding pins
+Podman offline; explicit private keeps `--engine auto` discovery. Omitted fields
+when **loading existing configuration** still retain private separation.
 
 For plain-container lifecycle JSON without an OpenShell dependency:
 
@@ -107,6 +113,10 @@ plain-container binding reports policy `unenforced`, including before creation;
 its environment identifies the runtime and, once observed, the engine. An unbound resolve
 uses null environment/capabilities, phase `unbound`, identity/policy `unknown`.
 Observed phases are `ready`, `stopped`, `error`, `transitioning` or `unknown`.
+The additive `environment.selinux_isolation` object reports `requested` and
+`verification`: `not-inspected` offline/on OpenShell/Docker, or `native-configuration`
+after plain Podman inspection. The latter includes `process_label`, `mount_label`
+and `host_selinux_enabled` (null if unknown), not kernel attestation.
 
 For plain containers, `initial_upload_pending` indicates incomplete guest
 preparation, not an upload. Stop and destroy the container before creating it

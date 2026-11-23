@@ -1,63 +1,62 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
-- Update the optional local agent image to OpenCode V2 2.2.7 with locked platform packages and a distinct image tag; existing guests, upstream image defaults and other tool pins are unchanged. Rebuild explicitly to use the new pin; end-to-end native validation remains separate.
-- Pin a hash-verified Node22.23.4 image runtime, including the owned guardian's exact path; preserve other tool pins and refuse stale/shadowed runtimes in image checks. Existing local image tags are not replaced automatically.
-- Keep runtime startup/resume diagnostics on stderr so headless harness stdout remains usable as JSON/JSONL; preserve native workload streams and exit status.
-- Honor explicit `doctor --runtime container|openshell` while retaining selected-project executable exclusions, including diagnosis from another directory.
-- Update adoption instructions for optional OpenShell, native headless harness modes and concurrent-live SELinux limits; expand the native container I/O gate.
-- Ask for a harness on first human initialization instead of assuming OpenCode; persist the project choice and keep host configuration imports opt-in. Noninteractive initialization requires `--agent` as well as `--yes`.
-- Make interactive bare `dungeon` launch the same guest CLI as `dungeon run` for every harness. Host OpenCode attachment is now explicit `dungeon attach`; `run -- NATIVE_FLAGS` uses the configured harness without a host client.
-- Support Linux machine stdout connected Unix stream sockets without changing inherited descriptor flags; preserve FIFO backpressure and cleanup.
-- Expose additive machine `copy_baseline_valid` admission evidence and terminal `cleanup` / `primary_transport_verified` lifecycle evidence for external consumers such as Switchboard.
-- Verify owned primary exit before removing controls; preserve queued frame sequences and drain discarded output within the cleanup deadline after cancellation or output faults. A cancellation observed before the terminal frame is written replaces only that unpublished frame.
+First Rust engineering preview, replacing the Python implementation in v0.0.1.
+The supported runtime path is Linux. Native builds for macOS and Windows do not
+establish runtime support or containment certification. Dungeon is not audited.
 
-## Unreleased preview additions (0.0.2)
+### Environments and daily use
 
-- Simplify `init` with current-project, generated-name and private-binding defaults; one scope confirmation or `--yes`, with explicit customization flags. Add offline `config`/`config --path`, make `plan` non-initializing, improve command help, and open `shell` in the guest project. Validate initial configuration before writing files; no image/policy default change.
-- Serialize first-copy creation/upload and block new work while durable initial upload is pending; recovery remains explicit `upload --yes`, without automatic retry or rollback guarantees.
+- One Rust binary manages private schema-2 project bindings, scope review,
+  configuration editing, setup, diagnostics and lifecycle. Project files cannot
+  authorize their own policy or mounts.
+- Run OpenCode, Claude Code, Codex or image-provided tools in plain rootless Podman
+  or standard Docker CE containers. OpenShell 0.0.116 remains optional for hard
+  Landlock/network policy, copy/export, SSH, forwarding and host OpenCode attachment.
+- New human bindings default to reviewed live project access. Explicit/legacy
+  copy mode retains one-time upload, reviewed three-way export, transfer locks and
+  retained recovery material. Stop/resume preserves guest files, login and sessions.
+- New Linux Podman bindings default to disabled per-workload SELinux separation
+  without host relabeling. Select `--selinux-isolation private` for the extra
+  MCS boundary. Host SELinux stays unchanged; historical configs/fingerprints stay
+  private. Docker and OpenShell refuse disabled mode. See
+  [security controls](https://github.com/Dark-Roast-Cyber/dungeon/blob/v0.3.0/docs/security-controls.md).
+- Optional reviewed OpenCode/Neovim imports remain read-only; native auth/session
+  databases are excluded. Guest-native login is separate from named providers.
+  Replacing a guest to change its image or SELinux mode loses guest-only state.
 
-- Add schema-1 machine lifecycle JSON and workload-byte JSONL on the same Runtime, with explicit whole-project transfer approval; no Sandcastle adapter or arbitrary-path synchronization.
-- Add read-only `doctor` diagnostics and opt-in Linux owned foreground/interactive execution. Ownership assists cleanup, not stronger containment.
-- Add explicit experimental live project transfer and fresh `setup --enable-live`; copy remains the default and copy-gateway migration is refused. Validation is limited to the recorded Linux/OpenShell/Podman combinations.
-- Add approved private Neovim snapshots with read-only mounted contents. Writable guest ancestors still allow pathname replacement; this is not trusted-execution control.
-- Serialize copy transfers with private native locks and retain interrupted export recovery for manual inspection; no automatic rollback or power-loss guarantee.
+### Automation, hardening and distribution
 
-## Unreleased safe export (Issue #9)
+- Schema-1 lifecycle JSON and OpenShell workload-byte JSONL reuse the same runtime.
+  Runtime progress stays on stderr; workload streams and exit status are preserved.
+  Opt-in owned execution assists cleanup, not stronger containment.
+- Identity/policy checks refuse drift; uninstall refuses foreign bindings and
+  removes only reviewed resources. Inspected network protocols require explicit
+  `enforcement=enforce`; unknown or mistyped selectors refuse.
+- The optional unpublished image recipe pins OpenCode 2.2.7, patched Node22.23.4,
+  Claude Code, Codex, Neovim and Rust. Build/select it explicitly; it is not the
+  mutable upstream default and is not upgraded during launch.
+- Tag-gated native archives include SHA-256 checksums and reviewed release notes.
+  Rust, lockfile, npm manifests and launcher dependency pins must agree before
+  publication. npm tarball assembly is tested; registry publication is not enabled.
 
-- Add Ready-only reviewed export for OpenShell 0.0.116: stage the guest tree, summarize changes deterministically, detect three-way conflicts, and require typed `yes` or `--yes` before applying. Preserve host-only files; reject special entries and unsupported metadata. Track the uploaded baseline in private config state, and retain private adjacent backups if apply fails. No live sync or host mount.
+### Known limitations
 
-## Unreleased lifecycle (Issue #8)
-
-- Add `up`, `run`, and `down` lifecycle flow: first `up` creates and uploads once, resume avoids upload, `run` starts a stopped bound sandbox without upload, and `down` stops while preserving guest state. Keep overwriting upload as explicit `upload --yes`; reviewed project export is a separate Issue #9 operation.
-
-## Unreleased local setup (Issue #7)
-
-- Add `dungeon setup` for Linux/rootless Podman/OpenShell 0.0.116: bootstrap and register one local mTLS gateway, check health and driver, refuse conflicting state, and show the reviewed local-image build/next init command. No image publication, policy change, installer, or MicroVM fallback.
-
-## Local image candidate (0.0.3-dev, not the CLI version)
-
-- Add one local Linux agent image with a digest-pinned OpenShell base, exact official OpenCode V2/Claude Code/Codex packages, a pnpm integrity lock, and build-time CLI version checks. No image publication, default-image change, policy expansion, or host-state import.
-- Add pinned, hash-verified Neovim 0.12.5 and Rust 1.98.1 (`rustc`, `cargo`, `rust-std`) to the image. Synthetic editor, compiler, and offline Cargo workloads passed under the unchanged OpenShell hard policy on the tested rootless-Podman gateway. Writable state uses HOME-derived `/sandbox` locations; no runtime installers or explicit guest environment propagation were added. Approved configuration snapshots are now implemented separately, with the contents-only limit above.
-
-## Unreleased (0.0.2)
-
-- Replace the Python implementation published as v0.0.1 with one Rust CLI; Rust 0.0.2 remains source-only.
-- Split the Rust implementation into plain `cli`, `config`, `policy`, and `openshell` responsibility modules without introducing traits or sub-crates.
-- Move `dungeon.json` to schema 2 and remove the redundant policy-path field; `policy.json` is always adjacent.
-- Collapse starter profiles into one starter development policy until live validation establishes meaningful scenario differences.
-- Remove the provisional in-guest `dungeon telltale` command; Telltale integration is deferred until Telltale 0.7.0/Event4 provides a stable downstream contract.
-- Add CI native archive packaging for Linux x64, macOS arm64/x64, and Windows x64, and a release workflow generating SHA-256 checksums. No Rust release assets are published yet.
-- Add a tag-gated GitHub prerelease workflow that verifies the tag against `Cargo.toml`, rebuilds from locked dependencies, and never runs on ordinary branch pushes.
-- Add a thin npm/npx launcher design with OS/CPU-specific native package templates. CI stages real native binaries into temporary packages and packs all five tarballs without publishing. No postinstall downloader and no duplicate runtime logic.
-- Add `dungeon auth codex` for Codex device-code authentication.
-- Add `dungeon auth claude` for Claude Code's vendor-native `/login` flow.
-- Keep OpenShell providers as the separate brokered API credential path.
-- Keep OpenCode authentication provider-specific. Grok is intentionally not added.
-- Bound the future declarative setup model: reviewed images own binaries/toolchains, imports are read-only snapshots, writable state is separate, and setup requests cannot silently widen policy or execute host hooks.
-- Preserve the successful synthetic OpenCode SQLite snapshot/download experiment as deferred research rather than binding Dungeon to Telltale's moving pre-0.7 contracts.
-- Reorient near-term work around a reviewed agent image, one-command local setup, simplified lifecycle, safe project export, and then reviewed editor/tool configuration imports.
+- OpenShell 0.1.x remains gated pending the full port and native qualification.
+  The SELinux toggle does not enable it or relax OpenShell's hard policy.
+- Imported newer OpenCode configuration can fail in the older CLI supplied by
+  upstream `base:latest` ([#47](https://github.com/Dark-Roast-Cyber/dungeon/issues/47)).
+  The image tag does not imply the latest agent. Prefer imports disabled until
+  the selected image/config combination is validated.
+- Imported `cli.json` is read-only and can block UI preference writes
+  ([#48](https://github.com/Dark-Roast-Cyber/dungeon/issues/48)). Guest-private
+  writable preference seeding is not implemented; avoid importing this file for
+  a new binding. Never make the host source writable as a workaround.
+- The current Fedora/Podman disabled/private SELinux and full-container gates pass;
+  older exit137 observations remain undiagnosed, not generally fixed by this release.
+  Evidence is combination-specific. Desktop, EDR, remote-host and broader-platform
+  claims remain unvalidated; Sandcastle and Telltale are not integrated.
 
 ## 0.0.1
 

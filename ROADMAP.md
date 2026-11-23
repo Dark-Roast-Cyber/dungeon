@@ -10,7 +10,7 @@ Dungeon owns environment setup, configuration, lifecycle, scope, reviewed capabi
 
 Dungeon should not become a prompt engine, issue runner, parallel-agent scheduler, branch orchestrator, or replacement for Sandcastle/OpenCode-style harnesses.
 
-## 0.0.2: validated native foundation
+## Rust foundation (developed as 0.0.2, source-only)
 
 Dungeon has converged on one Rust binary, one config schema, one starter policy, one OpenShell subprocess boundary, native release artifacts, and a thin npm/npx launcher.
 
@@ -18,9 +18,13 @@ Issue #1 validated the primary Linux path with OpenShell 0.0.116 and rootless Po
 
 The recorded Podman combination is validated. MicroVM, desktop-client containment, EDR visibility, and broader platform claims remain separate work.
 
-## 0.0.3: low-friction contained development
+## 0.3.0: first Rust engineering preview
 
-The current milestone remains focused on making the contained development loop comfortable without weakening the security boundary.
+The current candidate brings the contained-development loop to the first Rust
+tag release. New rootless-Podman bindings deliberately default to disabled
+SELinux separation; private mode remains explicit and historical configurations
+are unchanged. Review the [security tradeoff](docs/security-controls.md) and
+[release limitations](CHANGELOG.md) rather than treating usability as hardening.
 
 Completed or substantially implemented:
 
@@ -37,7 +41,7 @@ Keep Issue #16 as bounded follow-up hardening for export durability, concurrency
 
 ## Next: low-friction environment management
 
-After the current 0.0.3 loop is stable, prioritize these slices in dependency order.
+After the 0.3.0 preview, prioritize these slices in dependency order.
 
 **Remote-first use with live local edits.** Keep the user's
 editor/client and configuration on the host; run agent tools and state inside

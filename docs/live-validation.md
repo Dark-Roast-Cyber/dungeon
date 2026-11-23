@@ -1,10 +1,46 @@
 # Live validation runbook
 
-This runbook is the execution checklist for Issue #1. It is intentionally operational rather than architectural: the goal is to validate the current 0.0.2 boundary, record exact evidence, and surface defects without redesigning Dungeon during the test.
+This runbook began as the execution checklist for Issue #1. It is intentionally operational rather than architectural: the goal is to validate the current Rust preview boundary, record exact evidence, and surface defects without redesigning Dungeon during the test.
 
 Use synthetic project content and dedicated test credentials. Do not commit raw credentials, personal paths, transcripts, browser state, or unsanitized runtime logs.
 
 ## 1. Freeze the test inputs
+
+### SELinux separation gate (#49)
+
+On a supported enforcing-SELinux Linux host with an already running rootless
+Podman API socket, use a fresh empty private HOME, an absolute built Dungeon
+binary and a cached pinned image. This gate creates/destroys only its two synthetic
+guests; it does not set up services or pull/replace images:
+
+```sh
+HOME="$DISPOSABLE_HOME" DUNGEON_SELINUX_TEST=disposable-home \
+  DUNGEON_CONTAINER_BINARY="$ABSOLUTE_DUNGEON_BINARY" \
+  DUNGEON_CONTAINER_ENDPOINT="unix:///run/user/$(id -u)/podman/podman.sock" \
+  DUNGEON_CONTAINER_IMAGE="REGISTRY/IMAGE@sha256:REVIEWED_DIGEST" \
+  uv run --no-project tests/selinux-live.py
+```
+
+The runner verifies the new disabled **default** and explicitly selected private
+mode, existing/created/copied/same-filesystem-moved/atomically
+replaced files, bidirectional edits, UID/modes, disabled-mode label preservation,
+native process labels/security options/maps, read-only synthetic imports,
+outside-project/credential/socket absence, same-ID resume and private-mode
+moved-file denial. Its JSON receipt is `$DISPOSABLE_HOME/selinux-result.json`.
+Use a HOME outside any real project or native auth state; synthetic import path
+restrictions can reject temporary ancestors named `opencode`, so use an
+owner-private checkout `target/` directory when needed.
+
+Acceptance requires controlled private/disabled behavioral comparison, unchanged
+host enforcement/labels, boundary checks and the applicable ordinary container
+gate (`tests/container-live.sh`). That full gate includes uninstall and requires
+an isolated engine/store/API endpoint without other Dungeon bindings; a
+disposable HOME against a shared engine is insufficient. Never remove foreign
+bindings or weaken the uninstall guard to run it. Record exact OS/kernel/engine/
+image inputs. A matching AVC is useful when accessible through an authorized
+administrator, but unavailable audit logs are a diagnostic limitation rather
+than a hard prerequisite. Neither runner reads protected audit logs. See
+[security controls](security-controls.md#troubleshoot-without-weakening-the-host).
 
 ### Experimental setup CLI gate
 

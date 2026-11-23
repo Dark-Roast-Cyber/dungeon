@@ -4,6 +4,87 @@ Goal: host-native clients/editors, isolated agent execution, and visible local
 project edits without weakening the boundary. Validation does not authorize
 tool upgrades, client installation, release/tagging, or publication.
 
+## 0.3.0 release preparation (2026-11-23)
+
+The user subsequently authorized merging this candidate: commit, push, PR, final
+checks/review and merge are now in scope. Tagging/release publication remain
+separate approval boundaries; dependency PRs remain separate.
+`v0.0.1` already exists as a Python prerelease; `v0.3.0` is the first Rust release.
+Keep the existing engineering-preview/prerelease workflow.
+
+Reviewed GitHub work:
+
+| Work | Release disposition |
+| --- | --- |
+| #49 selectable SELinux | Include validated plain-Podman default/private change and compatibility contract; OpenShell toggle still unsupported |
+| #47 OpenCode import/version mismatch | Open; no bounded precreation compatibility check yet. Document imports-disabled/validated-image recovery, not an exact-version gate |
+| #48 mutable OpenCode preferences | Open; document new-binding `cli.json` exclusion. Do not invent writable host mounts or unvalidated preference seeding |
+| #18/#22/#24 adoption/setup/live workspace | Existing functionality included; remaining gateway migration and broader qualification are not release claims |
+| #19/#31 capabilities/network UX | Defer broader model/default changes; starter network policy unchanged |
+| #11 Claude account test | Historical native login/edit/test/resume evidence exists in validation; reconcile issue separately, no new credential test or closure here |
+| #21/#30/#32 integration/remotes | Not release gates for the supported local CLI; unsupported integrations stay explicit |
+| PR #44 Actions pins / #46 Rust dependencies | Both green at review; no formal review or merge performed. Existing checks do not validate this combined release candidate |
+| Pilot branch `6de3643` | Preserve larger onboarding/install changes separately; include only its small fail-closed inspection-protocol validation correction |
+
+Candidate: synchronize Cargo/lockfile and all launcher/platform versions to
+0.3.0; curated changelog replaces contradictory unreleased milestones.
+One build-time release checker validates versions, launcher dependency pins,
+tag and notes in CI/release. Tag quality gains CI's Node24 and Node tests.
+No new runtime implementation or registry/image publication is added.
+
+Before tagging: final source/release/package checks and final-commit cross-platform
+CI/review; then explicit publication authorization. #49's unchanged native
+container/SELinux/replacement evidence remains combination-specific, not general
+exit137 attribution, OpenShell parity or desktop/platform certification.
+
+Local checkpoint:277 Rust/33 Node24 tests, fmt, locked warnings-denied Clippy,
+locked release build/version, metadata/tag/notes checks, syntax/YAML/whitespace
+and real Linux archive/packed-launcher smoke passed. Other-platform npm binaries
+were synthetic assembly fixtures, not release assets. pnpm packing lost execute
+mode locally; the existing npm pack path passed and a regression guards the
+packed command. Seven broken scratch variants were rejected by the new tests.
+See [the release evidence](docs/validation.md#030-preparation-checkpoint-2026-11-23-not-published).
+All changes remain local/uncommitted; no publication operation was performed.
+
+## Selectable SELinux separation (#49, 2026-11-23)
+
+Branch `feat/49-selectable-selinux` starts at `origin/main`; prior pilot/policy
+changes are preserved on `feat/linux-team-pilot-first-run`, including local
+commit `6de3643`. No push or new PR publication has been performed.
+
+Implemented: closed private schema-2/CLI/machine selection, explicit plain
+rootless-Podman disabled labeling without project/snapshot relabeling, native
+label checks, historical fingerprint preservation, bound-edit refusal and the
+security-controls guide. The pinned OpenShell0.0.116 driver cannot express
+per-workload process-label disabling; it and Docker refuse disabled mode.
+
+The user approved the developer-first default after controlled native behavioral
+evidence: new Linux Podman bindings now explicitly save disabled. An unresolved
+new default pins Podman offline; saved/explicit Docker stays private, and explicit
+private retains auto discovery. Historical missing fields still load as private.
+Missing AVC access is diagnostic only; no permission bypass or host-policy
+change is authorized. Default/compatibility regressions are implemented.
+
+The broader shared-engine gate failure was uninstall's correct foreign-binding
+refusal, not a SELinux regression. The complete container gate, including actual
+uninstall, and the default/private native gate now pass on an isolated store/API.
+Its service/image were retired and all20 host records matched. No guard was
+weakened, foreign resources deleted or uninstall skipped. The runbook/preflight
+now declare the engine prerequisite. Documented
+replacement supports retaining the old guest or explicit stop/destroy/edit/up
+with loss of guest-only auth/sessions. The synthetic native replacement proved a
+new container ID, newly accessible moved file and lost guest-only session marker.
+No real existing guest was migrated. Final checks:275 Rust/11 Node tests, fmt,
+warnings-denied Clippy, debug build and shell/Python syntax passed.
+
+**Outstanding OpenShell requirement:** obtain an upstream-supported per-workload
+process-label toggle, then validate moved-file access with unchanged hard
+Landlock and representative denied-network/filesystem operations before parity.
+OpenShell remains private-only and explicit disabled continues to refuse.
+Modern OpenShell, network
+defaults (#31), generalized capabilities (#19) and live-mount design (#24) remain
+separate work; no migration or automatic recreation is added.
+
 ## Active handoff: forward-compatible OpenShell and simple onboarding (2026-11-06)
 
 **Publication handoff (2026-11-07):** the user authorized committing, syncing,

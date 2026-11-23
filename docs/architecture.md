@@ -121,6 +121,18 @@ The plain state's `observed_policy` field stores the stable native specification
 digest, not an enforced OpenShell policy. Generated Podman metadata and consumed
 SELinux relabel options are excluded; inspected bind sources/targets/modes remain
 authoritative. Native engines retain writable guest state between stop/start.
+Private schema-2 `selinux_isolation` is the sole per-binding selection: omitted
+or explicit private retains historical serialization and identity; disabled
+changes identity and is limited to explicit Linux/rootless Podman. It requests
+workload-only `label=disable` and omits project/private-snapshot relabeling, not
+OpenShell enforcement or host SELinux. Native process labels/security options
+are checked separately without changing historical specification digests;
+Podman's storage `MountLabel` can remain nonempty when process separation is
+disabled. Only new-binding constructors apply the developer default: they
+explicitly persist disabled on Linux Podman, pinning an unresolved engine to
+Podman offline rather than allowing Docker fallback. Explicit/private selection
+and loading existing configuration never apply this constructor default.
+See [security controls](security-controls.md).
 
 The OpenShell-specific sections below describe that optional contract.
 

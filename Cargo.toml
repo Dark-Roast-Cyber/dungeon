@@ -1,9 +1,9 @@
 [package]
 name = "agent-dungeon"
-version = "0.0.2"
+version = "0.3.0"
 edition = "2024"
 license = "Apache-2.0"
-description = "Terminal-first agent environments with OpenShell and optional Telltale"
+description = "Isolated project environments for coding agents with Podman, Docker, or OpenShell"
 repository = "https://github.com/Dark-Roast-Cyber/dungeon"
 rust-version = "1.98.1"
 

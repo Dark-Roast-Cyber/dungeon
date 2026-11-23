@@ -1271,6 +1271,7 @@ mod tests {
                 policy_path: canonical.join("policy.json"),
                 values: ConfigDoc {
                     openshell_contract: None,
+                    selinux_isolation: Default::default(),
                     container: None,
                     schema: 2,
                     name: "demo".into(),
@@ -2016,6 +2017,7 @@ esac
             path: PathBuf::from("/tmp/dungeon.json"),
             values: ConfigDoc {
                 openshell_contract: None,
+                selinux_isolation: Default::default(),
                 container: None,
                 schema: 2,
                 name: "demo".into(),

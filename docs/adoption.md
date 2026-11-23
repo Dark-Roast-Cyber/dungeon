@@ -1,10 +1,13 @@
 # Dungeon adoption cheat sheet (source preview)
 
-Dungeon 0.0.2 is **source-only**. Do not use the published v0.0.1 Python package
-or unpublished npm commands for this Rust workflow. The supported local path is
+This checkout prepares Dungeon **0.3.0**, the first Rust release. Until its tag is
+published, install from source. Do not use the older v0.0.1 Python package or
+unpublished npm commands for this Rust workflow. The supported local path is
 Linux with rootless Podman or standard Docker CE, and Rust **1.98.1** for building.
 OpenShell **0.0.116** is optional for policy enforcement, copy/export, SSH and
 forwarding. This is an engineering preview, not containment certification.
+Review the [security-controls decision guide](security-controls.md) before
+choosing runtime or SELinux separation.
 
 ## 1. Install the CLI, not a gateway
 
@@ -47,6 +50,14 @@ Noninteractive setup requires `--yes`; `--dry-run` never activates services, pul
 images or writes defaults. Containers mount
 only the reviewed project/imports, but **do not enforce OpenShell policy or restrict
 outbound networking**. Existing bindings never switch runtime automatically.
+New rootless-Podman bindings default to disabled SELinux separation, trading
+the extra MAC/MCS boundary for moved-file usability; host SELinux remains
+unchanged. Choose `init --runtime container --engine podman --selinux-isolation
+private` for the hardened option. New unresolved developer-default bindings pin
+Podman; setup-selected/explicit Docker stays unchanged. OpenShell/Docker refuse
+disabled mode. Existing guests need an
+[explicit replacement](configuration.md#adopt-relaxed-labeling-for-an-existing-environment)
+and new guest login, not an in-place label change.
 
 ### Optional OpenShell
 
@@ -79,11 +90,15 @@ immutable content. Setup never replaces existing guests or rewrites their bindin
 
 For the optional reviewed tool versions, build the
 [local Linux amd64 image](../images/agent/README.md) and select it with
-`dungeon init --image localhost/dungeon-agent:0.0.3-opencode-2.1.2`. The tag names
+`dungeon init --image localhost/dungeon-agent:0.0.3-opencode-2.2.7`. The tag names
 the OpenCode pin, not a required harness choice. Upstream image contents and
 versions differ from this recipe; its native results do not validate `latest`.
+The upstream image can contain an older OpenCode that rejects newer imported
+configuration. Keep imports disabled unless that combination is validated; see
+[known import limits and exclusions](configuration.md#known-opencode-import-limitations-47-48).
 To use the optional host OpenCode UI, separately install a host client
-matching the guest pin (currently 2.1.2); use `dungeon versions` to compare them.
+matching the actual selected guest version; use `dungeon versions` to compare
+the host with the reviewed recipe, not to attest another image's contents.
 Ordinary `dungeon` / `dungeon run` uses the guest CLI and needs no host harness client.
 
 ```sh

@@ -16,15 +16,19 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
       - name: Verify tag version
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
-          test "v${version}" = "$GITHUB_REF_NAME"
+        run: node scripts/check-release.mjs "$GITHUB_REF_NAME"
       - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
+      - run: node --test npm/launcher/test/platform.test.mjs npm/test/stage-packages.test.mjs scripts/check-release.test.mjs
+      - run: node --test images/agent/verify-layout.test.cjs
+      - run: node --test scripts/probe-opencode-identity.test.cjs
+      - run: node --test tests/owned.test.cjs
 
   build:
     needs: quality
@@ -86,6 +90,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Prepare reviewed release notes
+        run: node scripts/check-release.mjs "$GITHUB_REF_NAME" > release-notes.md
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-*
@@ -110,5 +123,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/* \
             --verify-tag \
             --prerelease \
-            --generate-notes \
+            --notes-file release-notes.md \
             --title "Dungeon ${GITHUB_REF_NAME#v} engineering preview"

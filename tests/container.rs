@@ -20,6 +20,9 @@ struct Fixture {
 
 impl Fixture {
     fn new(engine: &'static str) -> Self {
+        Self::with_selinux(engine, None)
+    }
+    fn with_selinux(engine: &'static str, mode: Option<&str>) -> Self {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("home");
         let project = root.path().join("project");
@@ -48,7 +51,7 @@ case "$1 ${{2:-}}" in
   'info --format') /bin/cat info.json;;
   'image inspect') test ! -e missing-image; printf '[{{"Config":{{}}}}]\n';;
   'pull '*) test ! -e fail-pull; /bin/rm -f missing-image;;
-  'ps --all') test ! -e fail-ps; if [ -e exists ]; then printf '%s\n' '{ID}'; fi; if [ -e extra ]; then /bin/cat extra; fi;;
+  'ps --all') test ! -e fail-ps; if [ -e exists ]; then printf '%s\n' '{ID}'; fi; case "$*" in *'--filter id='*) ;; *) if [ -e extra ]; then /bin/cat extra; fi;; esac;;
   'container inspect') test -e exists; test ! -e fail-inspect; /bin/cat inspect.json;;
   'create --name') if [ -e fail-before-create ]; then exit 17; fi; : > exists; /bin/cp stopped.json inspect.json; if [ -e lose-create-reply ]; then exit 17; fi; printf '%s\n' '{ID}';;
   'start '*) /bin/cp running.json inspect.json;;
@@ -66,11 +69,11 @@ esac
         let info = if engine == "docker" {
             json!({"ID":"synthetic-daemon", "OSType":"linux", "SecurityOptions":[]})
         } else {
-            json!({"host":{"os":"linux","hostname":"synthetic", "idMappings":{},"security":{"rootless":true}},"store":{"graphRoot":"/synthetic"}})
+            json!({"host":{"os":"linux","hostname":"synthetic", "idMappings":{},"security":{"rootless":true,"selinuxEnabled":true}},"store":{"graphRoot":"/synthetic"}})
         };
         f.write("info.json", &info);
         let endpoint = format!("unix://{}", socket.display());
-        let out = f.run(&[
+        let mut args = vec![
             "init",
             "--yes",
             "--agent",
@@ -83,7 +86,11 @@ esac
             &endpoint,
             "--image",
             "localhost/fixture:1",
-        ]);
+        ];
+        if let Some(mode) = mode {
+            args.extend(["--selinux-isolation", mode]);
+        }
+        let out = f.run(&args);
         assert!(out.status.success(), "{out:?}");
         let out = f.run(&["config"]);
         let config: Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -102,7 +109,9 @@ esac
         };
         let c = json!({"Id":ID,"Name":format!("/dungeon-{}-{}",config["values"]["name"].as_str().unwrap(), &fingerprint[..8]),
             "Config":{"User":user,"Labels":{"agentarchaeology.ai/dungeon-config":fingerprint,"agentarchaeology.ai/dungeon-runtime":"container"}},
-            "Image":"sha256:synthetic","HostConfig":{"Privileged":false},
+            "Image":"sha256:synthetic","HostConfig":{"Privileged":false,"SecurityOpt":if mode == Some("disabled") || (mode.is_none() && engine == "podman") {json!(["no-new-privileges","label=disable"])} else {json!(["no-new-privileges"])}},
+            "ProcessLabel":if mode == Some("disabled") || (mode.is_none() && engine == "podman") {""} else {"system_u:system_r:container_t:s0:c123,c456"},
+            "MountLabel":"system_u:object_r:container_file_t:s0:c123,c456",
             "Mounts":[{"Type":"bind","Source":f.project,"Destination":"/sandbox/project","RW":true}],"State":{"Running":false}});
         f.write("stopped.json", &json!([c.clone()]));
         let mut c = c;
@@ -136,6 +145,327 @@ esac
     fn state(&self) -> PathBuf {
         self.config.with_file_name("runtime.json")
     }
+}
+
+#[test]
+fn disabled_podman_mode_is_reviewed_inspected_and_preserved_on_resume() {
+    let f = Fixture::with_selinux("podman", Some("disabled"));
+    let config: Value = serde_json::from_slice(&fs::read(&f.config).unwrap()).unwrap();
+    assert_eq!(config["selinux_isolation"], "disabled");
+    let plan: Value = serde_json::from_slice(&f.ok(&["plan"]).stdout).unwrap();
+    assert_eq!(plan["selinux_isolation"]["requested"], "disabled");
+    assert_eq!(plan["selinux_isolation"]["verification"], "not-inspected");
+    f.ok(&["up"]);
+    let status: Value = serde_json::from_slice(&f.ok(&["status"]).stdout).unwrap();
+    assert_eq!(status["selinux_isolation"]["requested"], "disabled");
+    assert_eq!(
+        status["selinux_isolation"]["verification"],
+        "native-configuration"
+    );
+    assert_eq!(status["selinux_isolation"]["process_label"], "");
+    let machine: Value =
+        serde_json::from_slice(&f.ok(&["machine", "--schema", "1", "status"]).stdout).unwrap();
+    assert_eq!(machine["schema"], 1);
+    assert_eq!(
+        machine["result"]["environment"]["selinux_isolation"],
+        status["selinux_isolation"]
+    );
+    let doctor: Value = serde_json::from_slice(&f.ok(&["doctor", "--json"]).stdout).unwrap();
+    assert_eq!(
+        doctor["container"]["status"]["selinux_isolation"],
+        status["selinux_isolation"]
+    );
+    let state = fs::read(f.state()).unwrap();
+    f.ok(&["down"]);
+    f.ok(&["up"]);
+    assert_eq!(fs::read(f.state()).unwrap(), state);
+    let calls = fs::read_to_string(f.root.path().join("calls")).unwrap();
+    let create = calls
+        .lines()
+        .find(|line| line.contains("create --name"))
+        .unwrap();
+    assert!(create.contains("--security-opt label=disable"));
+    assert!(create.contains("--security-opt no-new-privileges"));
+    assert!(create.contains("--userns=keep-id:uid=998,gid=998"));
+    assert!(create.contains("--cap-drop NET_RAW"));
+    assert!(create.contains(":/sandbox/project:rw "));
+    assert!(!create.contains(",Z"));
+}
+
+#[test]
+fn new_podman_bindings_persist_disabled_separation_by_default() {
+    let f = Fixture::new("podman");
+    let config: Value = serde_json::from_slice(&fs::read(&f.config).unwrap()).unwrap();
+    assert_eq!(config["selinux_isolation"], "disabled");
+    f.ok(&["up"]);
+    let status: Value = serde_json::from_slice(&f.ok(&["status"]).stdout).unwrap();
+    assert_eq!(status["selinux_isolation"]["requested"], "disabled");
+    assert_eq!(status["selinux_isolation"]["process_label"], "");
+}
+
+#[test]
+fn offline_default_binding_pins_podman_without_discovery_or_docker_fallback() {
+    let f = Fixture::new("podman");
+    let directory = f.root.path().join("default-config");
+    let output = f.ok(&[
+        "init",
+        "--yes",
+        "--agent",
+        "codex",
+        "--directory",
+        directory.to_str().unwrap(),
+    ]);
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("SELinux container separation DISABLED")
+    );
+    let saved: Value =
+        serde_json::from_slice(&fs::read(directory.join("dungeon.json")).unwrap()).unwrap();
+    assert_eq!(saved["container"]["engine"], "podman");
+    assert_eq!(saved["selinux_isolation"], "disabled");
+    assert!(!f.root.path().join("calls").exists());
+}
+
+#[test]
+fn offline_machine_default_pins_podman_with_disabled_separation() {
+    let f = Fixture::new("podman");
+    let directory = f.root.path().join("machine-default");
+    let output = f.ok(&[
+        "machine",
+        "--schema",
+        "1",
+        "init",
+        "--yes",
+        "--runtime",
+        "container",
+        "--directory",
+        directory.to_str().unwrap(),
+        "--project",
+        f.project.to_str().unwrap(),
+        "--name",
+        "default",
+        "--image",
+        "localhost/fixture:1",
+    ]);
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        result["result"]["environment"]["selinux_isolation"]["requested"],
+        "disabled"
+    );
+    let saved: Value =
+        serde_json::from_slice(&fs::read(directory.join("dungeon.json")).unwrap()).unwrap();
+    assert_eq!(saved["container"]["engine"], "podman");
+    assert_eq!(saved["selinux_isolation"], "disabled");
+    assert!(!f.root.path().join("calls").exists());
+}
+
+#[test]
+fn explicit_private_selection_preserves_offline_auto_engine_discovery() {
+    let f = Fixture::new("podman");
+    let directory = f.root.path().join("private-auto");
+    f.ok(&[
+        "init",
+        "--yes",
+        "--agent",
+        "codex",
+        "--engine",
+        "auto",
+        "--selinux-isolation",
+        "private",
+        "--directory",
+        directory.to_str().unwrap(),
+    ]);
+    let saved: Value =
+        serde_json::from_slice(&fs::read(directory.join("dungeon.json")).unwrap()).unwrap();
+    assert_eq!(saved["container"]["engine"], "auto");
+    assert!(saved.get("selinux_isolation").is_none());
+    assert!(!f.root.path().join("calls").exists());
+}
+
+#[test]
+fn foreign_dungeon_containers_block_uninstall_before_any_deletion() {
+    let f = Fixture::new("podman");
+    f.ok(&["up"]);
+    let installed = f.bin.join("dungeon");
+    fs::copy(env!("CARGO_BIN_EXE_dungeon"), &installed).unwrap();
+    fs::write(f.root.path().join("extra"), format!("{}\n", "b".repeat(64))).unwrap();
+    let before = fs::read(f.state()).unwrap();
+    let output = f.run(&["uninstall", "--bin-dir", f.bin.to_str().unwrap(), "--yes"]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("unrecorded or foreign Dungeon containers"),
+        "{output:?}"
+    );
+    assert_eq!(fs::read(f.state()).unwrap(), before);
+    assert!(installed.exists());
+    assert!(f.root.path().join("exists").exists());
+    let calls = fs::read_to_string(f.root.path().join("calls")).unwrap();
+    assert!(
+        !calls
+            .lines()
+            .any(|line| line.contains(" rm ") || line.contains(" stop "))
+    );
+}
+
+#[test]
+fn historical_omitted_selinux_selection_keeps_private_native_identity() {
+    let f = Fixture::with_selinux("podman", Some("private"));
+    let before = fs::read(&f.config).unwrap();
+    let saved: Value = serde_json::from_slice(&before).unwrap();
+    assert!(saved.get("selinux_isolation").is_none());
+    let plan: Value = serde_json::from_slice(&f.ok(&["plan"]).stdout).unwrap();
+    assert_eq!(plan["selinux_isolation"]["requested"], "private");
+    f.ok(&["up"]);
+    let state = fs::read(f.state()).unwrap();
+    f.ok(&["down"]);
+    f.ok(&["up"]);
+    assert_eq!(fs::read(&f.config).unwrap(), before);
+    assert_eq!(fs::read(f.state()).unwrap(), state);
+    let status: Value = serde_json::from_slice(&f.ok(&["status"]).stdout).unwrap();
+    assert_eq!(status["selinux_isolation"]["requested"], "private");
+}
+
+#[test]
+fn private_podman_mode_keeps_project_relabeling_and_bound_edit_refusal() {
+    let f = Fixture::with_selinux("podman", Some("private"));
+    f.ok(&["up"]);
+    let before = fs::read(&f.config).unwrap();
+    let output = f.run(&[
+        "config",
+        "--edit",
+        "--yes",
+        "--selinux-isolation",
+        "disabled",
+    ]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("bound sandbox"));
+    assert_eq!(fs::read(&f.config).unwrap(), before);
+    let calls = fs::read_to_string(f.root.path().join("calls")).unwrap();
+    let create = calls
+        .lines()
+        .find(|line| line.contains("create --name"))
+        .unwrap();
+    assert!(create.contains(":/sandbox/project:rw,Z"));
+    assert!(!create.contains("label=disable"));
+}
+
+#[test]
+fn requested_disabled_mode_refuses_private_native_labels_before_start() {
+    let f = Fixture::with_selinux("podman", Some("disabled"));
+    let mut c: Value =
+        serde_json::from_slice(&fs::read(f.root.path().join("stopped.json")).unwrap()).unwrap();
+    c[0]["HostConfig"]["SecurityOpt"] = json!(["no-new-privileges"]);
+    c[0]["ProcessLabel"] = json!("system_u:system_r:container_t:s0:c123,c456");
+    f.write("stopped.json", &c);
+    let output = f.run(&["up"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("SELinux"));
+    let calls = fs::read_to_string(f.root.path().join("calls")).unwrap();
+    assert!(!calls.lines().any(|line| line.contains(" start ")));
+    assert!(f.state().exists());
+}
+
+#[test]
+fn selinux_security_option_drift_blocks_work_and_preserves_binding() {
+    let f = Fixture::with_selinux("podman", Some("disabled"));
+    f.ok(&["up"]);
+    let before = fs::read(f.state()).unwrap();
+    let mut c: Value =
+        serde_json::from_slice(&fs::read(f.root.path().join("inspect.json")).unwrap()).unwrap();
+    c[0]["ProcessLabel"] = json!("system_u:system_r:container_t:s0:c123,c456");
+    f.write("inspect.json", &c);
+    assert!(!f.run(&["exec", "--", "true"]).status.success());
+    assert_eq!(fs::read(f.state()).unwrap(), before);
+}
+
+#[test]
+fn changing_bound_selinux_selection_refuses_before_runtime_contact() {
+    let f = Fixture::with_selinux("podman", Some("disabled"));
+    f.ok(&["up"]);
+    let state = fs::read(f.state()).unwrap();
+    let mut config: Value = serde_json::from_slice(&fs::read(&f.config).unwrap()).unwrap();
+    config["selinux_isolation"] = json!("private");
+    fs::write(&f.config, serde_json::to_vec(&config).unwrap()).unwrap();
+    let calls = fs::read(f.root.path().join("calls")).unwrap();
+    let output = f.run(&["up"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("configuration changed"));
+    assert_eq!(fs::read(f.state()).unwrap(), state);
+    assert_eq!(fs::read(f.root.path().join("calls")).unwrap(), calls);
+}
+
+#[test]
+fn machine_init_persists_explicit_podman_selinux_selection_offline() {
+    let f = Fixture::new("podman");
+    let directory = f.root.path().join("machine-config");
+    let output = f.ok(&[
+        "machine",
+        "--schema",
+        "1",
+        "init",
+        "--yes",
+        "--runtime",
+        "container",
+        "--engine",
+        "podman",
+        "--directory",
+        directory.to_str().unwrap(),
+        "--project",
+        f.project.to_str().unwrap(),
+        "--name",
+        "machine",
+        "--image",
+        "localhost/fixture:1",
+        "--selinux-isolation",
+        "disabled",
+    ]);
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        result["result"]["environment"]["selinux_isolation"]["requested"],
+        "disabled"
+    );
+    assert_eq!(
+        result["result"]["environment"]["selinux_isolation"]["verification"],
+        "not-inspected"
+    );
+    let saved: Value =
+        serde_json::from_slice(&fs::read(directory.join("dungeon.json")).unwrap()).unwrap();
+    assert_eq!(saved["selinux_isolation"], "disabled");
+    assert!(!f.root.path().join("calls").exists());
+    assert!(!directory.join("runtime.json").exists());
+}
+
+#[test]
+fn disabled_mode_rejects_docker_and_openshell_without_engine_contact() {
+    let f = Fixture::new("docker");
+    let before = fs::read(&f.config).unwrap();
+    let output = f.run(&[
+        "config",
+        "--edit",
+        "--yes",
+        "--selinux-isolation",
+        "disabled",
+    ]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("rootless Podman"));
+    assert_eq!(fs::read(&f.config).unwrap(), before);
+    let private = f.root.path().join("openshell-private");
+    let output = f.run(&[
+        "init",
+        "--yes",
+        "--agent",
+        "codex",
+        "--runtime",
+        "openshell",
+        "--directory",
+        private.to_str().unwrap(),
+        "--selinux-isolation",
+        "disabled",
+    ]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("OpenShell 0.0.116"));
+    assert!(!private.exists());
+    assert!(!f.root.path().join("calls").exists());
 }
 
 #[test]
@@ -582,6 +912,21 @@ fn docker_rootless_flag_is_rejected_even_without_security_option() {
     assert!(!f.run(&["up"]).status.success());
     assert!(!f.state().exists());
     assert!(!f.root.path().join("exists").exists());
+}
+
+#[test]
+fn docker_retains_its_existing_native_label_contract() {
+    let f = Fixture::new("docker");
+    let mut c: Value =
+        serde_json::from_slice(&fs::read(f.root.path().join("stopped.json")).unwrap()).unwrap();
+    c[0]["HostConfig"]["SecurityOpt"] = json!(["no-new-privileges", "label=disable"]);
+    f.write("stopped.json", &c);
+    let mut running = c;
+    running[0]["State"]["Running"] = json!(true);
+    f.write("running.json", &running);
+    f.ok(&["up"]);
+    let status: Value = serde_json::from_slice(&f.ok(&["status"]).stdout).unwrap();
+    assert_eq!(status["selinux_isolation"]["verification"], "not-inspected");
 }
 
 #[test]

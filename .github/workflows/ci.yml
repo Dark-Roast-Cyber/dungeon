@@ -22,7 +22,7 @@ jobs:
           node-version: 24
           package-manager-cache: false
       - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
       - run: node --test images/agent/verify-layout.test.cjs
       - run: node --test scripts/probe-opencode-identity.test.cjs
@@ -37,26 +37,11 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
-      - run: node --test npm/launcher/test/platform.test.mjs npm/test/stage-packages.test.mjs
+      - run: node --test npm/launcher/test/platform.test.mjs npm/test/stage-packages.test.mjs scripts/check-release.test.mjs
       - run: node --test tests/owned.test.cjs
       - run: npm pack --dry-run ./npm/launcher
       - name: Check package versions
-        run: |
-          node - <<'NODE'
-          const fs = require('node:fs');
-          const cargo = fs.readFileSync('Cargo.toml', 'utf8').match(/^version = "([^"]+)"/m)?.[1];
-          if (!cargo) throw new Error('Cargo version not found');
-          for (const file of [
-            'npm/launcher/package.json',
-            'npm/platform/linux-x64/package.json',
-            'npm/platform/darwin-arm64/package.json',
-            'npm/platform/darwin-x64/package.json',
-            'npm/platform/win32-x64/package.json'
-          ]) {
-            const version = JSON.parse(fs.readFileSync(file, 'utf8')).version;
-            if (version !== cargo) throw new Error(`${file}: ${version} != ${cargo}`);
-          }
-          NODE
+        run: node scripts/check-release.mjs
 
   native-build:
     strategy:
