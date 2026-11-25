@@ -54,7 +54,7 @@ case "$1 ${{2:-}}" in
   'ps --all') test ! -e fail-ps; if [ -e exists ]; then printf '%s\n' '{ID}'; fi; case "$*" in *'--filter id='*) ;; *) if [ -e extra ]; then /bin/cat extra; fi;; esac;;
   'container inspect') test -e exists; test ! -e fail-inspect; /bin/cat inspect.json;;
   'create --name') if [ -e fail-before-create ]; then exit 17; fi; : > exists; /bin/cp stopped.json inspect.json; if [ -e lose-create-reply ]; then exit 17; fi; printf '%s\n' '{ID}';;
-  'start '*) /bin/cp running.json inspect.json; if [ -e replace-seed-at-start ]; then /bin/chmod 600 "$(/bin/cat replace-seed-at-start)"; printf 'changed-after-validation' > "$(/bin/cat replace-seed-at-start)"; fi;;
+  'start '*) if [ -e fail-start ]; then if [ -e start-failed.json ]; then /bin/cp start-failed.json inspect.json; fi; exit 19; fi; /bin/cp running.json inspect.json; if [ -e replace-seed-at-start ]; then /bin/chmod 600 "$(/bin/cat replace-seed-at-start)"; printf 'changed-after-validation' > "$(/bin/cat replace-seed-at-start)"; fi;;
   'unpause '*) /bin/cp running.json inspect.json;;
   'stop '*) /bin/cp stopped.json inspect.json;;
   'rm '*) if [ ! -e leave-container ]; then /bin/rm exists; fi; if [ -e fail-after-rm ]; then : > fail-ps; fi;;
@@ -197,6 +197,118 @@ fn first_create_seeds_exact_snapshot_bytes_and_resume_preserves_guest_changes() 
         b"guest-preference"
     );
     assert_eq!(fs::read(snapshot).unwrap(), b"approved\0\xff");
+}
+
+fn refuse_start(f: &Fixture, error: &str) {
+    let mut native: Value =
+        serde_json::from_slice(&fs::read(f.root.path().join("stopped.json")).unwrap()).unwrap();
+    native[0]["State"]["Error"] = json!(error);
+    native[0]["State"]["Running"] = json!(false);
+    f.write("start-failed.json", &native);
+    fs::write(f.root.path().join("fail-start"), "").unwrap();
+}
+
+#[test]
+fn definite_start_refusal_reports_the_engine_reason_and_leaves_no_pending_container() {
+    let f = Fixture::new("podman");
+    refuse_start(&f, "SELinux relabeling of /tmp is not allowed");
+    let output = f.run(&["up"]);
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains(
+            "dungeon: podman start failed: SELinux relabeling of /tmp is not allowed; no container left pending\n"
+        ),
+        "{stderr}"
+    );
+    assert!(!f.state().exists());
+    assert!(!f.root.path().join("exists").exists());
+    fs::remove_file(f.root.path().join("fail-start")).unwrap();
+    f.ok(&["up"]);
+    assert!(f.state().exists());
+}
+
+#[test]
+fn unremovable_start_refusal_keeps_the_pending_binding_and_the_engine_reason() {
+    let f = Fixture::new("podman");
+    refuse_start(&f, "SELinux relabeling of /tmp is not allowed");
+    fs::write(f.root.path().join("leave-container"), "").unwrap();
+    let output = f.run(&["up"]);
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains(
+            "dungeon: podman start failed: SELinux relabeling of /tmp is not allowed; container initialization incomplete; stop and destroy it before retrying\n"
+        ),
+        "{stderr}"
+    );
+    let state: Value = serde_json::from_slice(&fs::read(f.state()).unwrap()).unwrap();
+    assert_eq!(state["initial_upload_pending"], true);
+    assert!(f.root.path().join("exists").exists());
+    fs::remove_file(f.root.path().join("leave-container")).unwrap();
+    f.ok(&["down"]);
+    f.ok(&["destroy", "--yes"]);
+    assert!(!f.state().exists());
+    assert!(!f.root.path().join("exists").exists());
+}
+
+#[test]
+fn unsafe_start_reason_is_not_echoed_and_the_unstarted_container_is_removed() {
+    let f = Fixture::new("podman");
+    refuse_start(&f, "SELinux relabeling of /tmp is not allowed\n; rm -rf /");
+    let output = f.run(&["up"]);
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(
+        stderr.lines().last(),
+        Some(
+            "dungeon: podman start failed; inspect the selected container service; no container left pending"
+        ),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("rm -rf"));
+    assert!(!f.state().exists());
+    assert!(!f.root.path().join("exists").exists());
+}
+
+#[test]
+fn overlong_start_reason_is_not_echoed_and_the_unstarted_container_is_removed() {
+    let f = Fixture::new("podman");
+    refuse_start(&f, &"a".repeat(201));
+    let output = f.run(&["up"]);
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(
+        stderr.lines().last(),
+        Some(
+            "dungeon: podman start failed; inspect the selected container service; no container left pending"
+        ),
+        "{stderr}"
+    );
+    assert!(!stderr.contains(&"a".repeat(201)));
+    assert!(!f.state().exists());
+    assert!(!f.root.path().join("exists").exists());
+}
+
+#[test]
+fn resumed_start_refusal_reports_the_reason_without_removing_the_guest() {
+    let f = Fixture::new("podman");
+    f.ok(&["up"]);
+    f.ok(&["down"]);
+    refuse_start(&f, "SELinux relabeling of /tmp is not allowed");
+    let output = f.run(&["up"]);
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr
+            .contains("dungeon: podman start failed: SELinux relabeling of /tmp is not allowed\n"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("no container left pending"));
+    assert!(!stderr.contains("destroy"));
+    let state: Value = serde_json::from_slice(&fs::read(f.state()).unwrap()).unwrap();
+    assert_eq!(state.get("initial_upload_pending"), None);
+    assert!(f.root.path().join("exists").exists());
 }
 
 #[test]

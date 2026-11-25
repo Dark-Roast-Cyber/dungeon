@@ -64,6 +64,23 @@ impl Native {
     fn query(&self, args: &[String], seconds: u64) -> Result<String> {
         self.query_stdio(args, None, seconds)
     }
+    fn query_exit(&self, args: &[String], seconds: u64) -> Result<i32> {
+        let mut all = self.prefix();
+        all.extend_from_slice(args);
+        let arg_refs: Vec<_> = all.iter().map(String::as_str).collect();
+        query(
+            &self.binary,
+            &self.env,
+            &arg_refs,
+            Duration::from_secs(seconds),
+        )
+        .ok_or_else(|| {
+            Error::new(
+                "container service timed out or returned excessive output; inspect the selected service",
+            )
+        })
+        .map(|reply| reply.code)
+    }
     fn query_stdin(&self, args: &[String], stdin: &[u8], seconds: u64) -> Result<()> {
         self.query_stdio(args, Some(stdin), seconds).map(|_| ())
     }
@@ -119,6 +136,44 @@ impl Native {
 
 fn strings(args: &[&str]) -> Vec<String> {
     args.iter().map(|s| (*s).into()).collect()
+}
+
+const ENGINE_REASON_LIMIT: usize = 200;
+
+fn bounded_engine_reason(text: &str) -> Option<String> {
+    let text = text.trim();
+    if text.is_empty()
+        || text.chars().count() > ENGINE_REASON_LIMIT
+        || text.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(text.to_owned())
+}
+
+enum StartOutcome {
+    Started,
+    Refused(Option<String>),
+}
+
+enum StartDisposition {
+    Removed,
+    Pending,
+    Stopped,
+}
+
+fn start_refusal(engine: &str, reason: Option<&str>, disposition: StartDisposition) -> String {
+    let mut message = match reason {
+        Some(reason) => format!("{engine} start failed: {reason}"),
+        None => format!("{engine} start failed; inspect the selected container service"),
+    };
+    match disposition {
+        StartDisposition::Removed => message.push_str("; no container left pending"),
+        StartDisposition::Pending => message
+            .push_str("; container initialization incomplete; stop and destroy it before retrying"),
+        StartDisposition::Stopped => {}
+    }
+    message
 }
 fn checked_id(id: &str) -> Result<&str> {
     if id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -1030,7 +1085,18 @@ impl<'a> Runtime<'a> {
         let c = self.inspect(&state.id)?;
         state.observed_policy = digest(&self.specification(&c)?)?;
         self.persist(&state, true)?;
-        self.native.query(&strings(&["start", &state.id]), 30)?;
+        if let StartOutcome::Refused(reason) = self.start_container(&state.id)? {
+            let disposition = if self.retire_unstarted(&state.id).is_ok() {
+                StartDisposition::Removed
+            } else {
+                StartDisposition::Pending
+            };
+            return Err(Error::new(start_refusal(
+                self.native.binding.engine.name(),
+                reason.as_deref(),
+                disposition,
+            )));
+        }
         // Only image-owned parent directories; never recurse into project or imported leaves.
         let script = "set -eu; for p in /sandbox /sandbox/.config /sandbox/.config/opencode /sandbox/.local /sandbox/.local/share /sandbox/.local/state /sandbox/.cache /sandbox/.local/share/opencode /sandbox/.local/state/opencode /sandbox/.cache/opencode; do test ! -L \"$p\"; mkdir -p \"$p\"; chown \"$1\" \"$p\"; done";
         self.native.query(
@@ -1081,11 +1147,52 @@ impl<'a> Runtime<'a> {
             ))
         })
     }
+    fn start_container(&self, id: &str) -> Result<StartOutcome> {
+        if self.native.query_exit(&strings(&["start", id]), 30)? == 0 {
+            return Ok(StartOutcome::Started);
+        }
+        let reason = self.inspect(id).ok().and_then(|container| {
+            container["State"]["Error"]
+                .as_str()
+                .and_then(bounded_engine_reason)
+        });
+        Ok(StartOutcome::Refused(reason))
+    }
+    fn retire_unstarted(&self, id: &str) -> Result<()> {
+        let container = self.inspect(id)?;
+        if container["State"]["Running"] != false
+            || container["State"]["Restarting"] == true
+            || container["State"]["Paused"] == true
+        {
+            return Err(Error::new(
+                "container start was not a confirmed stopped refusal",
+            ));
+        }
+        self.output.mutating();
+        let args = if container["State"]["Dead"] == true {
+            strings(&["rm", "--force", id])
+        } else {
+            strings(&["rm", id])
+        };
+        self.native.query(&args, 30)?;
+        if self.exists(id)? {
+            return Err(Error::new("container remains; runtime binding retained"));
+        }
+        fs::remove_file(self.config.state_path())?;
+        fs::File::open(self.config.path.parent().unwrap())?.sync_all()?;
+        Ok(())
+    }
     fn start_locked(&self) -> Result<i32> {
         let (s, c) = self.checked(true)?;
         if c["State"]["Running"] == false {
             self.output.mutating();
-            self.native.query(&strings(&["start", &s.id]), 30)?;
+            if let StartOutcome::Refused(reason) = self.start_container(&s.id)? {
+                return Err(Error::new(start_refusal(
+                    self.native.binding.engine.name(),
+                    reason.as_deref(),
+                    StartDisposition::Stopped,
+                )));
+            }
         }
         if self.checked(true)?.1["State"]["Running"] != true {
             return Err(Error::new("container did not start"));

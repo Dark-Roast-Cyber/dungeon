@@ -115,6 +115,9 @@ bridge networking, fixed entrypoint, and only derived project/import binds. A
 pending intent precedes native creation and pins its service; a lost create reply
 can be reconciled only to one matching label, name, user and mount scope. An absent
 or ambiguous result retains the intent because native work may still be in flight.
+A definite start refusal with a confirmed stopped container removes that unstarted
+container and pending binding, and may report one bounded single-line engine error.
+Timeouts and ambiguous results still retain the intent.
 Guest HOME preparation also remains pending until verified. Configuration/mount
 drift blocks reuse.
 The plain state's `observed_policy` field stores the stable native specification

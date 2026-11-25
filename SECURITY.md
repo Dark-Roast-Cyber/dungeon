@@ -49,7 +49,12 @@ execute on the host. Interrupted initialization retains a pending binding for
 explicit stop/destroy. A creation intent is persisted before native create; a lost
 reply is reconciled only to a unique matching container on the recorded service.
 An absent or ambiguous result retains the intent because a timed-out service could
-still complete its request. Default restart, DNS, extra-host, supplemental-group
+still complete its request. A definite start refusal, after the engine has exited
+and the container is confirmed stopped, removes that unstarted container and the
+pending binding. The error may include one single-line `State.Error` of at most
+200 characters with no control characters; other engine output is not echoed or
+executed. Failed removal, a running or transitional container, or an inspect
+failure still retains the pending binding. Default restart, DNS, extra-host, supplemental-group
 and sysctl settings are checked separately on reuse; this is not an exhaustive
 attestation of every native engine setting. Docker rootless/userns-remap and remote endpoints are not
 supported by this UID mapping contract.
